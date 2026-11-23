@@ -31,6 +31,8 @@ const PAGES = [
   'ProxyPoolsPage',
   'TunnelsPage',
   'SkillsPage',
+  // Cycle 6's read-only format inventory: a separate chunk like every other page.
+  'TranslatorPage',
 ];
 
 test('no dashboard page is imported into the entry chunk', async () => {

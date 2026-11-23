@@ -120,3 +120,25 @@ test('no cell leaks raw source across a line boundary', { skip: !sourceTreePrese
     .filter((line) => /\| [^|]*\b(display|category|serviceKinds|baseUrl):/.test(line));
   assert.deepEqual(badRows, [], `source fragments leaked into the table: ${badRows[0]?.slice(0, 80)}`);
 });
+/**
+ * The provider defect register follows the same rule as this catalog: it documents another tree, so it
+ * is current or it is wrong, with no third state. The external half is checked only when a root is
+ * named explicitly, which is the same skip rule as the three assertions above.
+ */
+const DEFECT_SCRIPT = join(ROOT, 'scripts', 'build-provider-defects.mjs');
+const DEFECT_DOC = join(ROOT, 'docs', 'architecture', 'provider-defects.md');
+
+test('the provider defect register regenerates byte for byte', { skip: !sourceTreePresent && !EXPLICIT }, () => {
+  assert.ok(existsSync(DEFECT_SCRIPT), 'the defect generator must be committed alongside the document');
+  assert.ok(existsSync(DEFECT_DOC), 'the defect register must be committed');
+  execFileSync(process.execPath, [DEFECT_SCRIPT, '--root', NINE_ROOT, '--check'], { cwd: ROOT, stdio: 'pipe' });
+});
+
+test('every registry id has a defect row, so a new provider cannot appear without one', { skip: !sourceTreePresent && !EXPLICIT }, () => {
+  const doc = readFileSync(DEFECT_DOC, 'utf8');
+  const rows = new Set([...doc.matchAll(/^\| `([^`]+)` \|/gm)].map((match) => match[1]));
+  const files = readdirSync(REGISTRY).filter((file) => file.endsWith('.js') && file !== 'index.js');
+  const missing = files.map((file) => file.replace(/\.js$/, '')).filter((id) => !rows.has(id));
+  assert.deepEqual(missing, [], `registry ids without a defect row: ${missing.join(', ')}`);
+  assert.ok(rows.size >= files.length, 'the register has fewer rows than the registry has entries');
+});

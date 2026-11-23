@@ -24,7 +24,7 @@
   <a href="./CONTRIBUTING.md">Contributing</a>
 </p>
 
-**Current version: 3.96.0**
+**Current version: 3.98.0**
 
 OmniHilbras sits between your application and the model providers you already use. It gives every client one
 OpenAI-compatible endpoint, keeps credentials on your machine, and decides which saved connection serves each
@@ -274,6 +274,9 @@ Cline and ClinePass are two cards with their own connection records, model lists
 accept a Cline API key; sign-in uses Cline's WorkOS session, and a ClinePass OAuth account links to the Cline
 account explicitly rather than through a global alias. 100milionseek is a free OpenAI-compatible provider
 (`https://100milionseek.top/v1`) with one `deepseek-v4.1-flash-free` model and a daily token allowance.
+`glm-cn` is the mainland BigModel coding key on `open.bigmodel.cn`; it is a separate product, host and
+vault entry from the Z.ai `glm` key and the `zcode` Start Plan subscription. Its card claims no usage
+and Check cannot prove a pasted key from a public catalog.
 
 Provider cards in `src/data/providers.ts` are **catalog metadata**: they show `—` metrics and `No connections`
 until a real connection exists, and never invent a measurement. Provider-specific behaviour and standing
@@ -378,6 +381,7 @@ One React Router app mounted at `/dashboard`; client-side navigation never reloa
 | `/dashboard/proxy-pools` | Saved proxy pools from `GET /v1/proxy-pools` |
 | `/dashboard/tunnels` | Saved tunnels from `GET /v1/tunnels` |
 | `/dashboard/skills` | Saved skills from `GET /v1/skills` |
+| `/dashboard/translators` | Read-only format pairs from `GET /v1/translators` |
 | `/dashboard/about` | Build provenance and the limits of this installation |
 
 There is no Overview page: the earlier one had no data source and was removed rather than kept. `/dashboard`

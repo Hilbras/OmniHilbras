@@ -863,6 +863,9 @@ export class GatewayService {
     // Cycle 5 adds one keyed router: glm. Its own paid Z.ai coding-plan key and base URL, with the
     // `none` validation decision read from OWN_PROVIDER_ADAPTERS; no CLI identity or OAuth flow.
     resolver = resolver.onDemand('glm', own('glm').factory, { validation: own('glm').validation });
+    // Cycle 6 adds the mainland sibling: a second keyed router, not a second name for glm's Z.ai key.
+    // The `none` decision is read from OWN_PROVIDER_ADAPTERS beside the BigModel factory.
+    resolver = resolver.onDemand('glm-cn', own('glm-cn').factory, { validation: own('glm-cn').validation });
     // xAI is its own connection, not a second name for Grok's saved key. Its chat surface is the
     // OpenAI wire; video generation is a real adapter on the v1 video routes, not a simulated lane.
     // ("v1 video routes" is spelled out rather than as a path ending in slash-star: a source-text guard

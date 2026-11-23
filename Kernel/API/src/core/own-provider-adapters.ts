@@ -119,6 +119,13 @@ export const OWN_PROVIDER_ADAPTERS: Readonly<Record<string, OwnAdapterEntry>> = 
   // id is a separate product from the `zcode` Start Plan card. `validation: 'none'` is declared beside
   // the factory because a public catalog cannot prove a pasted key is the caller's.
   'glm': openAiRouter('glm', 'Z.ai GLM Coding', 'https://api.z.ai/api/coding/paas/v4'),
+  // Cycle 6's one honest slice of the remaining backlog: `glm-cn` is the mainland BigModel coding-plan
+  // key, a plain API-key OpenAI-compatible router on open.bigmodel.cn. Its base stops at /v4 because the
+  // shared adapter appends /chat/completions, giving .../paas/v4/chat/completions. The reference registry
+  // carries no OAuth, no client-impersonation headers and no embedded secret for this id, so none is ported.
+  // It is a separate product and a separate key from `glm` (z.ai) and from the `zcode` Start Plan account.
+  // `validation: 'none'` is declared beside the factory: a public catalog cannot prove a pasted key.
+  'glm-cn': openAiRouter('glm-cn', 'GLM (China)', 'https://open.bigmodel.cn/api/coding/paas/v4'),
   // xAI has its own SDK package because its video-job surface is not the shared chat wire. `none` is
   // declared, not inherited: no authenticated credential check was measured, and xAI's catalog is
   // public enough that a bogus key would look valid. Its own id keeps its own vault entry.

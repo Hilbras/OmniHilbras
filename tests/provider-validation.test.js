@@ -59,6 +59,8 @@ test('the together and fireworks registrations are real OpenAI-compatible chat a
   const expected = {
     together: 'api.together.xyz',
     fireworks: 'api.fireworks.ai',
+    // Cycle 6's plain keyed BigModel router: its own host, no identity headers and the same shared wire.
+    'glm-cn': 'open.bigmodel.cn',
   };
   for (const [id, host] of Object.entries(expected)) {
     const transport = scriptedTransport({ wireFormat: 'openai', catalog: ['router-model'] });
@@ -72,6 +74,36 @@ test('the together and fireworks registrations are real OpenAI-compatible chat a
     assert.equal(new URL(chatCall.url).hostname, host);
     assert.match(chatCall.body ?? '', /router-model/, `${id} dropped the requested model`);
   }
+});
+
+test('glm-cn sends a keyed chat turn to the BigModel coding path with no client impersonation', async () => {
+  // Scripted transport only: no key was used, no BigModel account was signed in and nothing was billed.
+  // The reference registry entry for glm-cn is a plain `apikey` router; its usage-quota URL and model
+  // list are not copied, and neither is any header that pretends to be a vendor CLI.
+  const entry = OWN_PROVIDER_ADAPTERS['glm-cn'];
+  assert.ok(entry, 'glm-cn has no factory beside the other openAiRouter entries');
+  assert.equal(entry.validation, 'none', 'a public catalog cannot prove a pasted BigModel key');
+  const transport = scriptedTransport({ wireFormat: 'openai', catalog: ['glm-5.3'] });
+  const adapter = entry.create({ transport });
+  assert.equal(adapter.id, 'glm-cn');
+  assert.deepEqual((await adapter.listModels({ credential: { type: 'api-key', value: 'key' } })).map((m) => m.id), ['glm-5.3']);
+  const catalogCall = transport.seen.find((call) => /\/models/.test(call.url));
+  assert.equal(new URL(catalogCall.url).hostname, 'open.bigmodel.cn');
+  const response = await adapter.chat(
+    { model: 'glm-5.3', messages: [{ role: 'user', content: 'ping' }] },
+    { credential: { type: 'api-key', value: 'key' } },
+  );
+  assert.ok(response.message, 'the scripted chat turn was not answered');
+  const chatCall = transport.seen.find((call) => /chat\/completions/.test(call.url));
+  const url = new URL(chatCall.url);
+  assert.equal(url.hostname, 'open.bigmodel.cn');
+  assert.equal(url.pathname, '/api/coding/paas/v4/chat/completions', 'the base must stop before /chat/completions');
+  assert.match(chatCall.body ?? '', /glm-5\.3/, 'the requested model was dropped');
+  const headers = chatCall.headers ?? {};
+  assert.equal(headers.authorization ?? headers.Authorization, 'Bearer key');
+  const names = Object.keys(headers).map((name) => name.toLowerCase());
+  assert.ok(!names.includes('x-api-key'), 'no Claude-header lane was copied');
+  assert.ok(!names.some((name) => name.startsWith('x-command-') || name === 'user-agent'), 'no CLI identity was copied');
 });
 
 test('a bogus key is refused by every provider that declares a credential check', async () => {

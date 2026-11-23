@@ -32,6 +32,7 @@ export const MitmContent = lazy(() => import('../pages/MitmPage').then((module) 
 export const ProxyPoolsContent = lazy(() => import('../pages/ProxyPoolsPage').then((module) => ({ default: module.ProxyPoolsContent })));
 export const TunnelsContent = lazy(() => import('../pages/TunnelsPage').then((module) => ({ default: module.TunnelsContent })));
 export const SkillsContent = lazy(() => import('../pages/SkillsPage').then((module) => ({ default: module.SkillsContent })));
+export const TranslatorContent = lazy(() => import('../pages/TranslatorPage').then((module) => ({ default: module.TranslatorContent })));
 
 /**
  * The module behind each nav path, for the preload.
@@ -55,6 +56,7 @@ const prefetchable: Record<string, () => Promise<unknown>> = {
   '/proxy-pools': () => import('../pages/ProxyPoolsPage'),
   '/tunnels': () => import('../pages/TunnelsPage'),
   '/skills': () => import('../pages/SkillsPage'),
+  '/translators': () => import('../pages/TranslatorPage'),
 };
 
 /**

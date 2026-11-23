@@ -20,6 +20,7 @@ import {
   RoutingContent,
   SettingsContent,
   TokenSaverContent,
+  TranslatorContent,
   UsageContent,
 } from './lib/pageChunks';
 
@@ -54,6 +55,7 @@ const activePageTitles = {
   'proxy-pools': 'Proxy pools',
   tunnels: 'Tunnels',
   skills: 'Skills',
+  translators: 'Translators',
 } as const;
 
 const pageDescriptions = {
@@ -76,6 +78,7 @@ const pageDescriptions = {
   'proxy-pools': 'Saved proxy pools from GET /v1/proxy-pools',
   tunnels: 'Saved tunnels from GET /v1/tunnels',
   skills: 'Saved skills from GET /v1/skills',
+  translators: 'Format pairs registered in GET /v1/translators',
 } as const;
 
 function PageTransition({ children }: { children: ReactNode }) {
@@ -145,7 +148,9 @@ function DashboardRoutes() {
                       ? 'tunnels'
                       : location.pathname.startsWith('/skills')
                         ? 'skills'
-                        : 'overview';
+                        : location.pathname.startsWith('/translators')
+                          ? 'translators'
+                          : 'overview';
   const provider = isProviderDetail ? getProviderById(location.pathname.split('/').filter(Boolean).at(-1)) : undefined;
   const pageTitle = provider?.name ?? activePageTitles[activePage];
   const pageDescription = provider ? 'Provider connection details' : pageDescriptions[activePage];
@@ -182,6 +187,7 @@ function DashboardRoutes() {
           <Route path={dashboardRoutes.proxyPools} element={<ProxyPoolsContent />} />
           <Route path={dashboardRoutes.tunnels} element={<TunnelsContent />} />
           <Route path={dashboardRoutes.skills} element={<SkillsContent />} />
+          <Route path={dashboardRoutes.translators} element={<TranslatorContent />} />
           <Route path="*" element={<Navigate to="/providers" replace />} />
           </Routes>
         </Suspense>

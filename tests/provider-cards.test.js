@@ -339,7 +339,10 @@ test('THE COUNT, asserted so it cannot drift quietly', () => {
   // 68 from cycle 5: `glm`, a paid Z.ai coding-plan key on the plain OpenAI chat path, not the ZCode
   // Start Plan subscription and not a CLI OAuth grant. No Claude headers, client identity or measured
   // card field came with it; it has a caps row, an openAiRouter factory and a scripted transport test.
-  assert.equal(all.length, 68, `the catalog now has ${all.length} cards`);
+  // 69 from cycle 6: `glm-cn`, the mainland BigModel key on open.bigmodel.cn — a second product and a
+  // second key, not an alias of glm's Z.ai key or the zcode subscription. No OAuth, client identity or
+  // measured card field came with it; it has a caps row, a factory and a scripted transport test.
+  assert.equal(all.length, 69, `the catalog now has ${all.length} cards`);
   // Eighteen cards claim OAuth and the gateway serves eighteen start routes. `clinepass` used to be
   // the odd one out when it shared Cline's connection; it has its own route now. `claude-code` and
   // `codex` sign in through `server.ts` routes this scan reads too.
@@ -432,6 +435,29 @@ test('glm is a paid Z.ai coding key, not the ZCode subscription or a CLI OAuth g
   assert.equal(card.endpoint, 'https://api.z.ai/api/coding/paas/v4', 'the card must name the base the adapter appends /chat/completions to');
   assert.doesNotMatch(card.endpoint, /anthropic|claude/i, 'the Claude-header lane was not ported');
   assert.ok(!oauthCapableProviders().has('glm'), 'no /v1/oauth/glm/start exists');
+});
+
+test('glm-cn is the mainland BigModel key, a separate product from glm and zcode with no measured claims', () => {
+  // The 9router registry entry is a plain `apikey` router: a base URL ending in /chat/completions,
+  // no OAuth and no client-impersonation headers. Only the honest OpenAI-compatible slice is ported.
+  const card = cards().find((entry) => entry.id === 'glm-cn');
+  assert.ok(card, 'the glm-cn card is missing');
+  const text = `${card.description ?? ''} ${card.riskNotice ?? ''}`.toLowerCase();
+  assert.match(text, /bigmodel/, 'the card must name the host the key is sent to');
+  assert.match(text, /glm/, 'the card must name the Z.ai key it is not');
+  assert.match(text, /zcode/, 'the card must name the Start Plan subscription it is not');
+  assert.match(text, /check cannot prove|no key validation/, 'the card must say Check cannot prove a pasted key');
+  assert.equal(card.auth, 'API key');
+  assert.ok(!card.authModes?.includes('oauth'), 'no OAuth route exists for glm-cn');
+  assert.equal(card.group, 'api-key', 'the key is collected by the keyed dialog');
+  assert.equal(card.endpoint, 'https://open.bigmodel.cn/api/coding/paas/v4', 'the card must name the base the adapter appends /chat/completions to');
+  assert.notEqual(card.endpoint, cards().find((entry) => entry.id === 'glm')?.endpoint, 'glm-cn must not borrow glm\'s Z.ai endpoint');
+  assert.equal(card.connectionProviderId, undefined, 'glm-cn keeps its own credential, not glm\'s');
+  assert.ok(!oauthCapableProviders().has('glm-cn'), 'no /v1/oauth/glm-cn/start exists');
+  for (const [field, placeholder] of Object.entries(PLACEHOLDERS)) {
+    assert.equal(card[field], placeholder, `glm-cn claims a ${field} nobody measured`);
+  }
+  assert.deepEqual(card.modelList, [], 'glm-cn claims no model list');
 });
 
 test('every catalog card has a row in the generated provider defect register', () => {

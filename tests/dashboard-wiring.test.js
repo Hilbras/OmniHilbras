@@ -367,3 +367,21 @@ test('the four operator pages read only gateways routes that exist', () => {
   assert.match(read('src/components/OperatorRecordsPage.tsx'), /setError\(cause instanceof Error \? cause\.message/, 'a gateway refusal is not shown verbatim');
   assert.doesNotMatch(read('src/components/OperatorRecordsPage.tsx'), /setTimeout|setInterval/, 'a timer changes operator state');
 });
+
+test('the translator page is wired end to end to the read-only inventory route', () => {
+  const routes = read('src/lib/routes.ts');
+  const app = read('src/dashboardApp.tsx');
+  const shell = read('src/components/DashboardShell.tsx');
+  const clients = read('src/lib/gatewayClient.ts');
+  const page = read('src/pages/TranslatorPage.tsx');
+  assert.match(routes, /translators: '\/translators'/, 'no declared router path for the inventory');
+  assert.match(app, /<Route path=\{dashboardRoutes\.translators\} element=\{<TranslatorContent \/>\}/, 'the router does not mount the page');
+  assert.match(shell, /to: dashboardRoutes\.translators/, 'the sidebar cannot reach the page');
+  assert.doesNotMatch(shell, /label: 'Translators'[^\n]*pending: true/, 'the live inventory is still a "soon" entry');
+  assert.match(clients, /getGatewayTranslators\(signal\?: AbortSignal\)/, 'the client has no typed call for the inventory');
+  assert.ok(clients.includes("'/v1/translators'"), 'the client does not ask the gateway route');
+  assert.match(page, /getGatewayTranslators\(controller\.signal\)/, 'the page never reads the gateway route');
+  // An inspector has no write surface: no translate/send/save call and no timer in its state path.
+  assert.doesNotMatch(page, /setTimeout|setInterval/, 'a timer changes the inventory state');
+  assert.doesNotMatch(page, /translate\(|sendTranslation|saveTranslation/, 'the page claims a write surface the gateway does not serve');
+});

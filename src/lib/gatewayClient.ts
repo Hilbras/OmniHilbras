@@ -2000,3 +2000,14 @@ export function listGatewayMitm(signal?: AbortSignal) { return listOperatorRecor
 export function listGatewayProxyPools(signal?: AbortSignal) { return listOperatorRecords('/v1/proxy-pools', signal); }
 export function listGatewayTunnels(signal?: AbortSignal) { return listOperatorRecords('/v1/tunnels', signal); }
 export function listGatewaySkills(signal?: AbortSignal) { return listOperatorRecords('/v1/skills', signal); }
+
+/** One registered format pair, as published by `GET /v1/translators`. No translate function crosses the wire. */
+export type GatewayTranslationPair = { source: string; target: string };
+
+/**
+ * The gateway's read-only format inventory. A consumer can ask what is translated, but this route has
+ * no translate/send/save surface: nothing here can transform a message or write a configuration file.
+ */
+export function getGatewayTranslators(signal?: AbortSignal): Promise<{ object: 'list'; data: GatewayTranslationPair[] }> {
+  return requestJson<{ object: 'list'; data: GatewayTranslationPair[] }>('/v1/translators', { signal });
+}

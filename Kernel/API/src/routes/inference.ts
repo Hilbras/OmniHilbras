@@ -1696,6 +1696,24 @@ export async function writeStreamData(response: ServerResponse, data: string, si
 }
 
 
+export const VIDEO_GENERATIONS_PATH = '/v1/videos/generations';
+export const VIDEO_EDITS_PATH = '/v1/videos/edits';
+export const VIDEO_EXTENSIONS_PATH = '/v1/videos/extensions';
+export const VIDEO_POLL_PREFIX = '/v1/videos/';
+
+/**
+ * The video surface is declared here, beside the other billable paths, so the key gate, the rate limiter
+ * and `tests/gateway-routes.test.js` see one table. The dispatcher in `server.ts` excludes these paths
+ * from the inference fast path and lets `handleVideoRoute` consume them; the answer to a request that
+ * reaches either place is the same named refusal until a provider declares video generation.
+ */
+export function isVideoRoute(method: string | undefined, pathname: string) {
+  if (method === 'POST') {
+    return pathname === VIDEO_GENERATIONS_PATH || pathname === VIDEO_EDITS_PATH || pathname === VIDEO_EXTENSIONS_PATH;
+  }
+  return method === 'GET' && pathname.startsWith(VIDEO_POLL_PREFIX) && pathname.length > VIDEO_POLL_PREFIX.length;
+}
+
 /**
  * The LLM surface: everything that can cost money or return model output, and therefore everything
  * that needs a key unless the caller is the allowlisted dashboard.
@@ -1718,7 +1736,8 @@ export function isPublicLlmRoute(method: string | undefined, pathname: string) {
     || (method === 'POST' && pathname === '/v1/messages')
     || (method === 'POST' && pathname === '/v1/embeddings')
     || (method === 'POST' && pathname === '/v1/images/generations')
-    || (method === 'POST' && pathname === '/v1/messages/count_tokens');
+    || (method === 'POST' && pathname === '/v1/messages/count_tokens')
+    || isVideoRoute(method, pathname);
 }
 
 /** Accepts the same headers OpenAI, Anthropic, and Gemini clients already send. */

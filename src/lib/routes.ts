@@ -37,6 +37,8 @@ export const dashboardRoutes = {
   proxyPools: '/proxy-pools',
   tunnels: '/tunnels',
   skills: '/skills',
+  /** Read-only inventory of the source→target format pairs from `GET /v1/translators`. */
+  translators: '/translators',
   /** Build provenance and the honest limits of this installation. */
   about: '/about',
   /** What the context saver actually measured, from `GET /v1/token-saver/stats`. */

@@ -39,7 +39,7 @@ import { compareVersions } from '../lib/versionCompare.mjs';
  * it. `tests/marketing-claims.test.js` pins which entries are still disabled, so this comment going stale
  * fails a test rather than misleading the next reader quietly.
  */
-type DashboardPage = 'home' | 'overview' | 'providers' | 'models' | 'routing' | 'keys' | 'usage' | 'logs' | 'settings' | 'about' | 'token-saver' | 'mitm' | 'proxy-pools' | 'tunnels' | 'skills';
+type DashboardPage = 'home' | 'overview' | 'providers' | 'models' | 'routing' | 'keys' | 'usage' | 'logs' | 'settings' | 'about' | 'token-saver' | 'mitm' | 'proxy-pools' | 'tunnels' | 'skills' | 'translators';
 
 type SidebarItem = {
   label: string;
@@ -80,6 +80,9 @@ const insightItems: SidebarItem[] = [
   { label: 'Proxy pools', icon: Network, to: dashboardRoutes.proxyPools, page: 'proxy-pools' },
   { label: 'Tunnels', icon: Network, to: dashboardRoutes.tunnels, page: 'tunnels' },
   { label: 'Skills', icon: Boxes, to: dashboardRoutes.skills, page: 'skills' },
+  // A real read-only capability inventory, not a configurator: the gateway serves no write route
+  // behind it, so this entry cannot promise anything the page does not do.
+  { label: 'Translators', icon: Boxes, to: dashboardRoutes.translators, page: 'translators' },
 ];
 
 const sidebarStorageKey = 'omnihilbras-sidebar-collapsed';
