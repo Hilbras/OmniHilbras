@@ -54,6 +54,9 @@ export const PROVIDER_REGISTRY: Readonly<Record<string, ProviderRegistryRow>> = 
   "qwen": { id: "qwen", name: "Qwen", baseUrl: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1", modelsUrl: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models", auth: "api-key", formats: ["openai"] },
   "qwen-token-plan": { id: "qwen-token-plan", name: "Qwen (Token Plan)", baseUrl: "https://token-plan.maas.qwencloudapi.com/compatible-mode/v1", modelsUrl: "https://token-plan.maas.qwencloudapi.com/compatible-mode/v1/models", auth: "api-key", formats: ["openai"] },
   "zcode": { id: "zcode", name: "ZCode (Start Plan)", baseUrl: "https://zcode.z.ai", modelsUrl: "https://zcode.z.ai/models", auth: "oauth", formats: ["openai"] },
+  // A paid Z.ai coding-plan API key, not an alias of the Start Plan subscription above. The shared
+  // adapter appends /chat/completions to this base; no Claude headers or CLI identity are added.
+  "glm": { id: "glm", name: "Z.ai GLM Coding", baseUrl: "https://api.z.ai/api/coding/paas/v4", auth: "api-key", formats: ["openai"] },
   "groq": { id: "groq", name: "Groq", baseUrl: "https://api.groq.com/openai/v1", modelsUrl: "https://api.groq.com/openai/v1/models", auth: "api-key", formats: ["openai"] },
   "grok": { id: "grok", name: "Grok", baseUrl: "https://api.x.ai/v1", modelsUrl: "https://api.x.ai/v1/models", auth: "api-key", formats: ["openai"] },
   // A separate xAI account slot, not an alias of Grok: two saved keys must not share one catalog or usage.

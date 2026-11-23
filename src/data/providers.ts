@@ -1357,6 +1357,31 @@ export const providerCatalog: ProviderRecord[] = [
     riskSeverity: 'standard',
   },
   {
+    id: 'glm',
+    name: 'Z.ai GLM Coding',
+    // A paid Z.ai coding-plan API key, not the ZCode Start Plan subscription above and not the ZCode
+    // CLI OAuth that the reference registry uses. The shared adapter appends /chat/completions to the
+    // base below, so the key reaches https://api.z.ai/api/coding/paas/v4/chat/completions over the
+    // plain OpenAI wire. No Claude headers, client identity, OAuth or measured card field came with it.
+    description: 'A paid Z.ai coding-plan API key on Z.ai’s OpenAI-compatible chat endpoint. This is a separate product from the ZCode Start Plan subscription (`zcode`) and from a CLI sign-in; the key is kept in the gateway vault and sent only to api.z.ai. Check cannot prove a pasted key from a public catalog.',
+    category: 'Model provider',
+    group: 'api-key',
+    status: 'available',
+    auth: 'API key',
+    models: '—',
+    latency: '—',
+    requests: '0',
+    lastUsed: 'never',
+    health: 0,
+    color: '#2563eb',
+    initial: 'G',
+    endpoint: 'https://api.z.ai/api/coding/paas/v4',
+    modelList: [],
+    riskNotice:
+      'This is a paid Z.ai coding-plan API key, billed by Z.ai — not the ZCode Start Plan subscription on the `zcode` card and not a CLI OAuth grant. Only OpenAI-compatible chat is routed here; the reference’s Claude-header lane, CLI sign-in and client identity are not copied. Check declares no key validation because a public catalog cannot prove a pasted key.',
+    riskSeverity: 'standard',
+  },
+  {
     id: 'groq',
     name: 'Groq',
     description: 'Groq LPU inference. Very fast first tokens, which is what a router wants most.',

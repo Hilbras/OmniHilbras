@@ -1,12 +1,12 @@
 {
-  "cycle": 4,
+  "cycle": 5,
   "step": 2,
   "status": "running",
   "stopped": false,
   "last_reports": {
-    "full_comparison": "docs/reports/parity-cycle-4-system.md",
-    "provider_comparison": "docs/reports/parity-cycle-3-providers.md",
-    "improvement_plan": "docs/reports/parity-cycle-4-system.md"
+    "full_comparison": "docs/reports/parity-cycle-5-system.md",
+    "provider_comparison": "docs/reports/parity-cycle-4-providers.md",
+    "improvement_plan": "docs/reports/parity-cycle-5-system.md"
   },
   "history": [
     {
@@ -65,6 +65,15 @@
       "event": "release trail repaired: commit 6a4484d4 carries the missing 3.97.0 bump, tag v3.97.0 was recreated there and force-pushed to origin, the existing GitHub release still names that tag, and npm view resolves 3.97.0 after polling. The working tree was then bumped to 3.98.0 with version:fix so the next release can be created without colliding. node --test tests/release-trail.test.js is 5/5 and pnpm verify exits 0. v3.96.0's npm gap remains open and unexempted; pnpm release:audit still exits 1 on that single gap.",
       "reports": [
         "docs/reports/parity-cycle-4-system.md"
+      ]
+    },
+    {
+      "cycle": 5,
+      "step": 2,
+      "event": "bookkeeping re-synced to the cycle-5 report: cycle 5, step 2, running; last_reports now name parity-cycle-5-system.md for the full comparison and improvement plan and parity-cycle-4-providers.md for the provider comparison. Corrections are recorded in a NEW note, docs/reports/parity-cycle-5-review.md; no existing report was overwritten. The report's items 2, 4 and 7 are NOT to be re-planned: item 2's video adapter, route and connection-bound poll are already committed (Kernel/API/src/routes/video.ts:99-146, Kernel/API/test/video-route.test.js:101-167, commit a71f61d8) and the xAI wire is in Kernel/SDK/xai/adapter/index.ts:87-135; item 4's xai/kimi split is asserted by src/data/providers.ts:1006-1053, :1667-1694 and tests/provider-cards.test.js:376-414, with validation decisions beside factories in Kernel/API/src/core/own-provider-adapters.ts; item 7's honest candidate-key and false-tools guards exist in tests/provider-validation.test.js:37-44,77-120 and Kernel/API/test/model-capabilities.test.js:40-49. Copying 9router's regex family defaults would assert unmeasured context windows. Scorecard row 6's video half was corrected; row 12 stays red until the 3.98.0 release ceremony ships. This edit does not claim pnpm verify ran.",
+      "reports": [
+        "docs/reports/parity-cycle-5-system.md",
+        "docs/reports/parity-cycle-5-review.md"
       ]
     }
   ]

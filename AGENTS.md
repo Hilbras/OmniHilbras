@@ -98,12 +98,14 @@ than by attention, and the offline half of the same rule — every tag on `main`
 and is offline, and a release gate that fails whenever npm hiccups is a gate people learn to skip.
 
 **The unrecoverable gaps are recorded, with reasons, in `knownGaps`** — `0.3.0`–`0.5.0` on npm,
-`0.6.1`–`0.7.0` on GitHub, `1.8.2` on both, and `1.60.0`, `1.72.0` and `3.70.0` on npm — and the test
-pins the early-era count at 22, so exempting a release is an edit a reviewer sees. `3.70.0` is there
-because it was tagged and released while npm still required an OTP this machine did not have; `3.71.0`
-supersedes it before the gap could be closed. Republishing them is not the fix: npm publishes
-forward, and both late versions are more than a hundred commits behind the tree. Publishing stale code
-to close a bookkeeping gap is a worse outcome than the gap.
+`0.6.1`–`0.7.0` on GitHub, `1.8.2` on both, and `1.60.0`, `1.72.0`, `3.70.0` and `3.96.0` on npm — and
+the test pins the early-era count at 22, so exempting a release is an edit a reviewer sees. `3.70.0` is
+there because it was tagged and released while npm still required an OTP this machine did not have;
+`3.71.0` supersedes it before the gap could be closed. `3.96.0` was tagged with the cycle-1 parity
+commit and never published; the cycle-5 audit found it E404 on npm while `3.97.0` resolved, so the
+later version supersedes it too. Republishing them is not the fix: npm publishes forward, and the
+early versions are far behind the tree. Publishing stale code to close a bookkeeping gap is a worse
+outcome than the gap.
 
 Never publish a version that does not exist on GitHub, and never tag a commit
 that is not on `main`.

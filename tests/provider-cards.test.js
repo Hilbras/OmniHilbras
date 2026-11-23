@@ -336,7 +336,10 @@ test('THE COUNT, asserted so it cannot drift quietly', () => {
   // 63-67 from cycle 4: `sambanova`, `cerebras`, `siliconflow`, `nebius` and `perplexity`, five plain
   // API-key OpenAI-compatible routers from the 9router backlog. No measured card fields, no OAuth and
   // no client impersonation came with them; each has a caps row and a scripted transport test.
-  assert.equal(all.length, 67, `the catalog now has ${all.length} cards`);
+  // 68 from cycle 5: `glm`, a paid Z.ai coding-plan key on the plain OpenAI chat path, not the ZCode
+  // Start Plan subscription and not a CLI OAuth grant. No Claude headers, client identity or measured
+  // card field came with it; it has a caps row, an openAiRouter factory and a scripted transport test.
+  assert.equal(all.length, 68, `the catalog now has ${all.length} cards`);
   // Eighteen cards claim OAuth and the gateway serves eighteen start routes. `clinepass` used to be
   // the odd one out when it shared Cline's connection; it has its own route now. `claude-code` and
   // `codex` sign in through `server.ts` routes this scan reads too.
@@ -411,6 +414,24 @@ test('the xAI card names the lanes this build really serves and does not claim t
   assert.doesNotMatch(card.description, /oauth|responses|image generation|search-via-chat/i, 'the description must not advertise a lane the gateway does not route');
   assert.ok(!oauthCapableProviders().has('xai'), 'no /v1/oauth/xai/start exists, so the card must not imply one');
   assert.equal(card.endpoint, 'https://api.x.ai/v1', 'the card must name the host the adapter really uses');
+});
+
+test('glm is a paid Z.ai coding key, not the ZCode subscription or a CLI OAuth grant', () => {
+  // The 9router registry entry for this id is dual-auth: an OpenAI chat key, a Claude-header lane
+  // and a ZCode CLI OAuth flow. Only the first is honest to port here; the others are a different
+  // product and, for the headers, an impersonation of the vendor's own client.
+  const card = cards().find((entry) => entry.id === 'glm');
+  assert.ok(card, 'the glm card is missing');
+  const text = `${card.description ?? ''} ${card.riskNotice ?? ''}`.toLowerCase();
+  assert.match(text, /paid|billed/, 'the card must say the coding-plan key costs money');
+  assert.match(text, /zcode/, 'the card must name the Start Plan subscription it is not');
+  assert.match(text, /not.*oauth|no.*oauth|not.*cli/, 'the card must say the CLI sign-in is not included');
+  assert.equal(card.auth, 'API key');
+  assert.ok(!card.authModes?.includes('oauth'), 'no OAuth route exists for glm');
+  assert.equal(card.group, 'api-key', 'the key is collected by the keyed dialog');
+  assert.equal(card.endpoint, 'https://api.z.ai/api/coding/paas/v4', 'the card must name the base the adapter appends /chat/completions to');
+  assert.doesNotMatch(card.endpoint, /anthropic|claude/i, 'the Claude-header lane was not ported');
+  assert.ok(!oauthCapableProviders().has('glm'), 'no /v1/oauth/glm/start exists');
 });
 
 test('every catalog card has a row in the generated provider defect register', () => {

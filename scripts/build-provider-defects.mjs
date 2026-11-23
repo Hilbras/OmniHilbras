@@ -67,7 +67,16 @@ const DEFECTS = {
     status: 'fixed — separate card, adapter and PKCE S256 flow on its own connection',
     test: 'Kernel/API/test/oauth-claude.test.js',
   },
-  ...Object.fromEntries(['gemini-cli', 'cursor', 'zed', 'glm'].map((id) => [id, {
+  // Cycle 5 closed the cheap, honest half of glm's gap: a paid Z.ai coding-plan API key on the OpenAI
+  // chat wire. The reference's Claude-header lane, CLI identity and ZCode OAuth grant are not ported,
+  // so the row says exactly what is served rather than claiming full parity.
+  'glm': {
+    failure: 'The reference ships a dual-auth Z.ai coding entry (OpenAI chat plus a Claude-header lane and ZCode CLI OAuth); OmniHilbras serves the paid key on the OpenAI-compatible chat path only.',
+    source: '9router/open-sse/providers/registry/glm.js:1',
+    status: 'partial — keyed OpenAI-compatible chat only; no Claude headers, CLI identity or OAuth',
+    test: 'Kernel/SDK/tests/glm.test.js',
+  },
+  ...Object.fromEntries(['gemini-cli', 'cursor', 'zed'].map((id) => [id, {
     failure: 'The reference ships a registry/OAuth flow for this id; OmniHilbras has no card, adapter or flow.',
     source: `9router/open-sse/providers/registry/${id}.js:1`,
     status: 'gap — parity backlog',

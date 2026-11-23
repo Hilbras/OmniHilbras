@@ -98,6 +98,8 @@ const FORCED_WIRE = {
   // Cycle-4 keyed routers share the OpenAI wire, so one driven wire covers all five rows. Their own
   // scripted transport tests (one per id) assert the host and base path their adapters really use.
   sambanova: 'openai', cerebras: 'openai', siliconflow: 'openai', nebius: 'openai', perplexity: 'openai',
+  // Cycle 5's glm uses the same shared OpenAI wire; its own scripted test pins the coding-plan path.
+  glm: 'openai',
   'agnes-ai': 'openai', agentrouter: 'openai', 'aion-labs': 'openai', '100milionseek': 'openai', anyrouter: 'openai', apinex: 'openai',
   coarena: 'openai', custom: 'openai', deepseek: 'openai', groq: 'openai', grok: 'openai', kimi: 'openai',
   kiraai: 'openai', mistral: 'openai', 'nara-router': 'openai', nvidia: 'openai', numes: 'openai',

@@ -59,6 +59,7 @@ const OPENAI_WIRE = [
   'custom',
   'cerebras',
   'deepseek',
+  'glm',
   'groq',
   'grok',
   'kimi',

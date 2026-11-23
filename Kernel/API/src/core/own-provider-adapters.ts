@@ -112,6 +112,13 @@ export const OWN_PROVIDER_ADAPTERS: Readonly<Record<string, OwnAdapterEntry>> = 
   'siliconflow': openAiRouter('siliconflow', 'SiliconFlow', 'https://api.siliconflow.com/v1'),
   'nebius': openAiRouter('nebius', 'Nebius AI', 'https://api.studio.nebius.ai/v1'),
   'perplexity': openAiRouter('perplexity', 'Perplexity', 'https://api.perplexity.ai'),
+  // Cycle 5's one honest slice of the remaining backlog: `glm` is a paid Z.ai coding-plan API key on
+  // the plain OpenAI chat wire. The base stops at /v4 because the shared adapter appends
+  // /chat/completions, giving https://api.z.ai/api/coding/paas/v4/chat/completions. The reference's
+  // Claude-header lane, forged CLI identity and ZCode OAuth grant are deliberately not ported; this
+  // id is a separate product from the `zcode` Start Plan card. `validation: 'none'` is declared beside
+  // the factory because a public catalog cannot prove a pasted key is the caller's.
+  'glm': openAiRouter('glm', 'Z.ai GLM Coding', 'https://api.z.ai/api/coding/paas/v4'),
   // xAI has its own SDK package because its video-job surface is not the shared chat wire. `none` is
   // declared, not inherited: no authenticated credential check was measured, and xAI's catalog is
   // public enough that a bogus key would look valid. Its own id keeps its own vault entry.

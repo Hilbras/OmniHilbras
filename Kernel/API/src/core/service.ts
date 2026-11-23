@@ -860,6 +860,9 @@ export class GatewayService {
     resolver = resolver.onDemand('siliconflow', own('siliconflow').factory, { validation: own('siliconflow').validation });
     resolver = resolver.onDemand('nebius', own('nebius').factory, { validation: own('nebius').validation });
     resolver = resolver.onDemand('perplexity', own('perplexity').factory, { validation: own('perplexity').validation });
+    // Cycle 5 adds one keyed router: glm. Its own paid Z.ai coding-plan key and base URL, with the
+    // `none` validation decision read from OWN_PROVIDER_ADAPTERS; no CLI identity or OAuth flow.
+    resolver = resolver.onDemand('glm', own('glm').factory, { validation: own('glm').validation });
     // xAI is its own connection, not a second name for Grok's saved key. Its chat surface is the
     // OpenAI wire; video generation is a real adapter on the v1 video routes, not a simulated lane.
     // ("v1 video routes" is spelled out rather than as a path ending in slash-star: a source-text guard

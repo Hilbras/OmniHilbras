@@ -76,6 +76,18 @@ those versions; they are deprecated with a message saying so, and `docs/INSTALL.
 
    If the shortcut is missing or the version disagrees, the release is not done.
 
+## A missed publish is recorded, not repaired with old code
+
+If a tag reaches npm late — or never — after a later version has shipped, do **not** publish the old
+tag's code to close the bookkeeping gap. npm publishes forward, so that would put superseded code on
+the registry under a version people may still install. Record it in `knownGaps` in
+`scripts/audit-release-trail.mjs` with a why-sentence and a pinned count in
+`tests/release-trail.test.js`, as was done for `3.70.0` (superseded by `3.71.0`) and for `3.96.0`
+(superseded by `3.97.0`; the cycle-5 audit found `npm view @hilbras/omnihilbras@3.96.0 version`
+returned E404 while `3.97.0` resolved). A gap that is still current — a tag whose code is what users
+should get — is a publish, not an exemption. `pnpm release:audit` distinguishes the two: a recorded
+gap is a line of context, a new one fails the command.
+
 ## Deprecating an old range
 
 The previous project occupies `<3.0.0` and cannot be unpublished (npm refuses after 72 hours), so it is

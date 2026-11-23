@@ -6,14 +6,14 @@ criterion is at least level 4 **and** OmniHilbras is not behind 9router on any r
 
 Evidence must be a path + line or a measured command output. "We think" is not a score.
 
-| # | Criterion | 9router | OH | Evidence (cycle 4) | OH ≥ 9R? |
+| # | Criterion | 9router | OH | Evidence (cycle 4 measurements, corrected in cycle 5 where noted) | OH ≥ 9R? |
 |---|---|---|---|---|---|
 | 1 | Working provider coverage on live requests | 3 | 3 | `docs/reports/parity-cycle-4-system.md:63,110-115,153-163`: 148 registry ids vs 62 cards, no live calls | = |
 | 2 | Credential validation: real probe vs public catalog | 3 | 4 | `parity-cycle-4-system.md:64,158-161,167-177`; declared strategies beside factories, real probes | yes |
 | 3 | Model-ID / upstream-ID / capability mapping | 4 | 4 | `parity-cycle-4-system.md:65,123-128`; parsing improved, family patterns still 9R-only | = |
 | 4 | Tool calling breadth and end-to-end reliability | 4 | 4 | `parity-cycle-4-system.md:66,134-140`; cloaking and the supervised MCP bridge now present | = |
 | 5 | Failover and multi-account rotation | 4 | 4 | `parity-cycle-4-system.md:67,99-104`; smart/fusion committed and exercised by the gateway tests | yes |
-| 6 | Streaming / protocol surfaces (chat, Messages, Responses) | 4 | 3 | `parity-cycle-4-system.md:68,142-149`; the report says the video route refuses and systemone is absent | no |
+| 6 | Streaming / protocol surfaces (chat, Messages, Responses) | 4 | 3 | **Cycle-5 correction:** video is **served**, not refused — `Kernel/SDK/xai/adapter/index.ts:87-135`, `Kernel/API/src/routes/video.ts:99-146` and `Kernel/API/test/video-route.test.js:101-167` (commit `a71f61d8`) create and poll real xAI jobs bound to the creating connection. The remaining gap is `/systemone`, which this build does not serve; no live cross-provider measurement was made, so the level stays 3. | no |
 | 7 | Web-session, free-tier and special-provider support | 4 | 3 | `parity-cycle-4-system.md:69,113-115,155-163`; 115 registry ids without an OH counterpart | no |
 | 8 | Observability: honest records, failure reasons, logs | 3 | 4 | `parity-cycle-4-system.md:70,181-190`; redacted request details | yes |
 | 9 | Dashboard and operator surfaces | 4 | 3 | `parity-cycle-4-system.md:71,181-190`; CLI-tool configurators/translator inspector absent | no |
@@ -53,8 +53,13 @@ and `npm view @hilbras/omnihilbras@3.97.0 version` resolves `3.97.0`. The workin
 exited 0. The rows above are deliberately left as the cycle-4 measurement. The `v3.96.0` npm gap is
 still open and unexempted, so `pnpm release:audit` still exits 1 on that one tag.
 
-Correction to the cycle-4 evidence: the report's §5 says the video route "still refuses every request"
-(`:145-146`) and scorecard row 6 repeats that. The committed code already implements a real xAI video
-adapter (`Kernel/SDK/xai/adapter/index.ts:87-135`), route (`Kernel/API/src/routes/video.ts:130-146`) and
-scripted-transport tests (`Kernel/API/test/video-route.test.js`); the row-6 score is kept as the
-cycle-4 measurement but its video half should not be trusted. `systemone` remains absent.
+Cycle 5: `docs/reports/parity-cycle-5-system.md` is the new full comparison. Its section 1 re-scores
+all twelve rows; the numeric scores in the table above stay at the cycle-4 measurement until that
+re-score is adopted as a whole. Two corrections are recorded in the NEW note
+`docs/reports/parity-cycle-5-review.md` (no report was overwritten): row 6's video half was wrong in
+both the cycle-4 report and this scorecard — video is a real xAI adapter and route, committed at
+`a71f61d8` (`Kernel/SDK/xai/adapter/index.ts:87-135`, `Kernel/API/src/routes/video.ts:99-146`,
+`Kernel/API/test/video-route.test.js:101-167`) — while the unserved `/systemone` surface remains. Row 12
+stays red: the `v3.96.0` npm gap is now recorded as unrecoverable, but the `3.98.0` ceremony has not
+shipped, so no green claim is made here. Report items 2, 4 and 7 are already implemented and guarded;
+the note records the evidence so a later cycle does not re-plan them.
