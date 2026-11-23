@@ -21,8 +21,8 @@ test('the local tool surface has no shell, write or network capability', () => {
 
 test('local tools are only added to the non-streaming chat path', () => {
   const service = read('Kernel/API/src/core/service.ts');
-  assert.match(service, /applyToolContract\(providerId, request, true, connectionId\)/, 'chat does not request local tools');
-  assert.match(service, /applyToolContract\(providerId, request, false, connectionId\)/, 'streaming does not explicitly decline local tools');
+  assert.match(service, /applyToolContract\(providerId, request, true, connectionId, scope\?\.id\)/, 'chat does not request local tools');
+  assert.match(service, /applyToolContract\(providerId, request, false, connectionId, scope\?\.id\)/, 'streaming does not explicitly decline local tools');
   assert.doesNotMatch(service, /applyToolContract\(providerId, request, true\)/, 'a stale two-argument call remains');
 });
 

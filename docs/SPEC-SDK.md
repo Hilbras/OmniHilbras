@@ -1,6 +1,6 @@
 # Spec: OmniHilbras Gateway and Provider SDK
 
-**Status:** Current — release 3.94.0
+**Status:** Current — release 3.95.0
 
 This document is the contract behind the gateway and its provider packages. It is intentionally more
 specific than the [README](../README.md): a route, an error code or a provider boundary written here is
@@ -1003,7 +1003,12 @@ advertised, because the backend's support for it has not been measured; the gate
 Web sessions are excluded on purpose. They drive a page, not an API with a function-calling surface; smuggling a schema
 into a chat box produced prose that looked like a refusal and cost a turn to discover. `tests/tools-caps.test.js` fails
 if a catalogue card has no row, and `tests/tools-behaviour.test.js` fails if a row claims forcing that the adapter does
-not actually send.
+not actually send. A client that **declares tools** to any of those providers now gets a stated
+`501 NOT_SUPPORTED` before dispatch instead of a text-only answer that silently ends its agent loop —
+the failure mode when a conversation started with a tool-capable provider is continued through one
+that is not. `tool_choice: 'none'` is the caller's own choice and is still served. Each usage record
+carries `toolContract: { declared, forwarded, stripped, dropped }` — counts only, no names or schemas —
+and the Logs page labels a record whose tools were stripped or dropped.
 
 ### What the gateway does with it
 

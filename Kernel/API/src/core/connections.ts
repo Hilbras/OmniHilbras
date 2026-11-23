@@ -1867,7 +1867,10 @@ function normalizeModelMeta(value: unknown): ModelMetaMap | undefined {
     if (isRecord(raw.cp)) {
       const caps: NonNullable<ModelMeta['cp']> = {};
       for (const key of ['chat', 'streaming', 'models', 'embeddings', 'images', 'audio', 'search', 'tools', 'reasoning', 'vision', 'pdf', 'audioInput', 'videoInput', 'imageOutput', 'audioOutput'] as const) {
-        if (raw.cp[key] === true) caps[key] = true;
+        // A provider-stated `false` is a fact too: `narrowedToolCaps` uses `tools: false` to stop
+        // advertising tools on one model of a tool-capable provider. Dropping it here made that
+        // narrowing unreachable after any save or restart.
+        if (typeof raw.cp[key] === 'boolean') caps[key] = raw.cp[key];
       }
       if (Object.keys(caps).length) entry.cp = caps;
     }

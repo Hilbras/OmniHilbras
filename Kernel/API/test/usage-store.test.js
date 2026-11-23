@@ -55,6 +55,16 @@ test('the forbidden-field list is enforced against the real record, not a copy',
   for (const key of produced) assert.ok(!listed.has(key), `\`${key}\` is produced but not on the forbidden list`);
 });
 
+test('tool-contract counts survive normalization without carrying names or schemas', async () => {
+  const store = new InMemoryUsageStore();
+  const record = await store.record({
+    ...entry(),
+    toolContract: { declared: 3, forwarded: 1, stripped: 2, dropped: 1 },
+  });
+  assert.deepEqual(record.toolContract, { declared: 3, forwarded: 1, stripped: 2, dropped: 1 });
+  assert.equal(JSON.stringify(record).includes('read'), false, 'no tool name reached the record');
+});
+
 test('an unknown key on the input is dropped, not stored', async () => {
   // The type system stops this in TypeScript; JavaScript callers and a hand-edited file do not. Normalization
   // is what makes the guarantee real rather than advisory.

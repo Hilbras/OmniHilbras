@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ProviderRegistry } from '../dist/src/core/index.js';
+import { InMemorySecretStore, ProviderRegistry } from '../dist/src/core/index.js';
 import { GatewayService, InMemoryApiKeyStore, InMemoryConnectionStore } from '../dist/src/index.js';
 
 /**
@@ -71,10 +71,13 @@ test('tool_choice: none removes the definitions before the adapter sees them', a
   assert.equal(requests.at(-1).tools, undefined);
 });
 
-test('a web provider receives no tools at all', async () => {
+test('a web provider refuses declared tools instead of stripping them silently', async () => {
   const { requests, service } = harness();
-  await service.chat('qwen-web', { model: 'm', messages: [{ role: 'user', content: 'hi' }], tools: [tool('bash')] });
-  assert.equal(requests.at(-1).tools, undefined, 'a web session was handed a schema it will ignore');
+  await assert.rejects(
+    () => service.chat('qwen-web', { model: 'm', messages: [{ role: 'user', content: 'hi' }], tools: [tool('bash')] }),
+    (error) => error.code === 'NOT_SUPPORTED' && /cannot serve function tools/.test(error.publicMessage ?? ''),
+  );
+  assert.equal(requests.length, 0, 'no provider was billed for a contract the gateway could not honour');
 });
 
 test('a call naming a tool the client never declared is dropped, and the turn stops claiming a tool call', async () => {
@@ -201,4 +204,35 @@ test('a returned tool call makes the turn a tool turn whatever finish reason the
   const response = await service.chat('openai', { model: 'm', messages: [{ role: 'user', content: 'hi' }], tools: [tool('read')] });
   assert.equal(response.message.toolCalls?.length, 1);
   assert.equal(response.finishReason, 'tool_calls', 'the gateway derives the terminal state from the call it forwards');
+});
+
+test('a model that publishes no tools gets the same stated refusal', async () => {
+  // The per-model narrowing uses the connection's own catalog metadata. A provider row that allows tools
+  // must not turn a model that cannot call them into a normal text answer.
+  const requests = [];
+  const registry = new ProviderRegistry().register({
+    id: 'openai', name: 'openai', capabilities: { chat: true, models: true },
+    async listModels() { return [{ id: 'm', providerId: 'openai' }]; },
+    async healthCheck() { return { status: 'healthy', checkedAt: new Date().toISOString(), latencyMs: 1, verified: 'credential' }; },
+    async chat(request) { requests.push(request); return { id: 'r', providerId: 'openai', model: request.model, createdAt: new Date().toISOString(), message: { role: 'assistant', content: 'ok' }, finishReason: 'stop' }; },
+  });
+  const connections = new InMemoryConnectionStore();
+  void connections.save({
+    id: 'openai', providerId: 'openai', name: 'openai', endpoint: 'https://example.invalid/v1',
+    priority: 1, proxyPool: 'none', modelIds: ['m'], modelMeta: { m: { cp: { tools: false } } },
+  }, { type: 'api-key', value: 'k' });
+  const narrowed = new GatewayService(registry, new InMemorySecretStore({}), connections, new InMemoryApiKeyStore(), {});
+  await assert.rejects(
+    () => narrowed.chat('openai', { model: 'm', messages: [{ role: 'user', content: 'hi' }], tools: [tool('read')] }, undefined, undefined, 'openai'),
+    (error) => error.code === 'NOT_SUPPORTED' && /cannot serve function tools/.test(error.publicMessage ?? ''),
+  );
+  assert.equal(requests.length, 0);
+});
+
+test('a caller that opts out of tools or sends none is still served by a text-only provider', async () => {
+  const { service } = harness();
+  const none = await service.chat('qwen-web', { model: 'm', messages: [{ role: 'user', content: 'hi' }], tools: [tool('read')], toolChoice: 'none' });
+  assert.equal(none.message.content, 'ok');
+  const plain = await service.chat('qwen-web', { model: 'm', messages: [{ role: 'user', content: 'hi' }] });
+  assert.equal(plain.message.content, 'ok');
 });

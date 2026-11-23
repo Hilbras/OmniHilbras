@@ -821,6 +821,7 @@ function recordUsage(
     : undefined;
   const usage = measured ?? (estimated ? { ...estimated } : undefined);
   const compression = service.takeCompressionTelemetry(input.requestId);
+  const toolContract = service.toolContractFor(input.requestId);
   // **No requirement that a provider was reached.** The first version returned early when `providerId` was
   // missing, which silently dropped every request that ended before a route was tried — a client that
   // disconnected during startup, or a request nothing could serve. Measured: 30 such requests produced **zero**
@@ -839,6 +840,7 @@ function recordUsage(
       latencyMs: Math.max(0, Math.round(input.latencyMs)),
       ...(input.errorCode ? { errorCode: input.errorCode } : {}),
       ...(input.incomplete ? { incomplete: true } : {}),
+      ...(toolContract ? { toolContract } : {}),
       ...(usage?.inputTokens !== undefined ? { inputTokens: usage.inputTokens } : {}),
       ...(usage?.outputTokens !== undefined ? { outputTokens: usage.outputTokens } : {}),
       ...(usage?.cacheReadTokens !== undefined ? { cacheReadTokens: usage.cacheReadTokens } : {}),

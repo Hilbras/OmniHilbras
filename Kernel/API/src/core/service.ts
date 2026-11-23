@@ -232,6 +232,17 @@ export type SaverTelemetry = {
   }>;
 };
 
+/**
+ * What the gateway did with a request's tool definitions. Counts only — no names, no schemas — so a
+ * record can say "your tools were removed here" without holding any prompt content.
+ */
+export type ToolContractTelemetry = {
+  declared: number;
+  forwarded: number;
+  stripped: number;
+  dropped: number;
+};
+
 export type GatewayServiceOptions = {
   /** 0/undefined means no cap. Applied to every chat request before routing. */
   maxOutputTokensCap?: number;
@@ -319,6 +330,12 @@ export type GatewayServiceOptions = {
 
 export class GatewayService {
   private readonly connectionLocks = new Map<string, Promise<void>>();
+  /**
+   * Tool-contract decisions by request id, read by the route when it writes a usage record. Kept here
+   * rather than on `RequestScope`, which is deliberately frozen; bounded because a process may serve
+   * far more requests than it keeps records.
+   */
+  private readonly toolContractNotes = new Map<string, ToolContractTelemetry>();
   /** Absent means the gateway records nothing; see `GatewayServiceOptions.usageStore`. */
   private readonly usageStore?: UsageStore;
   private readonly virtualModelStore?: VirtualModelStore;
@@ -3745,11 +3762,40 @@ export class GatewayService {
    * `null` means the request carried no tools and no `tool_choice`, which is the common case: the whole cost of this
    * feature for a client that does not use tools is one map lookup.
    */
-  private async applyToolContract(providerId: string, request: ChatRequest, includeLocalTools = false, connectionId?: string): Promise<{ request: ChatRequest; declared: readonly string[]; renames: ReadonlyMap<string, string> }> {
+  private noteToolContract(scopeId: string | undefined, note: ToolContractTelemetry): void {
+    if (!scopeId) return;
+    if (this.toolContractNotes.size >= 512) this.toolContractNotes.delete(this.toolContractNotes.keys().next().value!);
+    this.toolContractNotes.set(scopeId, note);
+  }
+
+  /** Counts only. Used by the HTTP layer to label the usage record for this request. */
+  toolContractFor(scopeId: string | undefined): ToolContractTelemetry | undefined {
+    return scopeId ? this.toolContractNotes.get(scopeId) : undefined;
+  }
+
+  private async applyToolContract(providerId: string, request: ChatRequest, includeLocalTools = false, connectionId?: string, scopeId?: string): Promise<{ request: ChatRequest; declared: readonly string[]; renames: ReadonlyMap<string, string> }> {
     try {
       const connection = connectionId ? (await this.connections.list()).find((entry) => entry.id === connectionId) : undefined;
       const effectiveCaps = narrowedToolCaps(request.model, connection, toolCaps(providerId));
       const { request: normalized, notes } = normalizeToolsRequest(request, providerId, effectiveCaps);
+      const toolContract: ToolContractTelemetry = {
+        declared: (request.tools ?? []).length,
+        forwarded: 0,
+        stripped: notes.stripped ? (request.tools ?? []).length : 0,
+        dropped: notes.dropped.length,
+      };
+      // A client that declared tools which this provider cannot serve gets a stated refusal before any
+      // provider call, instead of a normal-looking text turn that ends the agent's tool loop silently.
+      // `toolChoice: 'none'` is the caller's own decision, not a capability mismatch.
+      if (notes.stripped && (request.tools ?? []).length > 0 && request.toolChoice !== 'none') {
+        this.noteToolContract(scopeId, { ...toolContract, stripped: (request.tools ?? []).length });
+        throw new ToolContractError(
+          'TOOLS_UNSUPPORTED',
+          providerId,
+          `${providerId} cannot serve the ${(request.tools ?? []).length} declared tool(s); they were stripped.`,
+          `${providerId} cannot serve function tools. Continue this conversation with a tool-capable provider, or send the request without tools.`,
+        );
+      }
       if (notes.stripped) console.warn(`[tools] ${providerId} does not serve tools; ${(request.tools ?? []).length} definition(s) removed`);
       if (notes.assumed) console.warn(`[tools] ${providerId} has no capability row; assuming tools with auto/none`);
       for (const drop of notes.dropped) console.warn(`[tools] ${providerId} dropped "${drop.name}": ${drop.reason}`);
@@ -3783,6 +3829,8 @@ export class GatewayService {
         // The gateway declared these tools, so a call naming one is legitimate even though the client did not.
         declaredNames = [...declaredNames, ...LOCAL_TOOL_NAMES];
       }
+      toolContract.forwarded = (outbound.tools ?? []).length;
+      this.noteToolContract(scopeId, toolContract);
       return { request: outbound, declared: declaredNames, renames };
     } catch (error) {
       if (error instanceof ToolContractError) {
@@ -3886,7 +3934,7 @@ export class GatewayService {
   async chat(providerId: string, request: ChatRequest, signal?: AbortSignal, scope?: RequestScope, connectionId?: string): Promise<ChatResponse> {
     const adapter = await this.resolveAdapter(providerId, undefined, connectionId);
     if (!adapter.chat || adapter.capabilities.chat !== true) throw notSupported(adapter, 'chat');
-    const contracted = await this.applyToolContract(providerId, request, true, connectionId);
+    const contracted = await this.applyToolContract(providerId, request, true, connectionId, scope?.id);
     const release = await this.acquireConcurrency(connectionId);
     try {
       const local = await this.runLocalToolRounds(providerId, contracted, adapter, signal, scope, connectionId);
@@ -3901,7 +3949,7 @@ export class GatewayService {
   async *streamChat(providerId: string, request: ChatRequest, signal?: AbortSignal, scope?: RequestScope, connectionId?: string): AsyncIterable<ChatChunk> {
     const adapter = await this.resolveAdapter(providerId, undefined, connectionId);
     if (!adapter.streamChat || adapter.capabilities.streaming !== true) throw notSupported(adapter, 'streaming');
-    const contracted = await this.applyToolContract(providerId, request, false, connectionId);
+    const contracted = await this.applyToolContract(providerId, request, false, connectionId, scope?.id);
     const release = await this.acquireConcurrency(connectionId);
     try {
       const chunks = adapter.streamChat(this.withRequestLimits({ ...contracted.request, model: await this.upstreamModelFor(providerId, connectionId, contracted.request.model), messages: await this.preparedMessages(contracted.request, scope, adapter.imageContext === true) }), await this.contextForRequest(providerId, connectionId, signal, scope));

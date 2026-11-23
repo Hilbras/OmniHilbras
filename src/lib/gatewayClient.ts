@@ -1132,6 +1132,8 @@ export type GatewayUsageRecord = {
   path?: Array<{ providerId: string; connectionId?: string; outcome: string; errorCode?: string; latencyMs?: number }>;
   /** Compression telemetry, when a saver ran. */
   compression?: unknown;
+  /** Counts only: what happened to this request's tool definitions. No names or schemas. */
+  toolContract?: { declared: number; forwarded: number; stripped: number; dropped: number };
 };
 
 export type GatewayUsageTotals = {

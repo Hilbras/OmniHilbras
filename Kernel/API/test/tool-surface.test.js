@@ -7,9 +7,9 @@ import { GatewayService, InMemoryConnectionStore, createGatewayServer } from '..
 /**
  * What the client is told about tools.
  *
- * The contract's refusal is only half of it: a request that *can* be served is still served, so a client needs to be
- * able to tell that its tools were dropped rather than ignored by a model that chose not to call. These assert the
- * three surfaces that say so — the model listing, the response body, and the streaming header.
+ * A client that declares tools which the target provider cannot serve now gets a stated 501 rather than a
+ * normal-looking text turn that ends its agent loop. These assert the three surfaces that say so — the model
+ * listing, the response body, and the streaming surface — and that a capable provider is left alone.
  */
 
 const models = {
@@ -103,15 +103,16 @@ test('a model whose provider cannot serve tools says so in the listing', async (
   });
 });
 
-test('a chat answered by a web session reports that the tools were not used', async () => {
+test('a chat with tools to a web session is refused with a clear 501', async () => {
   await withServer(async (base) => {
     const response = await fetch(`${base}/v1/chat/completions`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: body('qw/qwen3.8-max'),
     });
     const raw = await response.text();
-    assert.equal(response.status, 200, raw.slice(0, 300));
+    assert.equal(response.status, 501, raw.slice(0, 300));
     const payload = JSON.parse(raw);
-    assert.equal(payload.gateway.tools, 'unsupported', 'the client was left to guess why its agent went quiet');
+    assert.equal(payload.error?.code ?? payload.code, 'NOT_SUPPORTED');
+    assert.match(payload.error?.message ?? '', /cannot serve function tools/, 'the reason must be actionable, not a generic refusal');
   });
 });
 
@@ -143,51 +144,53 @@ test('a chat answered by a capable provider says nothing extra', async () => {
   });
 });
 
-test('a streamed answer from a web session carries the note in the stream', async () => {
+test('a streamed chat with tools to a web session is refused before any byte is written', async () => {
   await withServer(async (base) => {
     const response = await fetch(`${base}/v1/chat/completions`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...JSON.parse(body('qw/qwen3.8-max')), stream: true }),
     });
-    // The head is written before the provider is known, so the note arrives as the stream's first event.
-    const streamed = await response.text();
-    const first = streamed.split('\n\n')[0];
-    assert.match(first, /"gateway":\{"tools":"unsupported"\}/, `the note was not in the stream: ${first.slice(0, 200)}`);
+    assert.equal(response.status, 501);
+    const raw = await response.text();
+    assert.doesNotMatch(raw, /data: /, 'a refusal is a JSON error, not a truncated SSE body');
+    const payload = JSON.parse(raw);
+    assert.equal(payload.error?.code ?? payload.code, 'NOT_SUPPORTED');
   });
 });
 
-test('a Responses request to a tools-less provider says so in its body', async () => {
+test('a Responses request with tools to a tools-less provider is refused', async () => {
   await withServer(async (base) => {
     const response = await fetch(`${base}/v1/responses`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ model: 'qw/qwen3.8-max', input: 'hi', tools: [tool] }),
     });
     const raw = await response.text();
-    assert.equal(response.status, 200, raw.slice(0, 300));
-    assert.equal(JSON.parse(raw).gateway?.tools, 'unsupported', 'the Responses surface left the client guessing');
+    assert.equal(response.status, 501, raw.slice(0, 300));
+    assert.equal((JSON.parse(raw).error ?? {}).code, 'NOT_SUPPORTED');
   });
 });
 
-test('a streamed Responses completion carries the same note', async () => {
+test('a streamed Responses request with tools is refused before the stream starts', async () => {
   await withServer(async (base) => {
     const response = await fetch(`${base}/v1/responses`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ model: 'qw/qwen3.8-max', input: 'hi', tools: [tool], stream: true }),
     });
-    const events = await response.text();
-    assert.match(events, /event: response\.completed/);
-    assert.match(events, /"gateway":\{"requestId":"[^"]+","tools":"unsupported"\}/, `the streamed completion had no note: ${events.slice(-300)}`);
+    assert.equal(response.status, 501);
+    const raw = await response.text();
+    assert.doesNotMatch(raw, /event: response\.completed/, 'a refusal must not look like a completed turn');
+    assert.equal((JSON.parse(raw).error ?? {}).code, 'NOT_SUPPORTED');
   });
 });
 
-test('a streamed note names the provider that answered, not the one that failed first', async () => {
+test('a tools request whose surviving provider is a web session is refused, not answered without tools', async () => {
   await withFailoverServer(async (base) => {
     const response = await fetch(`${base}/v1/chat/completions`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ model: 'shared/model', messages: [{ role: 'user', content: 'hi' }], tools: [tool], stream: true }),
     });
-    const streamed = await response.text();
-    const first = streamed.split('\n\n')[0];
-    assert.match(first, /"gateway":\{"tools":"unsupported"\}/, `the backup is a web session but the note named the failed primary: ${first.slice(0, 200)}`);
+    assert.equal(response.status, 501);
+    const raw = await response.text();
+    assert.match(raw, /cannot serve function tools/, `the refusal must name the capability that failed: ${raw.slice(0, 200)}`);
   });
 });
 

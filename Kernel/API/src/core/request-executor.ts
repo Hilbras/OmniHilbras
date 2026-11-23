@@ -1011,6 +1011,10 @@ function attachAttempts(error: unknown, attempts: GatewayFailoverAttempt[]) {
         ...(error.providerId ? { providerId: error.providerId } : {}),
         ...(error.statusCode ? { statusCode: error.statusCode } : {}),
         retryable: error.retryable,
+        // A terminal error still owes the caller its own explanation. Dropping `publicMessage` here
+        // turned a specific refusal into "This provider does not support the requested capability"
+        // after failover, which is exactly when a person needs to know which capability failed.
+        ...(error.publicMessage ? { publicMessage: `${error.publicMessage} Tried: ${failedProviders.join(', ')}.` } : {}),
         details: { ...(typeof error.details === 'object' && error.details !== null ? error.details : {}), ...ledger },
         cause: error,
       });

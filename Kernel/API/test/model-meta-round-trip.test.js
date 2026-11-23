@@ -85,6 +85,15 @@ test('every catalog field survives the store round trip', async (t) => {
   assert.deepEqual(meta.p, [2, 8, 0.5, 4]);
 });
 
+test('a provider-stated false capability survives the round trip', async (t) => {
+  // `narrowedToolCaps` stops advertising tools on a model whose catalog says `tools: false`. If this
+  // boolean were dropped on load, the refusal would only work until the next restart.
+  const model = await roundTrip(t, modelMetaFor([{
+    id: 'vendor/model', providerId: 'fake', capabilities: { chat: true, tools: false },
+  }]));
+  assert.deepEqual(model.cp, { chat: true, tools: false });
+});
+
 test('a stated zero price is kept, and a sparse price never shifts dimensions', async (t) => {
   const free = await roundTrip(t, modelMetaFor([{
     id: 'vendor/model', providerId: 'fake',

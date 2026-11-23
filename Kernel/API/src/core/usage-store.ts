@@ -60,6 +60,14 @@ export type UsageCompression = {
   }>;
 };
 
+/** Counts only — no tool names or schemas — so a record can explain a stripped contract without holding prompt content. */
+export type ToolContractCounts = {
+  declared: number;
+  forwarded: number;
+  stripped: number;
+  dropped: number;
+};
+
 export type UsageRecord = {
   /** Monotonic within a store; the stable id a UI row keys on. */
   id: string;
@@ -111,6 +119,8 @@ export type UsageRecord = {
   tokensEstimated?: boolean;
   /** What the token saver did to the prompt, when it changed anything. No prompt content is stored. */
   compression?: UsageCompression;
+  /** Whether the request's tool definitions survived the target provider's contract. Counts only. */
+  toolContract?: ToolContractCounts;
 };
 
 /** What a caller wants out. Every field is optional; the default is everything, newest first. */
@@ -563,7 +573,15 @@ export function isUsageRecord(value: unknown): value is UsageRecord {
     Number.isFinite(value.attempts) &&
     (value.requestId === undefined || typeof value.requestId === 'string') &&
     (value.incomplete === undefined || typeof value.incomplete === 'boolean') &&
+    (value.toolContract === undefined || isToolContractCounts(value.toolContract)) &&
     (value.path === undefined || (Array.isArray(value.path) && value.path.every(isUsageAttempt)))
+  );
+}
+
+function isToolContractCounts(value: unknown): value is ToolContractCounts {
+  if (!isRecord(value)) return false;
+  return ['declared', 'forwarded', 'stripped', 'dropped'].every(
+    (key) => typeof value[key] === 'number' && Number.isFinite(value[key]) && (value[key] as number) >= 0,
   );
 }
 
@@ -614,6 +632,14 @@ export function normalizeRecord(record: UsageRecord): UsageRecord {
           },
         }
       : {}),
+    ...(isToolContractCounts(record.toolContract) ? {
+      toolContract: {
+        declared: record.toolContract.declared,
+        forwarded: record.toolContract.forwarded,
+        stripped: record.toolContract.stripped,
+        dropped: record.toolContract.dropped,
+      },
+    } : {}),
     ...(typeof record.requestId === 'string' ? { requestId: record.requestId } : {}),
     ...(Array.isArray(record.path) ? { path: record.path.map(normalizeAttempt) } : {}),
   };

@@ -44,6 +44,7 @@ function rowHaystack(row: RecordRow): string {
     row.errorCode,
     'requestId' in row ? row.requestId : undefined,
     'path' in row && Array.isArray(row.path) ? row.path.map((attempt) => `${attempt.providerId} ${attempt.connectionId ?? ''} ${attempt.errorCode ?? ''}`) : undefined,
+    'toolContract' in row && row.toolContract && (row.toolContract.stripped > 0 || row.toolContract.dropped > 0) ? 'tools stripped' : undefined,
   ];
   return parts.flat().filter((value): value is string => typeof value === 'string').join(' ').toLowerCase();
 }
@@ -292,6 +293,7 @@ export function LogsContent() {
                     {row.model} · {row.providerId ?? 'no provider'} · {row.attempts} {row.attempts === 1 ? 'attempt' : 'attempts'}
                     {'errorCode' in row && row.errorCode ? ` · ${row.errorCode}` : ''}
                     {'incomplete' in row && row.incomplete ? ' · no terminal finish' : ''}
+                    {'toolContract' in row && row.toolContract && (row.toolContract.stripped > 0 || row.toolContract.dropped > 0) ? ` · ${row.toolContract.stripped > 0 ? `${row.toolContract.stripped} tools stripped` : `${row.toolContract.dropped} tools dropped`}` : ''}
                   </span>
                   <span className={row.outcome === 'success' ? 'text-success' : row.outcome === 'failure' ? 'text-danger' : 'muted'}>
                     {row.outcome} · {row.latencyMs} ms
