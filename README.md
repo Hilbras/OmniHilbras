@@ -24,7 +24,7 @@
   <a href="./CONTRIBUTING.md">Contributing</a>
 </p>
 
-**Current version: 3.98.0**
+**Current version: 3.98.1**
 
 OmniHilbras sits between your application and the model providers you already use. It gives every client one
 OpenAI-compatible endpoint, keeps credentials on your machine, and decides which saved connection serves each
@@ -506,6 +506,7 @@ most people change:
 | `OMNIHILBRAS_MAX_OUTPUT_TOKENS` | none | Hard output cap |
 | `OMNIHILBRAS_THINKING_BUDGET` | none | Thinking-budget cap where supported |
 | `OMNIHILBRAS_HISTORY_TRIM_TOKENS` | none | Trim whole old turns above this estimate |
+| `OMNIHILBRAS_TOOL_SCHEMA_BYTES` | 256 KiB | Total tool-definition bytes per request; larger values forward more tools but cost input tokens on every turn |
 | `OMNIHILBRAS_CACHE_ANCHOR` | off | Re-anchor provider cache breakpoints |
 | `OMNIHILBRAS_HEADROOM_URL` / `OMNIHILBRAS_PXPIPE_URL` | none | Optional external savers |
 | `OMNIHILBRAS_MAX_CONNECTIONS` | 250 | How many connections a vault holds |

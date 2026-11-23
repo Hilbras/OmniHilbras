@@ -110,6 +110,22 @@ test('a schema larger than the cap is refused rather than paid for on every turn
   assert.match(notes.dropped[0].reason, /exceed/);
 });
 
+test('a tool-heavy agent keeps its definitions when the cumulative schema budget is raised', () => {
+  // Measured shape of a real agent request: ~315 definitions of roughly 1 KB each. Under the historical
+  // 32 KB budget only the first ~17 survive, so the model cannot call the rest and the agent stops mid-loop.
+  const many = Array.from({ length: 315 }, (_, index) => tool(`tool_${index}`, {
+    parameters: { type: 'object', properties: { path: { type: 'string', description: 'x'.repeat(1024) } } },
+  }));
+  const historical = normalizeToolsRequest({ tools: many }, 'openai');
+  assert.ok(historical.request.tools.length < 50, `the 32 KB default still truncates: ${historical.request.tools.length}`);
+  assert.ok(historical.notes.dropped.length > 250);
+
+  const raised = normalizeToolsRequest({ tools: many }, 'openai', undefined, { maxSchemaBytes: 1024 * 1024 });
+  assert.equal(raised.request.tools.length, 315, 'all definitions fit under the raised budget');
+  assert.equal(raised.notes.dropped.length, 0);
+  assert.equal(MAX_SCHEMA_BYTES, 32 * 1024, 'the default stays as the historical cap for direct callers');
+});
+
 test('arguments that are already JSON are not rewritten', () => {
   const repair = repairArguments('{"path":"a.ts"}');
   assert.equal(repair.ok, true);

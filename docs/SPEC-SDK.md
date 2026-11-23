@@ -1,6 +1,6 @@
 # Spec: OmniHilbras Gateway and Provider SDK
 
-**Status:** Current — release 3.98.0
+**Status:** Current — release 3.98.1
 
 This document is the contract behind the gateway and its provider packages. It is intentionally more
 specific than the [README](../README.md): a route, an error code or a provider boundary written here is
@@ -1027,7 +1027,9 @@ not actually send. A client that **declares tools** to any of those providers no
 the failure mode when a conversation started with a tool-capable provider is continued through one
 that is not. `tool_choice: 'none'` is the caller's own choice and is still served. Each usage record
 carries `toolContract: { declared, forwarded, stripped, dropped }` — counts only, no names or schemas —
-and the Logs page labels a record whose tools were stripped or dropped.
+and the Logs page labels a record whose tools were stripped or dropped. A turn whose returned call the gateway
+refused to forward is additionally marked `incomplete: true`: the client still sees `finish_reason: "stop"`,
+but the record no longer claims the agent's tool loop finished.
 
 ### What the gateway does with it
 
@@ -1036,7 +1038,10 @@ and the Logs page labels a record whose tools were stripped or dropped.
   told the client its constraint had been honoured when it had not.
 - **`tool_choice: "none"`** removes the definitions before the adapter runs, whatever that adapter would have done.
 - **Definitions** are sanitised: the name must be 1–64 characters of letters, digits, `_` or `-`; a description is
-  capped at 2 000 characters; the whole schema at 32 KB; duplicates are dropped. Each drop is logged with its reason.
+  capped at 2 000 characters; duplicates are dropped. The cumulative schema budget is
+  `OMNIHILBRAS_TOOL_SCHEMA_BYTES` (default 256 KiB, clamp 32 KiB–8 MiB), passed to the Tools package per call;
+  raising it forwards more of a tool-heavy agent's definitions but costs input tokens on every turn, and values
+  near 1 MiB can exceed a model's context window. Each drop is logged with its reason.
 - **Returned calls** are validated. A call must name a tool the client declared and carry a JSON object after bounded
   repair (trailing comma, single quotes, bare keys, a markdown fence). Anything else is dropped and logged, and a turn
   whose only call was dropped no longer reports `finish_reason: "tool_calls"`.
@@ -1051,6 +1056,7 @@ and the Logs page labels a record whose tools were stripped or dropped.
 | `POST /v1/chat/completions` | `gateway.tools: "unsupported"` when the client sent tools to such a provider |
 | `POST /v1/chat/completions` (stream) | the same note on the stream's first, empty-delta chunk — the head is written before the provider is known |
 | `POST /v1/responses` | `gateway.tools: "unsupported"` in the response, and in the streamed `response.completed` event |
+| Every inference surface | `gateway.tools: "call-dropped"` in the terminal body/chunk when a returned call was refused; the usage record is `incomplete` |
 
 ## Additional Providers
 

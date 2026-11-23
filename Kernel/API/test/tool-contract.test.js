@@ -88,9 +88,12 @@ test('a call naming a tool the client never declared is dropped, and the turn st
       finishReason: 'tool_calls',
     }),
   });
-  const response = await service.chat('openai', { model: 'm', messages: [{ role: 'user', content: 'hi' }], tools: [tool('read')] });
+  const scope = { id: 'scope-dropped-call', startedAt: Date.now(), requestedModel: 'm' };
+  const response = await service.chat('openai', { model: 'm', messages: [{ role: 'user', content: 'hi' }], tools: [tool('read')] }, undefined, scope);
   assert.equal(response.message.toolCalls, undefined, 'an undeclared tool reached the client');
   assert.equal(response.finishReason, 'stop', 'a turn with no forwarded call still reported tool_calls');
+  assert.equal(service.blockedCallsFor(scope.id), 1, 'the rejected call must be visible to the route, not only in a log');
+  assert.equal(service.blockedCallsFor('other-scope'), 0);
 });
 
 test('the free-tier declaration comes from the gateway and contains no shell tool', async () => {
@@ -183,12 +186,14 @@ test('a streamed call to an undeclared tool never reaches the client', async () 
     }),
   });
   const chunks = [];
-  for await (const chunk of service.streamChat('openai', { model: 'm', messages: [{ role: 'user', content: 'hi' }], tools: [tool('read')] })) {
+  const scope = { id: 'scope-stream-dropped', startedAt: Date.now(), requestedModel: 'm' };
+  for await (const chunk of service.streamChat('openai', { model: 'm', messages: [{ role: 'user', content: 'hi' }], tools: [tool('read')] }, undefined, scope)) {
     chunks.push(chunk);
   }
   const emitted = chunks.flatMap((chunk) => [...(chunk.delta.toolCalls ?? [])]);
   assert.deepEqual(emitted, [], 'the blocked call was streamed to the client');
   assert.equal(chunks.at(-1).finishReason, 'stop', 'the stream still ended as a tool call');
+  assert.equal(service.blockedCallsFor(scope.id), 1, 'a blocked stream call is counted for the route');
 });
 
 test('a returned tool call makes the turn a tool turn whatever finish reason the provider reported', async () => {

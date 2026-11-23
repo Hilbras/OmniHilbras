@@ -33,9 +33,15 @@ const MAX_DESCRIPTION_CHARS = 2_000;
 /** Total bytes the definitions may occupy. A schema is paid for on every turn of a conversation. */
 export const MAX_SCHEMA_BYTES = 32 * 1024;
 
+/**
+ * A per-call override of the cumulative schema budget. The gateway passes its operator setting here;
+ * this package stays free of `process.env` because it is also used outside a Node process.
+ */
+export type ToolNormalizeOptions = { maxSchemaBytes?: number };
+
 const utf8 = (text: string): number => new TextEncoder().encode(text).length;
 
-function sanitizeDefinitions(tools: readonly ToolDefinition[]): { tools: ToolDefinition[]; dropped: { name: string; reason: string }[] } {
+function sanitizeDefinitions(tools: readonly ToolDefinition[], maxSchemaBytes = MAX_SCHEMA_BYTES): { tools: ToolDefinition[]; dropped: { name: string; reason: string }[] } {
   const kept: ToolDefinition[] = [];
   const dropped: { name: string; reason: string }[] = [];
   const seen = new Set<string>();
@@ -57,8 +63,8 @@ function sanitizeDefinitions(tools: readonly ToolDefinition[]): { tools: ToolDef
     const description = typeof tool.description === 'string' ? tool.description.slice(0, MAX_DESCRIPTION_CHARS) : undefined;
     const sanitized: ToolDefinition = { name, parameters: tool.parameters, ...(description ? { description } : {}) };
     const size = utf8(JSON.stringify(sanitized));
-    if (bytes + size > MAX_SCHEMA_BYTES) {
-      dropped.push({ name, reason: `the schema would exceed ${MAX_SCHEMA_BYTES} bytes` });
+    if (bytes + size > maxSchemaBytes) {
+      dropped.push({ name, reason: `the schema would exceed ${maxSchemaBytes} bytes` });
       continue;
     }
     bytes += size;
@@ -96,7 +102,7 @@ function emptyNotes(providerId: string): ToolRequestNotes {
  * Sanitising is not optional: a name and description are client input that becomes instructions on the provider's
  * side, and a duplicate or oversized schema is a refusal from the provider that reads as our bug.
  */
-export function normalizeToolsRequest<T extends ToolRequest>(request: T, providerId: string, capsOverride?: ToolCaps): NormalizedToolRequest<T> {
+export function normalizeToolsRequest<T extends ToolRequest>(request: T, providerId: string, capsOverride?: ToolCaps, options: ToolNormalizeOptions = {}): NormalizedToolRequest<T> {
   // A provider row is the floor. A caller that already proved this particular model refuses tools may
   // pass a narrower row; the reverse is deliberately impossible, because a catalog that claims tools
   // cannot give a function-calling surface to a provider that has none.
@@ -129,7 +135,7 @@ export function normalizeToolsRequest<T extends ToolRequest>(request: T, provide
 
   if (choice === 'required' && !hasTools) throw forcedWithoutDefinitions(providerId);
   if (!hasTools) return { request, notes };
-  const sanitized = sanitizeDefinitions(request.tools ?? []);
+  const sanitized = sanitizeDefinitions(request.tools ?? [], options.maxSchemaBytes);
   const { tools, dropped } = dedupeToolDefinitions(sanitized.tools, providerId);
   notes.dropped = [...sanitized.dropped, ...dropped];
   if (choice === 'required' && tools.length === 0) throw forcedWithoutDefinitions(providerId);

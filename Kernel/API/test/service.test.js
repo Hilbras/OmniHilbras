@@ -42,6 +42,13 @@ test('gateway config reads reliability tuning from the environment', () => {
   assert.equal(loadGatewayConfig({ OMNIHILBRAS_HEALTH_INTERVAL_MS: '0' }).healthIntervalMs, 0, '0 disables polling');
 });
 
+test('gateway config sizes the tool schema budget from the environment', () => {
+  assert.equal(loadGatewayConfig({}).toolSchemaBytes, 256 * 1024, 'a tool-heavy agent is no longer cut to 17 definitions');
+  assert.equal(loadGatewayConfig({ OMNIHILBRAS_TOOL_SCHEMA_BYTES: '1048576' }).toolSchemaBytes, 1024 * 1024);
+  assert.throws(() => loadGatewayConfig({ OMNIHILBRAS_TOOL_SCHEMA_BYTES: '1000' }), /integer between/);
+  assert.throws(() => loadGatewayConfig({ OMNIHILBRAS_TOOL_SCHEMA_BYTES: 'huge' }), /integer between/);
+});
+
 test('gateway config rejects non-loopback hosts and wildcard CORS', () => {
   assert.throws(() => loadGatewayConfig({ OMNIHILBRAS_HOST: '0.0.0.0' }), /loopback/);
   assert.throws(() => loadGatewayConfig({ OMNIHILBRAS_HOST: '127.999.999.999' }), /loopback/);

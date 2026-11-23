@@ -263,6 +263,8 @@ export type GatewayServiceOptions = {
   maxOutputTokensCap?: number;
   /** 0/undefined means no cap. Applied to adapters that take a thinking budget. */
   thinkingBudgetCap?: number;
+  /** Total bytes the tool definitions of one request may occupy. Absent means the Tools package default. */
+  toolSchemaBytes?: number;
   /** Threshold history trimming. Runs after content compression, before dispatch. */
   historyTrim?: { maxInputTokens: number; keepRecent: number };
   /** Re-anchor provider cache breakpoints on the final body. Anthropic-shaped adapters honour it. */
@@ -356,6 +358,8 @@ export class GatewayService {
    * far more requests than it keeps records.
    */
   private readonly toolContractNotes = new Map<string, ToolContractTelemetry>();
+  /** Returned calls the gateway refused to forward, keyed by the same request scope as the tool contract. */
+  private readonly blockedCallNotes = new Map<string, number>();
   /** Absent means the gateway records nothing; see `GatewayServiceOptions.usageStore`. */
   private readonly usageStore?: UsageStore;
   private readonly requestDetails?: RequestDetailStore;
@@ -377,6 +381,7 @@ export class GatewayService {
   private readonly tokenSaverStore?: MemoryCcrStore;
   private readonly maxOutputTokensCap?: number;
   private readonly thinkingBudgetCap?: number;
+  private readonly toolSchemaBytes?: number;
   private readonly historyTrim?: { maxInputTokens: number; keepRecent: number };
   private readonly cacheAnchor?: boolean;
   private readonly caveman?: { level: CavemanLevel };
@@ -618,6 +623,7 @@ export class GatewayService {
         : undefined;
     this.maxOutputTokensCap = options.maxOutputTokensCap && options.maxOutputTokensCap > 0 ? options.maxOutputTokensCap : undefined;
     this.thinkingBudgetCap = options.thinkingBudgetCap && options.thinkingBudgetCap > 0 ? options.thinkingBudgetCap : undefined;
+    this.toolSchemaBytes = options.toolSchemaBytes ?? options.config?.toolSchemaBytes;
     this.cacheAnchor = options.cacheAnchor === true;
     this.caveman = options.caveman;
     this.ponytail = options.ponytail;
@@ -3885,11 +3891,24 @@ export class GatewayService {
     return scopeId ? this.toolContractNotes.get(scopeId) : undefined;
   }
 
+  /** Calls the model made that the gateway refused to forward, so a route can flag a truncated tool turn. */
+  blockedCallsFor(scopeId: string | undefined): number {
+    return scopeId ? this.blockedCallNotes.get(scopeId) ?? 0 : 0;
+  }
+
+  private noteBlockedCalls(scopeId: string | undefined, count: number): void {
+    if (!scopeId || count <= 0) return;
+    if (this.blockedCallNotes.size >= 512) this.blockedCallNotes.delete(this.blockedCallNotes.keys().next().value!);
+    this.blockedCallNotes.set(scopeId, (this.blockedCallNotes.get(scopeId) ?? 0) + count);
+  }
+
   private async applyToolContract(providerId: string, request: ChatRequest, includeLocalTools = false, connectionId?: string, scopeId?: string): Promise<{ request: ChatRequest; declared: readonly string[]; renames: ReadonlyMap<string, string>; cloaked: boolean }> {
     try {
       const connection = connectionId ? (await this.connections.list()).find((entry) => entry.id === connectionId) : undefined;
       const effectiveCaps = narrowedToolCaps(request.model, connection, toolCaps(providerId));
-      const { request: normalized, notes } = normalizeToolsRequest(request, providerId, effectiveCaps);
+      const { request: normalized, notes } = normalizeToolsRequest(request, providerId, effectiveCaps, {
+        ...(this.toolSchemaBytes ? { maxSchemaBytes: this.toolSchemaBytes } : {}),
+      });
       const toolContract: ToolContractTelemetry = {
         declared: (request.tools ?? []).length,
         forwarded: 0,
@@ -3973,7 +3992,7 @@ export class GatewayService {
    * forwarded; what does not is dropped and logged, and a turn whose only call was dropped no longer claims
    * `finish_reason: tool_calls`.
    */
-  private validatedToolResponse(providerId: string, declared: readonly string[], response: ChatResponse, renames: ReadonlyMap<string, string> = new Map(), cloaked = false): ChatResponse {
+  private validatedToolResponse(providerId: string, declared: readonly string[], response: ChatResponse, renames: ReadonlyMap<string, string> = new Map(), cloaked = false, scopeId?: string): ChatResponse {
     const calls = response.message.toolCalls;
     if (!calls?.length) return response;
     const allowed = new Set(declared);
@@ -3986,6 +4005,7 @@ export class GatewayService {
         : call;
     });
     const { calls: valid, issues, repaired } = validateToolCalls(wireCalls, declared);
+    this.noteBlockedCalls(scopeId, issues.length);
     for (const issue of issues) console.warn(`[tools] ${providerId} returned a call that was not forwarded: ${issue.name} — ${issue.reason}`);
     for (const fix of repaired) console.log(`[tools] ${providerId} repaired arguments on call ${fix.index}: ${fix.repairs.join(', ')}`);
     // A call that survived is a tool turn whatever the provider called its finish reason. Gemini reports `STOP`
@@ -4032,7 +4052,7 @@ export class GatewayService {
       const response = this.validatedToolResponse(providerId, contracted.declared, await adapter.chat!(
         this.withRequestLimits({ ...contracted.request, model: await this.upstreamModelFor(providerId, connectionId, contracted.request.model), messages: prepared }),
         context,
-      ), contracted.renames, contracted.cloaked);
+      ), contracted.renames, contracted.cloaked, scope?.id);
       last = response;
 
       if (native) {
@@ -4070,7 +4090,7 @@ export class GatewayService {
       const local = await this.runLocalToolRounds(providerId, contracted, adapter, signal, scope, connectionId);
       if (local) return local;
       const response = await adapter.chat(this.withRequestLimits({ ...contracted.request, model: await this.upstreamModelFor(providerId, connectionId, contracted.request.model), messages: await this.preparedMessages(contracted.request, scope, adapter.imageContext === true) }), await this.contextForRequest(providerId, connectionId, signal, scope));
-      return this.validatedToolResponse(providerId, contracted.declared, response, contracted.renames, contracted.cloaked);
+      return this.validatedToolResponse(providerId, contracted.declared, response, contracted.renames, contracted.cloaked, scope?.id);
     } finally {
       release();
     }
@@ -4130,6 +4150,7 @@ export class GatewayService {
           contracted.renames,
         );
       } finally {
+        this.noteBlockedCalls(scope?.id, report.blocked.length);
         for (const blocked of report.blocked) {
           console.warn(`[tools] ${providerId} streamed a call to "${blocked.name}", which the client did not declare; its deltas were dropped`);
         }

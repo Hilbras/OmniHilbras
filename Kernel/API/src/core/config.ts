@@ -61,6 +61,13 @@ export type GatewayConfig = {
   thinkingBudgetCap?: number;
   /** Threshold history trimming in estimated input tokens. */
   historyTrim?: { maxInputTokens: number; keepRecent: number };
+  /**
+   * Total bytes all tool definitions may occupy on a request. Parsed from
+   * `OMNIHILBRAS_TOOL_SCHEMA_BYTES`; 256 KB by default. A larger value forwards more of a
+   * tool-heavy agent's definitions but costs input tokens on every turn — a value near 1 MB
+   * can exceed a model's context window. Sanitisation of each definition still applies.
+   */
+  toolSchemaBytes: number;
   /** Re-anchor provider cache breakpoints on the final body. */
   cacheAnchor?: boolean;
   /** Output-shaping prompt levels. */
@@ -158,6 +165,7 @@ export function loadGatewayConfig(env: Readonly<Record<string, string | undefine
     corsOrigins: parseCorsOrigins(env.OMNIHILBRAS_CORS_ORIGINS),
     dataDir: env.OMNIHILBRAS_DATA_DIR?.trim() || defaultConnectionDirectory(env),
     usageBackend: env.OMNIHILBRAS_USAGE_STORE?.trim().toLowerCase() === 'sqlite' ? 'sqlite' : 'json',
+    toolSchemaBytes: parseOptionalLimit(env.OMNIHILBRAS_TOOL_SCHEMA_BYTES, 32 * 1024, 8 * 1024 * 1024) ?? 256 * 1024,
     ...(parseOptionalLimit(env.OMNIHILBRAS_MAX_OUTPUT_TOKENS, 1, 1_000_000) !== undefined ? { maxOutputTokensCap: parseOptionalLimit(env.OMNIHILBRAS_MAX_OUTPUT_TOKENS, 1, 1_000_000) } : {}),
     ...(parseOptionalLimit(env.OMNIHILBRAS_THINKING_BUDGET, 1024, 1_000_000) !== undefined ? { thinkingBudgetCap: parseOptionalLimit(env.OMNIHILBRAS_THINKING_BUDGET, 1024, 1_000_000) } : {}),
     ...(parseOptionalLimit(env.OMNIHILBRAS_HISTORY_TRIM_TOKENS, 1_000, 10_000_000) !== undefined
@@ -277,6 +285,7 @@ export function createGatewayService(config: GatewayConfig = loadGatewayConfig()
     tokenSaver: config.tokenSaver,
     ...(config.maxOutputTokensCap ? { maxOutputTokensCap: config.maxOutputTokensCap } : {}),
     ...(config.thinkingBudgetCap ? { thinkingBudgetCap: config.thinkingBudgetCap } : {}),
+    toolSchemaBytes: config.toolSchemaBytes,
     ...(config.historyTrim ? { historyTrim: config.historyTrim } : {}),
     ...(config.cacheAnchor ? { cacheAnchor: config.cacheAnchor } : {}),
     ...(config.caveman ? { caveman: config.caveman } : {}),

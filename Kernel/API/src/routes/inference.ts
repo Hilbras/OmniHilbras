@@ -350,7 +350,11 @@ export async function handleResponses(request: IncomingMessage, response: Server
     throw attachRequestId(error, scope);
   }
   const serving = attempts.find((attempt) => attempt.ok);
+  const blockedCalls = service.blockedCallsFor(scope.id);
   recordUsage(service, {
+    // A call the gateway refused to forward ends the client's tool loop as an ordinary `stop`. Say so in the
+    // record instead of counting a truncated turn as a completed one.
+    ...(blockedCalls > 0 ? { incomplete: true } : {}),
     model: completion.model,
     providerId: completion.providerId,
     connectionId: serving?.connectionId,
@@ -376,6 +380,7 @@ export async function handleResponses(request: IncomingMessage, response: Server
       requestId: scope.id,
       ...(attempts.length > 1 ? { attempts: attempts.map(toPublicAttempt) } : {}),
       ...toolSupportNote(chatRequest.tools, completion.providerId),
+      ...(blockedCalls > 0 ? { tools: 'call-dropped' } : {}),
     },
   }, origin);
 }
@@ -505,6 +510,7 @@ async function streamMessages(input: {
       }
       await send('content_block_stop', { type: 'content_block_stop', index: call.blockIndex });
     }
+    const blockedCalls = service.blockedCallsFor(scope.id);
     await send('message_delta', {
       type: 'message_delta',
       delta: {
@@ -512,13 +518,15 @@ async function streamMessages(input: {
         stop_sequence: null,
       },
       usage: anthropicUsage(usage),
+      // A rejected call ends the client's loop at `end_turn`. Name the truncation in the terminal event.
+      ...(blockedCalls > 0 ? { gateway: { tools: 'call-dropped' } } : {}),
     });
     await send('message_stop', { type: 'message_stop' });
 
     recordUsage(service, {
       model, providerId: servingOf()?.providerId, connectionId: servingOf()?.connectionId,
       outcome: 'success', attempts: outcome.attempts.length, latencyMs: Date.now() - streamStartedAt,
-      incomplete: providerFinish === undefined,
+      incomplete: providerFinish === undefined || blockedCalls > 0,
       ...(usage ? { usage } : {}), requestId: scope.id,
     });
     response.end();
@@ -589,7 +597,11 @@ export async function handleMessages(request: IncomingMessage, response: ServerR
     throw attachRequestId(error, scope);
   }
   const serving = attempts.find((attempt) => attempt.ok);
+  const blockedCalls = service.blockedCallsFor(scope.id);
   recordUsage(service, {
+    // A call the gateway refused to forward ends the client's tool loop as an ordinary `stop`. Say so in the
+    // record instead of counting a truncated turn as a completed one.
+    ...(blockedCalls > 0 ? { incomplete: true } : {}),
     model: completion.model,
     providerId: completion.providerId,
     connectionId: serving?.connectionId,
@@ -614,6 +626,7 @@ export async function handleMessages(request: IncomingMessage, response: ServerR
       requestId: scope.id,
       ...(attempts.length > 1 ? { attempts: attempts.map(toPublicAttempt) } : {}),
       ...toolSupportNote(chatRequest.tools, completion.providerId),
+      ...(blockedCalls > 0 ? { tools: 'call-dropped' } : {}),
     },
   }, origin);
 }
@@ -775,7 +788,8 @@ async function streamResponses(input: {
       ...(completedCalls.length ? { toolCalls: completedCalls } : {}),
       ...(usage ? { usage: { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, totalTokens: usage.totalTokens } } : {}),
     });
-    await write('response.completed', { type: 'response.completed', response: { ...completed, status: providerFinish === 'length' || providerFinish === undefined ? 'incomplete' : completed.status, gateway: { requestId: scope.id, ...toolSupportNote(chatRequest.tools, servingOf()?.providerId) } } });
+    const blockedCalls = service.blockedCallsFor(scope.id);
+    await write('response.completed', { type: 'response.completed', response: { ...completed, status: providerFinish === 'length' || providerFinish === undefined || blockedCalls > 0 ? 'incomplete' : completed.status, gateway: { requestId: scope.id, ...toolSupportNote(chatRequest.tools, servingOf()?.providerId), ...(blockedCalls > 0 ? { tools: 'call-dropped' } : {}) } } });
     recordUsage(service, {
       model,
       providerId: servingOf()?.providerId,
@@ -783,7 +797,7 @@ async function streamResponses(input: {
       outcome: 'success',
       attempts: outcome.attempts.length,
       latencyMs: Date.now() - streamStartedAt,
-      incomplete: providerFinish === undefined,
+      incomplete: providerFinish === undefined || blockedCalls > 0,
       ...(usage ? { usage } : {}),
       requestId: scope.id,
     });
@@ -1063,7 +1077,11 @@ async function handleChatRequest(input: {
      */
     let toolsNoteSent = false;
     let providerFinish: string | undefined;
+    let lastChunkId: string | undefined;
+    let lastChunkModel: string | undefined;
     for await (const chunk of outcome.chunks) {
+      lastChunkId = chunk.id;
+      lastChunkModel = chunk.model;
       if (!toolsNoteSent) {
         toolsNoteSent = true;
         // A failed attempt still carries a providerId, so `find` with a truthy predicate named the provider that
@@ -1107,6 +1125,12 @@ async function handleChatRequest(input: {
       if (!response.destroyed && !response.writableEnded) response.end();
       return;
     }
+    const blockedCalls = service.blockedCallsFor(scope.id);
+    if (blockedCalls > 0) {
+      // The terminal chunk was already sent with `finish_reason: stop`. An empty-delta note in the same shape
+      // as the tools-unsupported note is the one way a chat client still sees that its tool loop was cut short.
+      await writeStreamData(response, `data: ${JSON.stringify({ id: lastChunkId, object: 'chat.completion.chunk', created: Math.floor(Date.now() / 1000), model: lastChunkModel, choices: [{ index: 0, delta: {}, finish_reason: null }], gateway: { tools: 'call-dropped' } })}\n\n`, signal);
+    }
     await writeStreamData(response, 'data: [DONE]\n\n', signal);
     recordUsage(service, {
       model: chatRequest.model,
@@ -1115,7 +1139,7 @@ async function handleChatRequest(input: {
       outcome: 'success',
       attempts: outcome.attempts.length,
       latencyMs: Date.now() - streamStartedAt,
-      incomplete: providerFinish === undefined,
+      incomplete: providerFinish === undefined || blockedCalls > 0,
       ...(streamUsage ? { usage: streamUsage } : {}),
       messages: chatRequest.messages,
       responseText: text,

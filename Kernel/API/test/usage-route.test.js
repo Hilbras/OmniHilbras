@@ -196,6 +196,29 @@ test('a stream with no terminal finish is recorded as an incomplete success', as
   assert.equal(records[0].incomplete, true, 'a turn that never finished must be visible as incomplete');
 });
 
+test('a blocked tool call ends as a normal stop but the turn is recorded incomplete and named to the client', async (t) => {
+  const p = provider();
+  p.capabilities.streaming = true;
+  p.streamChat = async function* () {
+    yield { id: 'c0', providerId: 'p', model: 'm', delta: { toolCalls: [{ id: 'call_1', type: 'function', function: { name: 'rm_rf', arguments: '{}' } }] } };
+    yield { id: 'c1', providerId: 'p', model: 'm', delta: {}, finishReason: 'tool_calls' };
+  };
+  const gw = await gateway({ provider: p });
+  t.after(gw.close);
+  const response = await gw.post({
+    stream: true,
+    tools: [{ type: 'function', function: { name: 'read', description: 'read a file', parameters: { type: 'object', properties: {} } } }],
+  }, { accept: 'text/event-stream' });
+  const body = await response.text();
+  assert.match(body, /"tools":"call-dropped"/, 'the client must be told its tool loop was cut short');
+  await new Promise((resolve) => setTimeout(resolve, 80));
+
+  const records = await gw.usage.list();
+  assert.equal(records.length, 1);
+  assert.equal(records[0].outcome, 'success', 'the provider turn itself did not fail');
+  assert.equal(records[0].incomplete, true, 'a truncated tool turn must not look completed');
+});
+
 test('a stream that dies mid-answer records a failure, not a success', async (t) => {
   const gw = await gateway({ provider: provider({ chunks: 2, failWith: Object.assign(new Error('upstream died'), { code: 'PROVIDER_REQUEST_FAILED' }) }) });
   t.after(gw.close);
