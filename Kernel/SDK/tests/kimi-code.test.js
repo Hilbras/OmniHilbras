@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { KimiCodeAdapter, KIMI_CODE, kimiCodeCredentialExpired, kimiCodeProviderId } from '../kimi-code/dist/adapter/index.js';
 import { ProviderError } from '../kimi-code/dist/lib/errors.js';
+import { OWN_PROVIDER_ADAPTERS } from '../../API/dist/src/core/own-provider-adapters.js';
+import { scriptedTransport } from './harness/scripted-transport.js';
 
 /**
  * The Kimi Code adapter.
@@ -490,6 +492,30 @@ test('membership levels are named as Kimi names them, and an unknown level is no
   }
   const unknown = createTransport({ request: () => ({ status: 200, headers: new Headers(), data: { user: { membership: { level: 'LEVEL_PLASMA' } } } }) });
   assert.equal((await new KimiCodeAdapter({ transport: unknown }).quota({ credential: OAUTH })).plan, 'plasma');
+});
+
+test('a saved kimi key reaches the Moonshot platform host, never the coding subscription host', async () => {
+  // The two ids are two products: `kimi` is the metered platform API whose card names
+  // https://api.moonshot.ai/v1, and `kimi-code` is the device-flow subscription on api.kimi.com.
+  // Pointing the platform adapter at the coding host would send a platform key to another product,
+  // and reading the two as one account would merge separate bills. Scripted transport, no live key.
+  const transport = scriptedTransport({ wireFormat: 'openai', catalog: ['kimi-k2.6'] });
+  const adapter = OWN_PROVIDER_ADAPTERS.kimi.create({ transport });
+  assert.equal(adapter.id, 'kimi');
+  assert.equal(OWN_PROVIDER_ADAPTERS.kimi.validation, 'none');
+
+  const response = await adapter.chat(
+    { model: 'kimi-k2.6', messages: [{ role: 'user', content: 'ping' }] },
+    { credential: { type: 'api-key', value: 'moonshot-platform-key' } },
+  );
+  assert.ok(response.message, 'the platform adapter did not answer a scripted turn');
+  const chatCall = transport.seen.find((call) => /chat\/completions/.test(call.url));
+  assert.ok(chatCall, 'no chat request was sent');
+  const url = new URL(chatCall.url);
+  assert.equal(url.hostname, 'api.moonshot.ai', 'a saved kimi key was sent to a different host');
+  assert.equal(url.pathname, '/v1/chat/completions', 'the card names /v1, so the wire must use /v1');
+  assert.equal(chatCall.headers?.authorization ?? chatCall.headers?.Authorization, 'Bearer moonshot-platform-key');
+  assert.doesNotMatch(url.hostname, /kimi\.com$/, 'the coding subscription host must stay on the kimi-code id');
 });
 
 test('a usage refusal for a missing entitlement is not an expired sign-in', async () => {

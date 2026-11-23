@@ -95,6 +95,9 @@ const FORCED_WIRE = {
   openai: 'openai', openrouter: 'openai', 'openai-compatible': 'openai', apmix: 'openai', beatapi: 'openai',
   cline: 'openai', clinepass: 'openai', nous: 'openai',
   together: 'openai', fireworks: 'openai',
+  // Cycle-4 keyed routers share the OpenAI wire, so one driven wire covers all five rows. Their own
+  // scripted transport tests (one per id) assert the host and base path their adapters really use.
+  sambanova: 'openai', cerebras: 'openai', siliconflow: 'openai', nebius: 'openai', perplexity: 'openai',
   'agnes-ai': 'openai', agentrouter: 'openai', 'aion-labs': 'openai', '100milionseek': 'openai', anyrouter: 'openai', apinex: 'openai',
   coarena: 'openai', custom: 'openai', deepseek: 'openai', groq: 'openai', grok: 'openai', kimi: 'openai',
   kiraai: 'openai', mistral: 'openai', 'nara-router': 'openai', nvidia: 'openai', numes: 'openai',

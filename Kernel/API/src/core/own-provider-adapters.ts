@@ -103,6 +103,15 @@ export const OWN_PROVIDER_ADAPTERS: Readonly<Record<string, OwnAdapterEntry>> = 
   'coarena': { validation: 'none', create: (options) => new CoarenaAdapter(withTransport(options)) },
   'together': openAiRouter('together', 'Together AI', 'https://api.together.xyz/v1'),
   'fireworks': openAiRouter('fireworks', 'Fireworks AI', 'https://api.fireworks.ai/inference/v1'),
+  // Cycle-4's small, honest slice of the 115-id provider gap: five API-key OpenAI-compatible routers
+  // that 9router already serves with a plain key and no browser impersonation. Their hosts come from
+  // the corresponding registry entries; no client identity, OAuth, live validation or measured card
+  // field is copied with them. `openAiRouter` declares `validation: 'none'` beside each factory.
+  'sambanova': openAiRouter('sambanova', 'SambaNova', 'https://api.sambanova.ai/v1'),
+  'cerebras': openAiRouter('cerebras', 'Cerebras', 'https://api.cerebras.ai/v1'),
+  'siliconflow': openAiRouter('siliconflow', 'SiliconFlow', 'https://api.siliconflow.com/v1'),
+  'nebius': openAiRouter('nebius', 'Nebius AI', 'https://api.studio.nebius.ai/v1'),
+  'perplexity': openAiRouter('perplexity', 'Perplexity', 'https://api.perplexity.ai'),
   // xAI has its own SDK package because its video-job surface is not the shared chat wire. `none` is
   // declared, not inherited: no authenticated credential check was measured, and xAI's catalog is
   // public enough that a bogus key would look valid. Its own id keeps its own vault entry.

@@ -851,8 +851,19 @@ export class GatewayService {
     // Keyed routers served by the shared OpenAI-compatible adapter, with no dedicated SDK package.
     resolver = resolver.onDemand('together', own('together').factory, { validation: own('together').validation });
     resolver = resolver.onDemand('fireworks', own('fireworks').factory, { validation: own('fireworks').validation });
+    // Cycle-4's five API-key routers: each id resolves to its own base URL and its own `none`
+    // validation decision from OWN_PROVIDER_ADAPTERS. No key is checked against a public catalog and
+    // no OAuth or client-identity lane is claimed for any of them. Written as five literal rows because
+    // the provider-card guards read registrations from source; a loop would hide every id from them.
+    resolver = resolver.onDemand('sambanova', own('sambanova').factory, { validation: own('sambanova').validation });
+    resolver = resolver.onDemand('cerebras', own('cerebras').factory, { validation: own('cerebras').validation });
+    resolver = resolver.onDemand('siliconflow', own('siliconflow').factory, { validation: own('siliconflow').validation });
+    resolver = resolver.onDemand('nebius', own('nebius').factory, { validation: own('nebius').validation });
+    resolver = resolver.onDemand('perplexity', own('perplexity').factory, { validation: own('perplexity').validation });
     // xAI is its own connection, not a second name for Grok's saved key. Its chat surface is the
-    // OpenAI wire; video generation is a separate route and currently refuses every request.
+    // OpenAI wire; video generation is a real adapter on the v1 video routes, not a simulated lane.
+    // ("v1 video routes" is spelled out rather than as a path ending in slash-star: a source-text guard
+    // strips block comments first, and a literal slash-star in a comment would swallow code below it.)
     resolver = resolver.onDemand('xai', own('xai').factory, { validation: own('xai').validation });
     this.providers = resolver;
     this.credentialLifecycle = new CredentialLifecycle({

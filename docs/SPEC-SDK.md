@@ -1,6 +1,6 @@
 # Spec: OmniHilbras Gateway and Provider SDK
 
-**Status:** Current — release 3.97.0
+**Status:** Current — release 3.98.0
 
 This document is the contract behind the gateway and its provider packages. It is intentionally more
 specific than the [README](../README.md): a route, an error code or a provider boundary written here is
@@ -2764,6 +2764,8 @@ The endpoint is checked before the card is written, not after:
 | 100milionseek | `https://100milionseek.top/v1` | `GET /v1/models` | `401` without a key; with a key, the one `deepseek-v4.1-flash-free` model |
 
 **Together AI and Fireworks AI** are keyed routers with no dedicated SDK package. Their cards in `src/data/providers.ts` carry catalog placeholders only — no model count, latency, request total, last-used time or model list — and their adapters are built by the shared OpenAI-compatible factory in `OWN_PROVIDER_ADAPTERS` (`https://api.together.xyz/v1` and `https://api.fireworks.ai/inference/v1`). Each factory entry declares `validation: 'none'` beside it: a public catalog cannot prove a key, so Check must not report green for any pasted string. Both have a row in `Kernel/Tools/src/caps.ts` with forced tool calls allowed, and a scripted transport test drives a real chat turn through each id without a live key or a bill.
+
+**Cycle 4 adds five more plain keyed routers** — `sambanova` (`https://api.sambanova.ai/v1`), `cerebras` (`https://api.cerebras.ai/v1`), `siliconflow` (`https://api.siliconflow.com/v1`), `nebius` (`https://api.studio.nebius.ai/v1`) and `perplexity` (`https://api.perplexity.ai`, a root path with no `/v1`) — chosen from the 9router backlog because each is an API-key OpenAI-compatible registry entry needing no browser impersonation, client-identity header or OAuth device flow. Each has a placeholder-only catalog card, a literal `resolver.onDemand` registration in `Kernel/API/src/core/service.ts`, an `openAiRouter` factory with `validation: 'none'` beside it, a forced-tools-allowed row in `Kernel/Tools/src/caps.ts`, and a scripted transport test that sends a real chat turn to the named host with no live key and nothing billed. `perplexity` is a separate product from the `perplexity-web` cookie session: different credential, different endpoint, different id. No card claims a model count, latency, request total, last-used time or model list, and Check refuses to prove a key from a public catalog.
 
 A `401` with a JSON error body is the useful result: it shows the route exists, the service
 is live, and it wants a bearer key, which is what the generic on-demand adapter sends. A

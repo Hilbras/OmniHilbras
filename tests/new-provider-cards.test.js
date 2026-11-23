@@ -211,7 +211,9 @@ test('a new provider id is one edit away from a web-session id, and stays distin
     // Deduplicated: `deepseek-web-v2` extends both `deepseek-web` and `deepseek`, so it is a near-miss
     // against two bases and would otherwise appear twice — a fact about the prefix rule, not a second card.
     [...new Set(pairs.map(([, derived]) => derived))].sort(),
-    ['claude-code', 'clinepass', 'deepseek-web', 'deepseek-web-v2', 'gemini-web', 'grok-web', 'kimi-code', 'minimax-code-global', 'opencode-console', 'opencode-go', 'qwen-token-plan', 'qwen-web', 'tokenharbor-web'],
+    // `perplexity-web` joins this list in cycle 4: the new keyed `perplexity` card is its base id, and
+    // the derived card is a browser session with a pasted cookie, so it still satisfies the property.
+    ['claude-code', 'clinepass', 'deepseek-web', 'deepseek-web-v2', 'gemini-web', 'grok-web', 'kimi-code', 'minimax-code-global', 'opencode-console', 'opencode-go', 'perplexity-web', 'qwen-token-plan', 'qwen-web', 'tokenharbor-web'],
     'the near-miss ids are exactly the ones expected, so this stays a measurement and not a tautology',
   );
 });

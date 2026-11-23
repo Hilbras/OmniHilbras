@@ -61,6 +61,13 @@ export const PROVIDER_REGISTRY: Readonly<Record<string, ProviderRegistryRow>> = 
   "nvidia": { id: "nvidia", name: "NVIDIA", baseUrl: "https://integrate.api.nvidia.com/v1", modelsUrl: "https://integrate.api.nvidia.com/v1/models", auth: "api-key", formats: ["openai"] },
   "together": { id: "together", name: "Together AI", baseUrl: "https://api.together.xyz/v1", modelsUrl: "https://api.together.xyz/v1/models", auth: "api-key", formats: ["openai"] },
   "fireworks": { id: "fireworks", name: "Fireworks AI", baseUrl: "https://api.fireworks.ai/inference/v1", modelsUrl: "https://api.fireworks.ai/inference/v1/models", auth: "api-key", formats: ["openai"] },
+  // Cycle-4 keyed routers: one row per catalog card, each with its own base URL. They inherit the
+  // OpenAI-compatible wire; no client-identity header, OAuth mode or browser session is added here.
+  "sambanova": { id: "sambanova", name: "SambaNova", baseUrl: "https://api.sambanova.ai/v1", modelsUrl: "https://api.sambanova.ai/v1/models", auth: "api-key", formats: ["openai"] },
+  "cerebras": { id: "cerebras", name: "Cerebras", baseUrl: "https://api.cerebras.ai/v1", modelsUrl: "https://api.cerebras.ai/v1/models", auth: "api-key", formats: ["openai"] },
+  "siliconflow": { id: "siliconflow", name: "SiliconFlow", baseUrl: "https://api.siliconflow.com/v1", modelsUrl: "https://api.siliconflow.com/v1/models", auth: "api-key", formats: ["openai"] },
+  "nebius": { id: "nebius", name: "Nebius AI", baseUrl: "https://api.studio.nebius.ai/v1", modelsUrl: "https://api.studio.nebius.ai/v1/models", auth: "api-key", formats: ["openai"] },
+  "perplexity": { id: "perplexity", name: "Perplexity API", baseUrl: "https://api.perplexity.ai", modelsUrl: "https://api.perplexity.ai/models", auth: "api-key", formats: ["openai"] },
   "coarena": { id: "coarena", name: "Coarena", baseUrl: "https://coarena.ai/api/v1", modelsUrl: "https://coarena.ai/api/v1/models", auth: "api-key", formats: ["openai"] },
   "openai": { id: "openai", name: "OpenAI", baseUrl: "https://api.openai.com/v1", modelsUrl: "https://api.openai.com/v1/models", auth: "api-key", formats: ["openai"] },
   "anthropic": { id: "anthropic", name: "Anthropic", baseUrl: "https://api.anthropic.com/v1", modelsUrl: "https://api.anthropic.com/v1/models", auth: "api-key", formats: ["claude"] },

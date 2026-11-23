@@ -1005,7 +1005,10 @@ export const providerCatalog: ProviderRecord[] = [
   {
     id: 'kimi',
     name: 'Kimi',
-    description: 'Moonshot AI long-context and agentic models, reached through their OpenAI-compatible endpoint.',
+    // One product per id: this is the metered Moonshot platform API, not the coding subscription.
+    // 9router points its `kimi` id at api.kimi.com/coding; doing that here would merge two accounts the
+    // catalog and gateway deliberately keep apart. `kimi-code` is the separate OAuth card.
+    description: 'Moonshot AI long-context and agentic models on the metered platform API, reached through their OpenAI-compatible endpoint. The Kimi Code coding subscription is the separate `kimi-code` card, signed in with its own account — a key saved here is not a coding subscription.',
     category: 'Model provider',
     group: 'api-key',
     // Placeholders, because this catalog is the state a card shows when the gateway has no connection
@@ -1558,10 +1561,112 @@ export const providerCatalog: ProviderRecord[] = [
     apiKeysUrl: 'https://fireworks.ai/account/api-keys',
     modelList: [],
   },
+  // Cycle-4's five API-key routers from the 9router parity backlog. Each is a plain keyed
+  // OpenAI-compatible host with a card and a shared adapter, not a dedicated SDK package. Every
+  // metric below is a placeholder: this catalog is what a card shows with no connection, so nothing
+  // here may claim a count, latency, request total or model list. No OAuth, browser impersonation or
+  // key-validation claim is copied from the reference registry.
+  {
+    id: 'sambanova',
+    name: 'SambaNova',
+    description: 'SambaNova inference over its OpenAI-compatible endpoint. The key is kept in the gateway vault and sent only to sambanova.ai.',
+    category: 'Model provider',
+    group: 'api-key',
+    status: 'available',
+    auth: 'API key',
+    models: '—',
+    latency: '—',
+    requests: '0',
+    lastUsed: 'never',
+    health: 0,
+    color: '#f97316',
+    initial: 'S',
+    endpoint: 'https://api.sambanova.ai/v1',
+    apiKeysUrl: 'https://cloud.sambanova.ai/apis',
+    modelList: [],
+  },
+  {
+    id: 'cerebras',
+    name: 'Cerebras',
+    description: 'Cerebras inference over its OpenAI-compatible endpoint. The key is kept in the gateway vault and sent only to cerebras.ai.',
+    category: 'Model provider',
+    group: 'api-key',
+    status: 'available',
+    auth: 'API key',
+    models: '—',
+    latency: '—',
+    requests: '0',
+    lastUsed: 'never',
+    health: 0,
+    color: '#ff4f00',
+    initial: 'C',
+    endpoint: 'https://api.cerebras.ai/v1',
+    apiKeysUrl: 'https://cloud.cerebras.ai/platform',
+    modelList: [],
+  },
+  {
+    id: 'siliconflow',
+    name: 'SiliconFlow',
+    description: 'SiliconFlow model serving over its OpenAI-compatible endpoint. The key is kept in the gateway vault and sent only to siliconflow.com.',
+    category: 'Model provider',
+    group: 'api-key',
+    status: 'available',
+    auth: 'API key',
+    models: '—',
+    latency: '—',
+    requests: '0',
+    lastUsed: 'never',
+    health: 0,
+    color: '#5b6ef5',
+    initial: 'F',
+    endpoint: 'https://api.siliconflow.com/v1',
+    apiKeysUrl: 'https://cloud.siliconflow.com/account/ak',
+    modelList: [],
+  },
+  {
+    id: 'nebius',
+    name: 'Nebius AI',
+    description: 'Nebius AI model serving over its OpenAI-compatible endpoint. The key is kept in the gateway vault and sent only to nebius.ai.',
+    category: 'Model provider',
+    group: 'api-key',
+    status: 'available',
+    auth: 'API key',
+    models: '—',
+    latency: '—',
+    requests: '0',
+    lastUsed: 'never',
+    health: 0,
+    color: '#6c5ce7',
+    initial: 'N',
+    endpoint: 'https://api.studio.nebius.ai/v1',
+    apiKeysUrl: 'https://studio.nebius.com/settings/api-keys',
+    modelList: [],
+  },
+  {
+    id: 'perplexity',
+    name: 'Perplexity API',
+    // A separate product from `perplexity-web`: this one is a key on api.perplexity.ai, the other a
+    // pasted NextAuth session on perplexity.ai. Different credential, different endpoint, own id.
+    description: 'Perplexity’s keyed inference API over its OpenAI-compatible endpoint. The key is kept in the gateway vault and sent only to api.perplexity.ai; the separate `perplexity-web` card drives a browser session instead.',
+    category: 'Model provider',
+    group: 'api-key',
+    status: 'available',
+    auth: 'API key',
+    models: '—',
+    latency: '—',
+    requests: '0',
+    lastUsed: 'never',
+    health: 0,
+    color: '#20808d',
+    initial: 'P',
+    endpoint: 'https://api.perplexity.ai',
+    apiKeysUrl: 'https://www.perplexity.ai/settings/api',
+    modelList: [],
+  },
   {
     id: 'xai',
     name: 'xAI',
-    description: 'xAI\'s OpenAI-compatible API, served with its own saved account. A key is stored in the gateway vault and sent to xAI, never to the browser.',
+    description: 'xAI API-key account on api.x.ai: OpenAI-compatible chat and streaming, plus async video jobs created and polled through the gateway. The key stays in the gateway vault and is sent to xAI, never to the browser.',
     category: 'Model provider',
     group: 'api-key',
     // Catalog placeholders: nothing here is a measurement until a connection and a health poll report one.
@@ -1578,6 +1683,14 @@ export const providerCatalog: ProviderRecord[] = [
     endpoint: 'https://api.x.ai/v1',
     apiKeysUrl: 'https://console.x.ai/',
     modelList: [],
+    // The wire limits are stated here rather than implied by an API-key card. What this build serves is
+    // chat, streaming and video jobs; what 9router also serves for this id — its OAuth device flow, the
+    // Responses lane, the images config and search-via-chat — is not implemented here, and no route,
+    // simulated lane or second auth mode is advertised for it. Check declares validation 'none' beside
+    // the adapter: a public catalog cannot prove a pasted key.
+    riskNotice:
+      'Not served on this card: xAI sign-in/OAuth, the Responses API lane, image generation config and search-via-chat. This build serves API-key chat, streaming and async video jobs only; other xAI surfaces are not routed even if a vendor model name suggests them.',
+    riskSeverity: 'standard',
   },
   {
     id: 'custom',

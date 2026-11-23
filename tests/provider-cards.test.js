@@ -333,7 +333,10 @@ test('THE COUNT, asserted so it cannot drift quietly', () => {
   // no OAuth claim and no measured metrics until a connection reports them.
   // 62 added `claude` — the authorization-code + PKCE sibling of `claude-code`, with its own card,
   // adapter, caps row, sign-in routes and connection rather than borrowing the subscription's grant.
-  assert.equal(all.length, 62, `the catalog now has ${all.length} cards`);
+  // 63-67 from cycle 4: `sambanova`, `cerebras`, `siliconflow`, `nebius` and `perplexity`, five plain
+  // API-key OpenAI-compatible routers from the 9router backlog. No measured card fields, no OAuth and
+  // no client impersonation came with them; each has a caps row and a scripted transport test.
+  assert.equal(all.length, 67, `the catalog now has ${all.length} cards`);
   // Eighteen cards claim OAuth and the gateway serves eighteen start routes. `clinepass` used to be
   // the odd one out when it shared Cline's connection; it has its own route now. `claude-code` and
   // `codex` sign in through `server.ts` routes this scan reads too.
@@ -368,6 +371,46 @@ test('the Gemini Web driver checks the sign-in wall before the composer, because
     assert.ok(wall !== -1 && composer !== -1, `${name} no longer checks both the wall and the composer`);
     assert.ok(wall < composer, `${name} checks the composer before the sign-in wall, so a signed-out page can read as connected`);
   }
+});
+
+test('kimi stays the metered platform product and names kimi-code as the separate coding subscription', () => {
+  // 9router's `kimi` id points at api.kimi.com/coding with an OAuth device flow. This project keeps two
+  // products under two ids; repointing this card would merge a metered platform key with a subscription
+  // grant. The guard is on the words the user reads and on the host the saved key is sent to.
+  const cardsById = new Map(cards().map((card) => [card.id, card]));
+  const kimi = cardsById.get('kimi');
+  const code = cardsById.get('kimi-code');
+  assert.ok(kimi && code, 'both Kimi products need a card');
+  assert.match(kimi.description, /kimi-code/i, 'the kimi card must say the coding subscription is a separate product');
+  assert.match(kimi.description, /metered|platform/i, 'the kimi card must say which product its key buys');
+  assert.equal(kimi.auth, 'API key');
+  assert.equal(kimi.endpoint, 'https://api.moonshot.ai/v1', 'the platform key must not be sent to the coding host');
+  assert.equal(code.auth, 'OAuth', 'kimi-code remains the separate device-flow subscription');
+  assert.equal(code.endpoint, 'https://api.kimi.com', 'the coding subscription has its own host');
+  assert.ok(oauthCapableProviders().has('kimi-code'), 'the kimi-code sign-in route must exist');
+});
+
+test('the xAI card names the lanes this build really serves and does not claim the unserved ones', () => {
+  // The cycle-4 provider comparison found a lane mismatch: the card said only "API-key service" while
+  // this build really serves chat, streaming and async video jobs and 9router additionally advertises
+  // OAuth, Responses, image config and search-via-chat. The honest fix is a sentence on the card, not a
+  // simulated lane or a route nothing serves.
+  const card = cards().find((entry) => entry.id === 'xai');
+  assert.ok(card, 'the xai card is missing');
+  const served = `${card.description ?? ''} ${card.riskNotice ?? ''}`.toLowerCase();
+  for (const lane of ['chat', 'streaming', 'video']) {
+    assert.ok(served.includes(lane), `the xai card does not name the ${lane} lane this build really serves`);
+  }
+  const notice = card.riskNotice ?? '';
+  assert.match(notice, /not served/i, 'the unserved lanes must be stated as unserved, not left to inference');
+  for (const lane of ['sign-in/OAuth', 'Responses API lane', 'image generation', 'search-via-chat']) {
+    assert.ok(notice.includes(lane), `the xai card does not say that ${lane} is not served`);
+  }
+  assert.equal(card.auth, 'API key', 'xAI has no sign-in flow behind this card');
+  assert.ok(!card.authModes?.includes('oauth'), 'xAI must not claim an OAuth mode on the card');
+  assert.doesNotMatch(card.description, /oauth|responses|image generation|search-via-chat/i, 'the description must not advertise a lane the gateway does not route');
+  assert.ok(!oauthCapableProviders().has('xai'), 'no /v1/oauth/xai/start exists, so the card must not imply one');
+  assert.equal(card.endpoint, 'https://api.x.ai/v1', 'the card must name the host the adapter really uses');
 });
 
 test('every catalog card has a row in the generated provider defect register', () => {

@@ -179,7 +179,8 @@ test('THE COUNT, asserted so it cannot drift quietly', () => {
   // Cards 56 -> 57 in 3.43.0 (`numes`): keyed, `free-tier`, so the dialog gains one: 33 -> 34.
   // 59-60 are the `together` and `fireworks` keyed routers; both are offered by the keyed dialog.
   // 61 is `xai`, another keyed API card, so it joins the same dialog options.
-  assert.equal(providerCatalog.length, 62, `the catalog now has ${providerCatalog.length} cards`);
-  assert.equal(providerOptions.length, 38, `the dialog now offers ${providerOptions.length} options`);
+  // 63-67 are cycle 4's five API-key routers; all five are in `api-key`, so the dialog gains five too.
+  assert.equal(providerCatalog.length, 67, `the catalog now has ${providerCatalog.length} cards`);
+  assert.equal(providerOptions.length, 43, `the dialog now offers ${providerOptions.length} options`);
   console.log(`    cards: ${providerCatalog.length}   dialog options: ${providerOptions.length}   ids tested: ${knownIds().length + UNKNOWN_IDS.length}`);
 });

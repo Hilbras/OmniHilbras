@@ -1,12 +1,71 @@
 {
-  "cycle": 1,
-  "step": 1,
+  "cycle": 4,
+  "step": 2,
   "status": "running",
   "stopped": false,
   "last_reports": {
-    "full_comparison": null,
-    "provider_comparison": null,
-    "improvement_plan": null
+    "full_comparison": "docs/reports/parity-cycle-4-system.md",
+    "provider_comparison": "docs/reports/parity-cycle-3-providers.md",
+    "improvement_plan": "docs/reports/parity-cycle-4-system.md"
   },
-  "history": []
+  "history": [
+    {
+      "cycle": 1,
+      "step": 6,
+      "event": "implementation committed at bcd6222d and tagged v3.96.0; four scorecard rows closed. Scorecard and state were not advanced by that commit.",
+      "reports": [
+        "docs/reports/parity-cycle-1-system.md",
+        "docs/reports/parity-cycle-1-providers.md"
+      ]
+    },
+    {
+      "cycle": 2,
+      "step": 1,
+      "event": "whole-system comparison re-measured both trees and scored all twelve criteria; the scorecard was filled from its section 1. No existing report was overwritten.",
+      "reports": [
+        "docs/reports/parity-cycle-2-system.md"
+      ]
+    },
+    {
+      "cycle": 2,
+      "step": 2,
+      "event": "implementation of the ranked plan in progress. Cycle and status are deliberately not advanced: step 3's gates have not been run in this working tree, and v3.96.0 is still absent from npm.",
+      "reports": [
+        "docs/reports/parity-cycle-2-system.md"
+      ]
+    },
+    {
+      "cycle": 2,
+      "step": 6,
+      "event": "the ranked cycle-2 plan was implemented and shipped in the commit recorded as a71f61d8; its release-trail item was left blocked, so the loop advanced on evidence but not on a green release gate.",
+      "reports": [
+        "docs/reports/parity-cycle-2-system.md"
+      ]
+    },
+    {
+      "cycle": 3,
+      "step": 4,
+      "event": "provider-by-provider comparison of both trees recorded 33 shared ids, 29 OH-only ids and 115 9router-only ids, and ranked the xai, kimi and provider-gap items that cycle 4 implements.",
+      "reports": [
+        "docs/reports/parity-cycle-3-providers.md"
+      ]
+    },
+    {
+      "cycle": 4,
+      "step": 1,
+      "event": "whole-system comparison at a71f61d8 replaced all twelve scorecard scores with the cycle-4 section 1 table; row 12 dropped to level 1 because the tag disagrees with its own commit and two versions are absent from npm. This bookkeeping edit does not claim pnpm verify ran.",
+      "reports": [
+        "docs/reports/parity-cycle-4-system.md",
+        "docs/reports/parity-cycle-3-providers.md"
+      ]
+    },
+    {
+      "cycle": 4,
+      "step": 3,
+      "event": "release trail repaired: commit 6a4484d4 carries the missing 3.97.0 bump, tag v3.97.0 was recreated there and force-pushed to origin, the existing GitHub release still names that tag, and npm view resolves 3.97.0 after polling. The working tree was then bumped to 3.98.0 with version:fix so the next release can be created without colliding. node --test tests/release-trail.test.js is 5/5 and pnpm verify exits 0. v3.96.0's npm gap remains open and unexempted; pnpm release:audit still exits 1 on that single gap.",
+      "reports": [
+        "docs/reports/parity-cycle-4-system.md"
+      ]
+    }
+  ]
 }

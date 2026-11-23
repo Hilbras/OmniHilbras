@@ -3,12 +3,12 @@
 **Generated file — do not edit by hand.** Regenerate with `node scripts/build-provider-defects.mjs`;
 `node scripts/build-provider-defects.mjs --check` fails when the committed file is stale.
 Source for the external half: `open-sse/providers/registry/*.js` in `/mnt/sda3/work/projects.old/9router`.
-Source for the OmniHilbras half: `src/data/providers.ts` (62 cards).
+Source for the OmniHilbras half: `src/data/providers.ts` (67 cards).
 
 | | Count |
 | --- | --- |
 | Provider ids with a row | 177 |
-| OmniHilbras cards | 62 |
+| OmniHilbras cards | 67 |
 | 9router registry entries | 148 |
 | Ids with a recorded defect | 9 |
 
@@ -27,7 +27,7 @@ An id with no recorded defect says so rather than acquiring a fabricated failure
 | `alicode-intl` | — | 9router/open-sse/providers/registry/alicode-intl.js | No defect recorded. | — | no recorded defect | — |
 | `alims-intl` | — | 9router/open-sse/providers/registry/alims-intl.js | No defect recorded. | — | no recorded defect | — |
 | `alitp-intl` | — | 9router/open-sse/providers/registry/alitp-intl.js | No defect recorded. | — | no recorded defect | — |
-| `anthropic` | src/data/providers.ts:1474 | 9router/open-sse/providers/registry/anthropic.js | No defect recorded. | — | no recorded defect | — |
+| `anthropic` | src/data/providers.ts:1477 | 9router/open-sse/providers/registry/anthropic.js | No defect recorded. | — | no recorded defect | — |
 | `antigravity` | — | 9router/open-sse/providers/registry/antigravity.js | No defect recorded. | — | no recorded defect | — |
 | `anyrouter` | src/data/providers.ts:548 | — | No defect recorded. | — | no recorded defect | — |
 | `api-airforce` | — | 9router/open-sse/providers/registry/api-airforce.js | No defect recorded. | — | no recorded defect | — |
@@ -49,27 +49,27 @@ An id with no recorded defect says so rather than acquiring a fabricated failure
 | `brave-search` | — | 9router/open-sse/providers/registry/brave-search.js | No defect recorded. | — | no recorded defect | — |
 | `byteplus` | — | 9router/open-sse/providers/registry/byteplus.js | No defect recorded. | — | no recorded defect | — |
 | `cartesia` | — | 9router/open-sse/providers/registry/cartesia.js | No defect recorded. | — | no recorded defect | — |
-| `cerebras` | — | 9router/open-sse/providers/registry/cerebras.js | No defect recorded. | — | no recorded defect | — |
+| `cerebras` | src/data/providers.ts:1589 | 9router/open-sse/providers/registry/cerebras.js | No defect recorded. | — | no recorded defect | — |
 | `chatgpt-web` | src/data/providers.ts:103 | 9router/open-sse/providers/registry/chatgpt-web.js | No defect recorded. | — | no recorded defect | — |
 | `chutes` | — | 9router/open-sse/providers/registry/chutes.js | No defect recorded. | — | no recorded defect | — |
-| `claude` | src/data/providers.ts:1085 | 9router/open-sse/providers/registry/claude.js | The reference ships a plain authorization-code + PKCE sign-in for claude; OmniHilbras had no flow for that id. | 9router/src/lib/oauth/providers/claude.js:2 | fixed — separate card, adapter and PKCE S256 flow on its own connection | Kernel/API/test/oauth-claude.test.js |
-| `claude-code` | src/data/providers.ts:1052 | — | No defect recorded. | — | no recorded defect | — |
+| `claude` | src/data/providers.ts:1088 | 9router/open-sse/providers/registry/claude.js | The reference ships a plain authorization-code + PKCE sign-in for claude; OmniHilbras had no flow for that id. | 9router/src/lib/oauth/providers/claude.js:2 | fixed — separate card, adapter and PKCE S256 flow on its own connection | Kernel/API/test/oauth-claude.test.js |
+| `claude-code` | src/data/providers.ts:1055 | — | No defect recorded. | — | no recorded defect | — |
 | `cline` | src/data/providers.ts:286 | 9router/open-sse/providers/registry/cline.js | No defect recorded. | — | no recorded defect | — |
 | `clinepass` | src/data/providers.ts:307 | 9router/open-sse/providers/registry/clinepass.js | No defect recorded. | — | no recorded defect | — |
 | `cloudflare-ai` | — | 9router/open-sse/providers/registry/cloudflare-ai.js | No defect recorded. | — | no recorded defect | — |
-| `coarena` | src/data/providers.ts:1429 | — | No defect recorded. | — | no recorded defect | — |
-| `codebuddy-cn` | src/data/providers.ts:1224 | 9router/open-sse/providers/registry/codebuddy-cn.js | No defect recorded. | — | no recorded defect | — |
-| `codebuddy-intl` | src/data/providers.ts:1244 | 9router/open-sse/providers/registry/codebuddy-intl.js | No defect recorded. | — | no recorded defect | — |
-| `codex` | src/data/providers.ts:1109 | 9router/open-sse/providers/registry/codex.js | The pinned CLI identity was older than the published client, so catalog entries gated by minimal_client_version could be absent in a 200. | Kernel/SDK/codex/adapter/index.ts:19 | fixed — identity raised to the published client version | Kernel/SDK/tests/codex.test.js |
+| `coarena` | src/data/providers.ts:1432 | — | No defect recorded. | — | no recorded defect | — |
+| `codebuddy-cn` | src/data/providers.ts:1227 | 9router/open-sse/providers/registry/codebuddy-cn.js | No defect recorded. | — | no recorded defect | — |
+| `codebuddy-intl` | src/data/providers.ts:1247 | 9router/open-sse/providers/registry/codebuddy-intl.js | No defect recorded. | — | no recorded defect | — |
+| `codex` | src/data/providers.ts:1112 | 9router/open-sse/providers/registry/codex.js | The pinned CLI identity was older than the published client, so catalog entries gated by minimal_client_version could be absent in a 200. | Kernel/SDK/codex/adapter/index.ts:19 | fixed — identity raised to the published client version | Kernel/SDK/tests/codex.test.js |
 | `cohere` | — | 9router/open-sse/providers/registry/cohere.js | No defect recorded. | — | no recorded defect | — |
 | `comfyui` | — | 9router/open-sse/providers/registry/comfyui.js | No defect recorded. | — | no recorded defect | — |
 | `commandcode` | — | 9router/open-sse/providers/registry/commandcode.js | No defect recorded. | — | no recorded defect | — |
 | `coqui` | — | 9router/open-sse/providers/registry/coqui.js | No defect recorded. | — | no recorded defect | — |
 | `cursor` | — | 9router/open-sse/providers/registry/cursor.js | The reference ships a registry/OAuth flow for this id; OmniHilbras has no card, adapter or flow. | 9router/open-sse/providers/registry/cursor.js:1 | gap — parity backlog | tests/9router-catalog.test.js |
-| `custom` | src/data/providers.ts:1583 | — | No defect recorded. | — | no recorded defect | — |
+| `custom` | src/data/providers.ts:1696 | — | No defect recorded. | — | no recorded defect | — |
 | `dahl` | — | 9router/open-sse/providers/registry/dahl.js | No defect recorded. | — | no recorded defect | — |
 | `deepgram` | — | 9router/open-sse/providers/registry/deepgram.js | No defect recorded. | — | no recorded defect | — |
-| `deepseek` | src/data/providers.ts:1263 | 9router/open-sse/providers/registry/deepseek.js | The reference strips tool definitions on its wire; OmniHilbras refuses an unserved contract before spending a request instead. | 9router/open-sse/providers/registry/deepseek.js:31 | documented divergence | tests/tools-caps.test.js |
+| `deepseek` | src/data/providers.ts:1266 | 9router/open-sse/providers/registry/deepseek.js | The reference strips tool definitions on its wire; OmniHilbras refuses an unserved contract before spending a request instead. | 9router/open-sse/providers/registry/deepseek.js:31 | documented divergence | tests/tools-caps.test.js |
 | `deepseek-web` | src/data/providers.ts:224 | 9router/open-sse/providers/registry/deepseek-web.js | No defect recorded. | — | no recorded defect | — |
 | `deepseek-web-v2` | src/data/providers.ts:203 | — | No defect recorded. | — | no recorded defect | — |
 | `devin-cli` | — | 9router/open-sse/providers/registry/devin-cli.js | No defect recorded. | — | no recorded defect | — |
@@ -80,9 +80,9 @@ An id with no recorded defect says so rather than acquiring a fabricated failure
 | `fal-ai` | — | 9router/open-sse/providers/registry/fal-ai.js | No defect recorded. | — | no recorded defect | — |
 | `featherless` | — | 9router/open-sse/providers/registry/featherless.js | No defect recorded. | — | no recorded defect | — |
 | `firecrawl` | — | 9router/open-sse/providers/registry/firecrawl.js | No defect recorded. | — | no recorded defect | — |
-| `fireworks` | src/data/providers.ts:1543 | 9router/open-sse/providers/registry/fireworks.js | No defect recorded. | — | no recorded defect | — |
+| `fireworks` | src/data/providers.ts:1546 | 9router/open-sse/providers/registry/fireworks.js | No defect recorded. | — | no recorded defect | — |
 | `fish-audio` | — | 9router/open-sse/providers/registry/fish-audio.js | No defect recorded. | — | no recorded defect | — |
-| `gemini` | src/data/providers.ts:1498 | 9router/open-sse/providers/registry/gemini.js | No defect recorded. | — | no recorded defect | — |
+| `gemini` | src/data/providers.ts:1501 | 9router/open-sse/providers/registry/gemini.js | No defect recorded. | — | no recorded defect | — |
 | `gemini-cli` | — | 9router/open-sse/providers/registry/gemini-cli.js | The reference ships a registry/OAuth flow for this id; OmniHilbras has no card, adapter or flow. | 9router/open-sse/providers/registry/gemini-cli.js:1 | gap — parity backlog | tests/9router-catalog.test.js |
 | `gemini-web` | src/data/providers.ts:887 | 9router/open-sse/providers/registry/gemini-web.js | No defect recorded. | — | no recorded defect | — |
 | `github` | — | 9router/open-sse/providers/registry/github.js | No defect recorded. | — | no recorded defect | — |
@@ -91,10 +91,10 @@ An id with no recorded defect says so rather than acquiring a fabricated failure
 | `glm-cn` | — | 9router/open-sse/providers/registry/glm-cn.js | No defect recorded. | — | no recorded defect | — |
 | `google-pse` | — | 9router/open-sse/providers/registry/google-pse.js | No defect recorded. | — | no recorded defect | — |
 | `google-tts` | — | 9router/open-sse/providers/registry/google-tts.js | No defect recorded. | — | no recorded defect | — |
-| `grok` | src/data/providers.ts:1381 | — | No defect recorded. | — | no recorded defect | — |
+| `grok` | src/data/providers.ts:1384 | — | No defect recorded. | — | no recorded defect | — |
 | `grok-cli` | — | 9router/open-sse/providers/registry/grok-cli.js | No defect recorded. | — | no recorded defect | — |
 | `grok-web` | src/data/providers.ts:958 | 9router/open-sse/providers/registry/grok-web.js | No defect recorded. | — | no recorded defect | — |
-| `groq` | src/data/providers.ts:1357 | 9router/open-sse/providers/registry/groq.js | No defect recorded. | — | no recorded defect | — |
+| `groq` | src/data/providers.ts:1360 | 9router/open-sse/providers/registry/groq.js | No defect recorded. | — | no recorded defect | — |
 | `huggingface` | — | 9router/open-sse/providers/registry/huggingface.js | No defect recorded. | — | no recorded defect | — |
 | `hyperbolic` | — | 9router/open-sse/providers/registry/hyperbolic.js | No defect recorded. | — | no recorded defect | — |
 | `iflow` | — | 9router/open-sse/providers/registry/iflow.js | No defect recorded. | — | no recorded defect | — |
@@ -102,10 +102,10 @@ An id with no recorded defect says so rather than acquiring a fabricated failure
 | `jina-ai` | — | 9router/open-sse/providers/registry/jina-ai.js | No defect recorded. | — | no recorded defect | — |
 | `jina-reader` | — | 9router/open-sse/providers/registry/jina-reader.js | No defect recorded. | — | no recorded defect | — |
 | `kilo-gateway` | — | 9router/open-sse/providers/registry/kilo-gateway.js | No defect recorded. | — | no recorded defect | — |
-| `kilocode` | src/data/providers.ts:1162 | 9router/open-sse/providers/registry/kilocode.js | No defect recorded. | — | no recorded defect | — |
+| `kilocode` | src/data/providers.ts:1165 | 9router/open-sse/providers/registry/kilocode.js | No defect recorded. | — | no recorded defect | — |
 | `kimchi` | — | 9router/open-sse/providers/registry/kimchi.js | No defect recorded. | — | no recorded defect | — |
 | `kimi` | src/data/providers.ts:1006 | 9router/open-sse/providers/registry/kimi.js | No defect recorded. | — | no recorded defect | — |
-| `kimi-code` | src/data/providers.ts:1030 | — | No defect recorded. | — | no recorded defect | — |
+| `kimi-code` | src/data/providers.ts:1033 | — | No defect recorded. | — | no recorded defect | — |
 | `kiraai` | src/data/providers.ts:508 | — | No defect recorded. | — | no recorded defect | — |
 | `kiro` | src/data/providers.ts:260 | 9router/open-sse/providers/registry/kiro.js | No defect recorded. | — | no recorded defect | — |
 | `linkup` | — | 9router/open-sse/providers/registry/linkup.js | No defect recorded. | — | no recorded defect | — |
@@ -114,8 +114,8 @@ An id with no recorded defect says so rather than acquiring a fabricated failure
 | `mimo-free` | — | 9router/open-sse/providers/registry/mimo-free.js | No defect recorded. | — | no recorded defect | — |
 | `minimax` | — | 9router/open-sse/providers/registry/minimax.js | No defect recorded. | — | no recorded defect | — |
 | `minimax-cn` | — | 9router/open-sse/providers/registry/minimax-cn.js | No defect recorded. | — | no recorded defect | — |
-| `minimax-code` | src/data/providers.ts:1182 | 9router/open-sse/providers/registry/minimax-code.js | No defect recorded. | — | no recorded defect | — |
-| `minimax-code-global` | src/data/providers.ts:1202 | 9router/open-sse/providers/registry/minimax-code-global.js | No defect recorded. | — | no recorded defect | — |
+| `minimax-code` | src/data/providers.ts:1185 | 9router/open-sse/providers/registry/minimax-code.js | No defect recorded. | — | no recorded defect | — |
+| `minimax-code-global` | src/data/providers.ts:1205 | 9router/open-sse/providers/registry/minimax-code-global.js | No defect recorded. | — | no recorded defect | — |
 | `mistral` | src/data/providers.ts:664 | 9router/open-sse/providers/registry/mistral.js | No defect recorded. | — | no recorded defect | — |
 | `mmf` | — | 9router/open-sse/providers/registry/mmf.js | No defect recorded. | — | no recorded defect | — |
 | `morph` | — | 9router/open-sse/providers/registry/morph.js | No defect recorded. | — | no recorded defect | — |
@@ -124,33 +124,33 @@ An id with no recorded defect says so rather than acquiring a fabricated failure
 | `nace` | — | 9router/open-sse/providers/registry/nace.js | No defect recorded. | — | no recorded defect | — |
 | `nanobanana` | — | 9router/open-sse/providers/registry/nanobanana.js | No defect recorded. | — | no recorded defect | — |
 | `nara-router` | src/data/providers.ts:705 | — | No defect recorded. | — | no recorded defect | — |
-| `nebius` | — | 9router/open-sse/providers/registry/nebius.js | No defect recorded. | — | no recorded defect | — |
+| `nebius` | src/data/providers.ts:1627 | 9router/open-sse/providers/registry/nebius.js | No defect recorded. | — | no recorded defect | — |
 | `nous` | src/data/providers.ts:437 | 9router/open-sse/providers/registry/nous.js | No defect recorded. | — | no recorded defect | — |
 | `numes` | src/data/providers.ts:460 | — | No defect recorded. | — | no recorded defect | — |
-| `nvidia` | src/data/providers.ts:1405 | 9router/open-sse/providers/registry/nvidia.js | No defect recorded. | — | no recorded defect | — |
+| `nvidia` | src/data/providers.ts:1408 | 9router/open-sse/providers/registry/nvidia.js | No defect recorded. | — | no recorded defect | — |
 | `ollama` | src/data/providers.ts:608 | 9router/open-sse/providers/registry/ollama.js | No defect recorded. | — | no recorded defect | — |
 | `ollama-local` | — | 9router/open-sse/providers/registry/ollama-local.js | No defect recorded. | — | no recorded defect | — |
 | `ollama-search` | — | 9router/open-sse/providers/registry/ollama-search.js | No defect recorded. | — | no recorded defect | — |
-| `openai` | src/data/providers.ts:1450 | 9router/open-sse/providers/registry/openai.js | No defect recorded. | — | no recorded defect | — |
+| `openai` | src/data/providers.ts:1453 | 9router/open-sse/providers/registry/openai.js | No defect recorded. | — | no recorded defect | — |
 | `opencode` | src/data/providers.ts:329 | 9router/open-sse/providers/registry/opencode.js | No defect recorded. | — | no recorded defect | — |
 | `opencode-console` | src/data/providers.ts:83 | — | The free tier refuses direct requests from this host; the gateway must drive the local OpenCode service. | Kernel/API/src/core/opencode-service.ts:1 | documented and mitigated — falls back to the direct lane only when no service is running | Kernel/API/test/opencode-runtime-ui.test.js |
 | `opencode-go` | src/data/providers.ts:640 | 9router/open-sse/providers/registry/opencode-go.js | No defect recorded. | — | no recorded defect | — |
 | `opencode-zen` | — | 9router/open-sse/providers/registry/opencode-zen.js | No defect recorded. | — | no recorded defect | — |
 | `openrouter` | src/data/providers.ts:684 | 9router/open-sse/providers/registry/openrouter.js | No defect recorded. | — | no recorded defect | — |
-| `perplexity` | — | 9router/open-sse/providers/registry/perplexity.js | No defect recorded. | — | no recorded defect | — |
+| `perplexity` | src/data/providers.ts:1646 | 9router/open-sse/providers/registry/perplexity.js | No defect recorded. | — | no recorded defect | — |
 | `perplexity-agent` | — | 9router/open-sse/providers/registry/perplexity-agent.js | No defect recorded. | — | no recorded defect | — |
 | `perplexity-web` | src/data/providers.ts:982 | 9router/open-sse/providers/registry/perplexity-web.js | No defect recorded. | — | no recorded defect | — |
 | `playht` | — | 9router/open-sse/providers/registry/playht.js | No defect recorded. | — | no recorded defect | — |
 | `poolside` | — | 9router/open-sse/providers/registry/poolside.js | No defect recorded. | — | no recorded defect | — |
-| `qoder` | src/data/providers.ts:1142 | 9router/open-sse/providers/registry/qoder.js | No defect recorded. | — | no recorded defect | — |
+| `qoder` | src/data/providers.ts:1145 | 9router/open-sse/providers/registry/qoder.js | No defect recorded. | — | no recorded defect | — |
 | `qoder-cn` | — | 9router/open-sse/providers/registry/qoder-cn.js | No defect recorded. | — | no recorded defect | — |
-| `qwen` | src/data/providers.ts:1287 | — | No defect recorded. | — | no recorded defect | — |
-| `qwen-token-plan` | src/data/providers.ts:1311 | — | No defect recorded. | — | no recorded defect | — |
+| `qwen` | src/data/providers.ts:1290 | — | No defect recorded. | — | no recorded defect | — |
+| `qwen-token-plan` | src/data/providers.ts:1314 | — | No defect recorded. | — | no recorded defect | — |
 | `qwen-web` | src/data/providers.ts:135 | — | No defect recorded. | — | no recorded defect | — |
 | `recraft` | — | 9router/open-sse/providers/registry/recraft.js | No defect recorded. | — | no recorded defect | — |
 | `runcrate` | — | 9router/open-sse/providers/registry/runcrate.js | No defect recorded. | — | no recorded defect | — |
 | `runwayml` | — | 9router/open-sse/providers/registry/runwayml.js | No defect recorded. | — | no recorded defect | — |
-| `sambanova` | — | 9router/open-sse/providers/registry/sambanova.js | No defect recorded. | — | no recorded defect | — |
+| `sambanova` | src/data/providers.ts:1570 | 9router/open-sse/providers/registry/sambanova.js | No defect recorded. | — | no recorded defect | — |
 | `sdwebui` | — | 9router/open-sse/providers/registry/sdwebui.js | No defect recorded. | — | no recorded defect | — |
 | `searchapi` | — | 9router/open-sse/providers/registry/searchapi.js | No defect recorded. | — | no recorded defect | — |
 | `searxng` | — | 9router/open-sse/providers/registry/searxng.js | No defect recorded. | — | no recorded defect | — |
@@ -160,14 +160,14 @@ An id with no recorded defect says so rather than acquiring a fabricated failure
 | `sensenova` | — | 9router/open-sse/providers/registry/sensenova.js | No defect recorded. | — | no recorded defect | — |
 | `sensenova-intl` | — | 9router/open-sse/providers/registry/sensenova-intl.js | No defect recorded. | — | no recorded defect | — |
 | `serper` | — | 9router/open-sse/providers/registry/serper.js | No defect recorded. | — | no recorded defect | — |
-| `siliconflow` | — | 9router/open-sse/providers/registry/siliconflow.js | No defect recorded. | — | no recorded defect | — |
+| `siliconflow` | src/data/providers.ts:1608 | 9router/open-sse/providers/registry/siliconflow.js | No defect recorded. | — | no recorded defect | — |
 | `stability-ai` | — | 9router/open-sse/providers/registry/stability-ai.js | No defect recorded. | — | no recorded defect | — |
 | `synthetic` | — | 9router/open-sse/providers/registry/synthetic.js | No defect recorded. | — | no recorded defect | — |
 | `tavily` | — | 9router/open-sse/providers/registry/tavily.js | No defect recorded. | — | no recorded defect | — |
 | `tencent` | — | 9router/open-sse/providers/registry/tencent.js | No defect recorded. | — | no recorded defect | — |
 | `tiarina` | src/data/providers.ts:794 | — | No defect recorded. | — | no recorded defect | — |
 | `tinyfish` | — | 9router/open-sse/providers/registry/tinyfish.js | No defect recorded. | — | no recorded defect | — |
-| `together` | src/data/providers.ts:1522 | 9router/open-sse/providers/registry/together.js | No defect recorded. | — | no recorded defect | — |
+| `together` | src/data/providers.ts:1525 | 9router/open-sse/providers/registry/together.js | No defect recorded. | — | no recorded defect | — |
 | `tokenharbor` | src/data/providers.ts:726 | 9router/open-sse/providers/registry/tokenharbor.js | No defect recorded. | — | no recorded defect | — |
 | `tokenharbor-web` | src/data/providers.ts:848 | — | No defect recorded. | — | no recorded defect | — |
 | `tokenrouter` | — | 9router/open-sse/providers/registry/tokenrouter.js | No defect recorded. | — | no recorded defect | — |
@@ -186,13 +186,13 @@ An id with no recorded defect says so rather than acquiring a fabricated failure
 | `volcengine-ark` | — | 9router/open-sse/providers/registry/volcengine-ark.js | No defect recorded. | — | no recorded defect | — |
 | `voyage-ai` | — | 9router/open-sse/providers/registry/voyage-ai.js | No defect recorded. | — | no recorded defect | — |
 | `windsurf` | — | 9router/open-sse/providers/registry/windsurf.js | No defect recorded. | — | no recorded defect | — |
-| `xai` | src/data/providers.ts:1562 | 9router/open-sse/providers/registry/xai.js | The reference ships an async video lane for xAI; OmniHilbras served /v1/videos but refused every job. | 9router/open-sse/providers/registry/xai.js:44 | fixed — dedicated SDK adapter creates and polls real jobs with the pinned connection | Kernel/API/test/video-route.test.js |
+| `xai` | src/data/providers.ts:1667 | 9router/open-sse/providers/registry/xai.js | The reference ships an async video lane for xAI; OmniHilbras served /v1/videos but refused every job. | 9router/open-sse/providers/registry/xai.js:44 | fixed — dedicated SDK adapter creates and polls real jobs with the pinned connection | Kernel/API/test/video-route.test.js |
 | `xiaomi-mimo` | — | 9router/open-sse/providers/registry/xiaomi-mimo.js | No defect recorded. | — | no recorded defect | — |
 | `xiaomi-tokenplan` | — | 9router/open-sse/providers/registry/xiaomi-tokenplan.js | No defect recorded. | — | no recorded defect | — |
 | `xkiro` | src/data/providers.ts:816 | — | No defect recorded. | — | no recorded defect | — |
 | `xquik` | — | 9router/open-sse/providers/registry/xquik.js | No defect recorded. | — | no recorded defect | — |
 | `youcom` | — | 9router/open-sse/providers/registry/youcom.js | No defect recorded. | — | no recorded defect | — |
-| `zcode` | src/data/providers.ts:1331 | — | No defect recorded. | — | no recorded defect | — |
+| `zcode` | src/data/providers.ts:1334 | — | No defect recorded. | — | no recorded defect | — |
 | `zed` | — | 9router/open-sse/providers/registry/zed.js | The reference ships a registry/OAuth flow for this id; OmniHilbras has no card, adapter or flow. | 9router/open-sse/providers/registry/zed.js:1 | gap — parity backlog | tests/9router-catalog.test.js |
 | `zro` | src/data/providers.ts:568 | — | No defect recorded. | — | no recorded defect | — |
 
