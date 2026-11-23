@@ -342,7 +342,8 @@ export async function handleResponses(request: IncomingMessage, response: Server
       outcome: cancelled ? 'cancelled' : 'failure',
       attempts: ledger.length,
       latencyMs: Date.now() - startedAt,
-      ...(isProviderError(error) ? { errorCode: error.code } : {}),
+      ...(isProviderError(error) ? { errorCode: error.code, errorText: toErrorEnvelope(error).error.message } : { errorText: 'The gateway encountered an unexpected error.' }),
+      ...(chatRequest.tools?.length ? { toolNames: chatRequest.tools.map((tool) => tool.name) } : {}),
       requestId: scope.id,
       ledger,
     });
@@ -580,7 +581,8 @@ export async function handleMessages(request: IncomingMessage, response: ServerR
       outcome: cancelled ? 'cancelled' : 'failure',
       attempts: ledger.length,
       latencyMs: Date.now() - startedAt,
-      ...(isProviderError(error) ? { errorCode: error.code } : {}),
+      ...(isProviderError(error) ? { errorCode: error.code, errorText: toErrorEnvelope(error).error.message } : { errorText: 'The gateway encountered an unexpected error.' }),
+      ...(chatRequest.tools?.length ? { toolNames: chatRequest.tools.map((tool) => tool.name) } : {}),
       requestId: scope.id,
       ledger,
     });
@@ -625,9 +627,11 @@ function servingConnection(ledger: readonly GatewayFailoverAttempt[]): string | 
  * `stream: true` on `/v1/responses`: the chat stream, re-framed as Responses events.
  *
  * Failover is decided before the first byte is written, as on the chat path, so a stream that cannot
- * start is a normal JSON error. Each text delta becomes `response.output_text.delta`; the last event
- * is `response.completed`, carrying the same body a non-streaming call returns, so a client can read
- * either. Usage and cancellation are recorded exactly as the chat stream records them.
+ * start is a normal JSON error. `response.created` and `response.in_progress` open the stream before
+ * any work, reasoning arrives as its own summary part, text deltas end with `response.output_text.done`,
+ * and the terminal event is either `response.completed` (with the same body a non-streaming call returns)
+ * or `response.failed`. A stream that ends with no output at all is a stall, not a success — no
+ * `response.completed` is fabricated for it. Usage and cancellation are recorded as on the chat stream.
  */
 async function streamResponses(input: {
   response: ServerResponse;
@@ -653,9 +657,35 @@ async function streamResponses(input: {
   let model = chatRequest.model;
   let createdAt = new Date(streamStartedAt).toISOString();
   let text = '';
+  let sawText = false;
+  let textOpen = false;
+  let reasoningText = '';
+  let reasoningOpen = false;
   let usage: ChatChunk['usage'];
   const toolCalls = new Map<number, { id: string; name: string; arguments: string; announced: boolean }>();
   const servingOf = () => outcome.attempts.find((attempt) => attempt.ok);
+  const reasoningItemId = `rs_${id}`;
+  const textItemId = `msg_${id}`;
+  const write = (event: string, payload: Record<string, unknown>) => writeStreamData(response, `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`, signal);
+  const initial = { id, object: 'response', created_at: Math.floor(streamStartedAt / 1000), model, status: 'in_progress', output: [] };
+  // Open the stream before the first provider byte: a Responses client waits for `created` before it
+  // will accept any delta, and a client that only sees deltas treats the turn as malformed.
+  await write('response.created', { type: 'response.created', response: initial });
+  await write('response.in_progress', { type: 'response.in_progress', response: initial });
+
+  /** Reasoning is a summary part that must be closed before any other output block begins. */
+  const closeReasoning = async () => {
+    if (!reasoningOpen) return;
+    reasoningOpen = false;
+    await write('response.reasoning_summary_text.done', { type: 'response.reasoning_summary_text.done', response_id: id, item_id: reasoningItemId, output_index: 0, summary_index: 0, text: reasoningText });
+    await write('response.reasoning_summary_part.done', { type: 'response.reasoning_summary_part.done', response_id: id, item_id: reasoningItemId, output_index: 0, summary_index: 0, part: { type: 'summary_text', text: reasoningText } });
+  };
+  /** The text item closes when another output item starts, not only at the end of the stream. */
+  const closeText = async () => {
+    if (!textOpen) return;
+    textOpen = false;
+    await write('response.output_text.done', { type: 'response.output_text.done', output_index: 0, item_id: textItemId, text });
+  };
 
   try {
     let providerFinish: string | undefined;
@@ -664,11 +694,24 @@ async function streamResponses(input: {
       model = chunk.model || model;
       if (chunk.usage) usage = chunk.usage;
       if (chunk.finishReason) providerFinish = chunk.finishReason;
+      if (chunk.delta.reasoning) {
+        if (!reasoningOpen) {
+          reasoningOpen = true;
+          await write('response.reasoning_summary_part.added', { type: 'response.reasoning_summary_part.added', response_id: id, item_id: reasoningItemId, output_index: 0, summary_index: 0, part: { type: 'summary_text', text: '' } });
+        }
+        reasoningText += chunk.delta.reasoning;
+        await write('response.reasoning_summary_text.delta', { type: 'response.reasoning_summary_text.delta', response_id: id, item_id: reasoningItemId, output_index: 0, summary_index: 0, delta: chunk.delta.reasoning });
+      }
       if (chunk.delta.content) {
+        await closeReasoning();
+        sawText = true;
+        textOpen = true;
         text += chunk.delta.content;
-        await writeStreamData(response, `event: response.output_text.delta\ndata: ${JSON.stringify({ type: 'response.output_text.delta', delta: chunk.delta.content })}\n\n`, signal);
+        await write('response.output_text.delta', { type: 'response.output_text.delta', output_index: 0, item_id: textItemId, delta: chunk.delta.content });
       }
       for (const delta of chunk.delta.toolCalls ?? []) {
+        await closeText();
+        await closeReasoning();
         const call = toolCalls.get(delta.index) ?? { id: delta.id ?? `call_${delta.index}`, name: '', arguments: '', announced: false };
         if (delta.id) call.id = delta.id;
         if (delta.function?.name) call.name = delta.function.name;
@@ -683,6 +726,8 @@ async function streamResponses(input: {
         toolCalls.set(delta.index, call);
       }
     }
+    await closeReasoning();
+    await closeText();
     if (signal.aborted) {
       recordUsage(service, {
         model,
@@ -694,6 +739,24 @@ async function streamResponses(input: {
         requestId: scope.id,
       });
       if (!response.destroyed && !response.writableEnded) response.end();
+      return;
+    }
+    // A stream that produced no text, reasoning or tool call and no finish reason ended without an
+    // answer. Calling that `completed` is the fabricated success this contract exists to refuse.
+    if (providerFinish === undefined && !sawText && !reasoningText && toolCalls.size === 0) {
+      await write('response.failed', { type: 'response.failed', response: { ...initial, status: 'failed', error: { type: 'failed', code: 'STREAM_INCOMPLETE', message: 'The provider stream ended without any output.' } } });
+      recordUsage(service, {
+        model,
+        providerId: servingOf()?.providerId,
+        connectionId: servingOf()?.connectionId,
+        outcome: 'failure',
+        errorCode: 'STREAM_INCOMPLETE',
+        attempts: outcome.attempts.length,
+        latencyMs: Date.now() - streamStartedAt,
+        requestId: scope.id,
+        ledger: outcome.attempts,
+      });
+      response.end();
       return;
     }
     const completedCalls: ToolCall[] = [...toolCalls.values()].map((call) => ({ id: call.id, type: 'function', function: { name: call.name, arguments: call.arguments || '{}' } }));
@@ -712,7 +775,7 @@ async function streamResponses(input: {
       ...(completedCalls.length ? { toolCalls: completedCalls } : {}),
       ...(usage ? { usage: { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, totalTokens: usage.totalTokens } } : {}),
     });
-    await writeStreamData(response, `event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response: { ...completed, status: providerFinish === 'length' ? 'incomplete' : completed.status, gateway: { requestId: scope.id, ...toolSupportNote(chatRequest.tools, servingOf()?.providerId) } } })}\n\n`, signal);
+    await write('response.completed', { type: 'response.completed', response: { ...completed, status: providerFinish === 'length' || providerFinish === undefined ? 'incomplete' : completed.status, gateway: { requestId: scope.id, ...toolSupportNote(chatRequest.tools, servingOf()?.providerId) } } });
     recordUsage(service, {
       model,
       providerId: servingOf()?.providerId,
@@ -734,12 +797,19 @@ async function streamResponses(input: {
       outcome: cancelled ? 'cancelled' : 'failure',
       attempts: outcome.attempts.length,
       latencyMs: Date.now() - streamStartedAt,
-      ...(isProviderError(error) ? { errorCode: error.code } : {}),
+      ...(isProviderError(error) ? { errorCode: error.code, errorText: toErrorEnvelope(error).error.message } : { errorText: 'The gateway encountered an unexpected error.' }),
+      ...(chatRequest.tools?.length ? { toolNames: chatRequest.tools.map((tool) => tool.name) } : {}),
       requestId: scope.id,
       ledger: outcome.attempts,
     });
     if (!response.destroyed && !signal.aborted) {
-      await writeStreamData(response, `event: error\ndata: ${JSON.stringify(toErrorEnvelope(error))}\n\n`, signal).catch(() => undefined);
+      await closeReasoning().catch(() => undefined);
+      await closeText().catch(() => undefined);
+      const envelope = toErrorEnvelope(error);
+      // A failure ends with `response.failed`, never a `response.completed`: a client reading the
+      // terminal Responses event must be able to tell a broken turn from a finished one.
+      await write('response.failed', { type: 'response.failed', response: { ...initial, status: 'failed', error: { type: 'failed', ...envelope.error } } }).catch(() => undefined);
+      await writeStreamData(response, `event: error\ndata: ${JSON.stringify(envelope)}\n\n`, signal).catch(() => undefined);
       response.end();
     }
   }
@@ -797,6 +867,10 @@ function recordUsage(
     responseText?: string;
     requestId?: string;
     ledger?: readonly GatewayFailoverAttempt[];
+    /** Sanitised public error line, for the opt-in detail store. Never a raw provider message. */
+    errorText?: string;
+    toolNames?: string[];
+    schemaBytes?: { declared: number; forwarded: number };
   },
 ): void {
   const store = service.usage;
@@ -852,6 +926,19 @@ function recordUsage(
       ...(input.ledger && input.ledger.length > 0 ? { path: input.ledger.map(toUsageAttempt) } : {}),
     }),
   ).catch(() => undefined);
+
+  // The opt-in detail store is deliberately a second write with a smaller whitelist. It never widens
+  // UsageRecord; a gateway configured without it records nothing here.
+  if (service.requestDetailStore && input.requestId) {
+    void service.recordRequestDetail({
+      requestId: input.requestId,
+      model: input.model,
+      ...(input.providerId ? { providerId: input.providerId } : {}),
+      ...(input.errorText ? { errorText: input.errorText } : {}),
+      ...(input.toolNames ? { toolNames: input.toolNames } : {}),
+      ...(input.schemaBytes ? { schemaBytes: input.schemaBytes } : {}),
+    });
+  }
 }
 
 /**
@@ -1046,7 +1133,8 @@ async function handleChatRequest(input: {
       outcome: cancelled ? 'cancelled' : 'failure',
       attempts: outcome.attempts.length,
       latencyMs: Date.now() - streamStartedAt,
-      ...(isProviderError(error) ? { errorCode: error.code } : {}),
+      ...(isProviderError(error) ? { errorCode: error.code, errorText: toErrorEnvelope(error).error.message } : { errorText: 'The gateway encountered an unexpected error.' }),
+      ...(chatRequest.tools?.length ? { toolNames: chatRequest.tools.map((tool) => tool.name) } : {}),
       requestId: scope.id,
     });
     if (!response.destroyed && !signal.aborted) {

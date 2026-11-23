@@ -56,6 +56,8 @@ export const PROVIDER_REGISTRY: Readonly<Record<string, ProviderRegistryRow>> = 
   "groq": { id: "groq", name: "Groq", baseUrl: "https://api.groq.com/openai/v1", modelsUrl: "https://api.groq.com/openai/v1/models", auth: "api-key", formats: ["openai"] },
   "grok": { id: "grok", name: "Grok", baseUrl: "https://api.x.ai/v1", modelsUrl: "https://api.x.ai/v1/models", auth: "api-key", formats: ["openai"] },
   "nvidia": { id: "nvidia", name: "NVIDIA", baseUrl: "https://integrate.api.nvidia.com/v1", modelsUrl: "https://integrate.api.nvidia.com/v1/models", auth: "api-key", formats: ["openai"] },
+  "together": { id: "together", name: "Together AI", baseUrl: "https://api.together.xyz/v1", modelsUrl: "https://api.together.xyz/v1/models", auth: "api-key", formats: ["openai"] },
+  "fireworks": { id: "fireworks", name: "Fireworks AI", baseUrl: "https://api.fireworks.ai/inference/v1", modelsUrl: "https://api.fireworks.ai/inference/v1/models", auth: "api-key", formats: ["openai"] },
   "coarena": { id: "coarena", name: "Coarena", baseUrl: "https://coarena.ai/api/v1", modelsUrl: "https://coarena.ai/api/v1/models", auth: "api-key", formats: ["openai"] },
   "openai": { id: "openai", name: "OpenAI", baseUrl: "https://api.openai.com/v1", modelsUrl: "https://api.openai.com/v1/models", auth: "api-key", formats: ["openai"] },
   "anthropic": { id: "anthropic", name: "Anthropic", baseUrl: "https://api.anthropic.com/v1", modelsUrl: "https://api.anthropic.com/v1/models", auth: "api-key", formats: ["claude"] },

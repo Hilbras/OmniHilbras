@@ -104,9 +104,12 @@ function isCallerFault(code: string): boolean {
   return code === 'INVALID_REQUEST' || code === 'NOT_SUPPORTED' || code === 'CANCELLED';
 }
 
+/** The chat request being planned, passed to the router so a virtual strategy can spend a real turn. */
+export type PlanRouteContext = { request: ChatRequest; signal?: AbortSignal; scope?: RequestScope };
+
 export type RequestExecutorDeps = {
   /** Which providers could serve this model, in preference order. */
-  planRoute: (model: string, explicitProviderId?: string, explicitConnectionId?: string) => Promise<RouteDecision>;
+  planRoute: (model: string, explicitProviderId?: string, explicitConnectionId?: string, context?: PlanRouteContext) => Promise<RouteDecision>;
   /**
    * Test seam, never set in production: runs after a route is planned and before anything is dispatched, so a
    * test can use up a connection's budget in the gap between planning and dispatch. That gap is the only place a
@@ -251,7 +254,7 @@ export class RequestExecutor {
   }
 
   async chat(request: ChatRequest, explicitProviderId: string | undefined, signal?: AbortSignal, scope?: RequestScope): Promise<GatewayChatOutcome> {
-    const decision = await this.deps.planRoute(request.model, explicitProviderId, request.connectionId);
+    const decision = await this.deps.planRoute(request.model, explicitProviderId, request.connectionId, { request, signal, scope });
     await this.deps.afterPlan?.();
     if (decision.candidates.length === 0) throw noRouteAvailable(decision.skipped);
     const attempts: GatewayFailoverAttempt[] = [];
@@ -759,7 +762,7 @@ export class RequestExecutor {
 
   /** Streaming cannot retry after bytes are sent, so failover only covers the first chunk. */
   async stream(request: ChatRequest, explicitProviderId: string | undefined, signal?: AbortSignal, scope?: RequestScope): Promise<GatewayStreamOutcome> {
-    const decision = await this.deps.planRoute(request.model, explicitProviderId, request.connectionId);
+    const decision = await this.deps.planRoute(request.model, explicitProviderId, request.connectionId, { request, signal, scope });
     if (decision.candidates.length === 0) throw noRouteAvailable(decision.skipped);
     const attempts: GatewayFailoverAttempt[] = [];
     let lastError: unknown;

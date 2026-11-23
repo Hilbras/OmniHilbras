@@ -307,8 +307,15 @@ export type GatewayVirtualModel = {
   id: string;
   name: string;
   enabled: boolean;
-  strategy: 'priority' | 'round-robin' | 'fastest';
+  strategy: 'priority' | 'round-robin' | 'fastest' | 'smart' | 'fusion';
   targets: GatewayVirtualModelTarget[];
+  routerModel?: string;
+  confidenceThreshold?: number;
+  sessionSticky?: boolean;
+  judgeModel?: string;
+  quorum?: number;
+  graceMs?: number;
+  hardTimeoutMs?: number;
   createdAt: string;
   updatedAt: string;
 };
@@ -323,6 +330,13 @@ export async function saveGatewayVirtualModel(input: {
   name?: string;
   enabled?: boolean;
   strategy?: GatewayVirtualModel['strategy'];
+  routerModel?: string;
+  confidenceThreshold?: number;
+  sessionSticky?: boolean;
+  judgeModel?: string;
+  quorum?: number;
+  graceMs?: number;
+  hardTimeoutMs?: number;
   targets: Array<{ connectionId: string; upstreamModelId: string; priority?: number; enabled?: boolean }>;
 }, signal?: AbortSignal) {
   return requestJson<{ model: GatewayVirtualModel }>('/v1/virtual-models', {
@@ -336,6 +350,13 @@ export async function updateGatewayVirtualModel(id: string, input: {
   name?: string;
   enabled?: boolean;
   strategy?: GatewayVirtualModel['strategy'];
+  routerModel?: string;
+  confidenceThreshold?: number;
+  sessionSticky?: boolean;
+  judgeModel?: string;
+  quorum?: number;
+  graceMs?: number;
+  hardTimeoutMs?: number;
   targets: Array<{ connectionId: string; upstreamModelId: string; priority?: number; enabled?: boolean }>;
 }, signal?: AbortSignal) {
   return requestJson<{ model: GatewayVirtualModel }>(`/v1/virtual-models/${encodeURIComponent(id)}`, {
@@ -1966,3 +1987,16 @@ export async function requestJson<T>(path: string, init: RequestInit = {}) {
   if (body === undefined) throw new GatewayRequestError(`The gateway returned a ${response.status} response that is not JSON.`, { status: response.status });
   return body as T;
 }
+
+/** A row returned by one of the gateway's operator-store list routes. Only gateway-owned fields shown. */
+export type GatewayOperatorRecord = Record<string, unknown> & { id?: string; name?: string; enabled?: boolean };
+
+async function listOperatorRecords(path: string, signal?: AbortSignal): Promise<GatewayOperatorRecord[]> {
+  const response = await requestJson<{ data?: unknown }>(path, { signal });
+  return Array.isArray(response.data) ? response.data as GatewayOperatorRecord[] : [];
+}
+
+export function listGatewayMitm(signal?: AbortSignal) { return listOperatorRecords('/v1/mitm', signal); }
+export function listGatewayProxyPools(signal?: AbortSignal) { return listOperatorRecords('/v1/proxy-pools', signal); }
+export function listGatewayTunnels(signal?: AbortSignal) { return listOperatorRecords('/v1/tunnels', signal); }
+export function listGatewaySkills(signal?: AbortSignal) { return listOperatorRecords('/v1/skills', signal); }

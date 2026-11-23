@@ -10,6 +10,10 @@ import {
   ApiKeysContent,
   AppHomeContent,
   LogsContent,
+  MitmContent,
+  ProxyPoolsContent,
+  TunnelsContent,
+  SkillsContent,
   ModelsContent,
   ProviderDetailContent,
   ProvidersContent,
@@ -46,6 +50,10 @@ const activePageTitles = {
   settings: 'Settings',
   about: 'About',
   'token-saver': 'Token Saver',
+  mitm: 'MITM',
+  'proxy-pools': 'Proxy pools',
+  tunnels: 'Tunnels',
+  skills: 'Skills',
 } as const;
 
 const pageDescriptions = {
@@ -64,6 +72,10 @@ const pageDescriptions = {
   settings: 'The configuration this gateway loaded at startup',
   about: 'Version, platform, backup and recovery',
   'token-saver': 'Measured savings from context compression',
+  mitm: 'Saved interception profiles from GET /v1/mitm',
+  'proxy-pools': 'Saved proxy pools from GET /v1/proxy-pools',
+  tunnels: 'Saved tunnels from GET /v1/tunnels',
+  skills: 'Saved skills from GET /v1/skills',
 } as const;
 
 function PageTransition({ children }: { children: ReactNode }) {
@@ -125,7 +137,15 @@ function DashboardRoutes() {
               ? 'about'
               : location.pathname.startsWith('/token-saver')
                 ? 'token-saver'
-                : 'overview';
+                : location.pathname.startsWith('/mitm')
+                  ? 'mitm'
+                  : location.pathname.startsWith('/proxy-pools')
+                    ? 'proxy-pools'
+                    : location.pathname.startsWith('/tunnels')
+                      ? 'tunnels'
+                      : location.pathname.startsWith('/skills')
+                        ? 'skills'
+                        : 'overview';
   const provider = isProviderDetail ? getProviderById(location.pathname.split('/').filter(Boolean).at(-1)) : undefined;
   const pageTitle = provider?.name ?? activePageTitles[activePage];
   const pageDescription = provider ? 'Provider connection details' : pageDescriptions[activePage];
@@ -158,6 +178,10 @@ function DashboardRoutes() {
           <Route path="/settings" element={<SettingsContent />} />
           <Route path={dashboardRoutes.about} element={<AboutContent />} />
           <Route path={dashboardRoutes.tokenSaver} element={<TokenSaverContent />} />
+          <Route path={dashboardRoutes.mitm} element={<MitmContent />} />
+          <Route path={dashboardRoutes.proxyPools} element={<ProxyPoolsContent />} />
+          <Route path={dashboardRoutes.tunnels} element={<TunnelsContent />} />
+          <Route path={dashboardRoutes.skills} element={<SkillsContent />} />
           <Route path="*" element={<Navigate to="/providers" replace />} />
           </Routes>
         </Suspense>

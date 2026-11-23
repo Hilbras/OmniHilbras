@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { executeLocalTool, localToolRootsFromEnv } from './local-tool-executor.js';
 import { OWN_PROVIDER_ADAPTERS } from './own-provider-adapters.js';
 import { ApmixAdapter } from '@omnihilbras/sdk-apmix';
@@ -14,7 +14,7 @@ import { createOpencodeLocalService } from './opencode-service.js';
 import { removeChatGptWebProfile } from '../providers/chatgptWeb.js';
 import { ensureOpencodeService } from './opencode-runtime.js';
 import { CLINE_OAUTH } from '@omnihilbras/sdk-cline';
-import { FetchHttpTransport, ProviderError, completeToolRounds, compressToolResults, isProviderError, toolResultBytes, type AudioSpeechRequest, type AudioSpeechResponse, type AudioTranscriptionRequest, type AudioTranscriptionResponse, type ChatChunk, type ChatMessage, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type HttpTransport, type ImageRequest, type ImageResponse, type Model, type ModelImportPolicy, type ModelPricing, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ProviderQuota, type ProviderRegistry, type ProviderRequestContext } from './index.js';
+import { FetchHttpTransport, ProviderError, completeToolRounds, compressToolResults, isPrivateHostname, isLoopbackHostname, isProviderError, toolResultBytes, type AudioSpeechRequest, type AudioSpeechResponse, type AudioTranscriptionRequest, type AudioTranscriptionResponse, type ChatChunk, type ChatMessage, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type HttpTransport, type ImageRequest, type ImageResponse, type Model, type ModelImportPolicy, type ModelPricing, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ProviderQuota, type ProviderRegistry, type ProviderRequestContext } from './index.js';
 import { narrowedToolCaps } from './modelCapabilities.js';
 import { ChatGptWebAdapter, chatGptWebCredential, chatGptWebModels, isFreeChatGptPlan, parseChatGptStorageState, chatGptWebProviderId, type ChatGptWebDriver } from '@omnihilbras/sdk-chatgpt-web';
 import { CLAUDE_CODE, ClaudeCodeAdapter, claudeCodeProviderId } from '@omnihilbras/sdk-claude-code';
@@ -75,7 +75,7 @@ import { localDeployment, type ConnectionSecretStore, type DeploymentConfig } fr
 import { RoutingEngine } from './routing-engine.js';
 import { ModelCatalog } from './model-catalog.js';
 import { TimeoutPolicy } from './timeout-policy.js';
-import { parseVirtualModelState, type VirtualModel, type VirtualModelStore } from './virtual-models.js';
+import { parseVirtualModelState, type VirtualModel, type VirtualModelTarget, type VirtualModelStore } from './virtual-models.js';
 import { parseSkillState, type SkillStore } from './skills.js';
 import { parseWorkspaceState, type WorkspaceStore } from './workspaces.js';
 import { parseTunnelState, type TunnelStore } from './tunnels.js';
@@ -99,11 +99,12 @@ import { decryptBackup, encryptBackup } from './backup.js';
 import { exportWebProfiles, importWebProfiles, parseWebProfilesState } from './web-profiles.js';
 import { removeGeminiWebProfile } from '../providers/geminiWeb.js';
 import { notSupported } from './capability.js';
-import { RequestExecutor, type GatewayChatOutcome, type GatewayEmbedOutcome, type GatewayImageOutcome, type GatewayAudioOutcome, type GatewayTranscriptionOutcome, type GatewayStreamOutcome } from './request-executor.js';
+import { RequestExecutor, type GatewayChatOutcome, type GatewayEmbedOutcome, type GatewayImageOutcome, type GatewayAudioOutcome, type GatewayTranscriptionOutcome, type GatewayStreamOutcome, type GatewayFailoverAttempt, type PlanRouteContext } from './request-executor.js';
 import { providerAlias } from './provider-alias.js';
 import { ConnectionManager } from './connection-manager.js';
 import { ApiKeyManager } from './api-key-manager.js';
 import { parseUsageState, type UsageRecord, type UsageStore } from './usage-store.js';
+import { parseRequestDetailState, type RequestDetailInput, type RequestDetailStore } from './request-details.js';
 import { modelMetaPriceOrder } from './connections.js';
 
 /**
@@ -279,6 +280,11 @@ export type GatewayServiceOptions = {
    */
   usageStore?: UsageStore;
   /**
+   * Optional request-detail store. **Off by default**: usage records deliberately hold no content,
+   * and a detail store is a separate, opt-in trade of disk for diagnostics. See `request-details.ts`.
+   */
+  requestDetails?: RequestDetailStore;
+  /**
    * Per-connection breaker policy. Absent means `defaultBreakerConfig` — four consecutive failures, then fifteen
    * seconds, doubling to five minutes.
    */
@@ -338,6 +344,7 @@ export class GatewayService {
   private readonly toolContractNotes = new Map<string, ToolContractTelemetry>();
   /** Absent means the gateway records nothing; see `GatewayServiceOptions.usageStore`. */
   private readonly usageStore?: UsageStore;
+  private readonly requestDetails?: RequestDetailStore;
   private readonly virtualModelStore?: VirtualModelStore;
   private readonly workspaceStore?: WorkspaceStore;
   private readonly tunnelStore?: TunnelStore;
@@ -347,6 +354,10 @@ export class GatewayService {
   private readonly skillStore?: SkillStore;
   /** Round-robin position per virtual model; incremented only when a virtual model is routed. */
   private readonly virtualRotation = new Map<string, number>();
+  /** Smart-router choice per (virtual id, conversation), so a sticky answer costs one router turn. */
+  private readonly smartStickyChoices = new Map<string, string>();
+  /** The fingerprints of the last 500 conversations, bounded so a long-lived gateway cannot grow forever. */
+  private readonly smartStickyOrder: string[] = [];
   private readonly gatewayConfig: GatewayConfig | undefined;
   private readonly tokenSaverConfig?: NonNullable<GatewayServiceOptions['tokenSaver']>;
   private readonly tokenSaverStore?: MemoryCcrStore;
@@ -570,6 +581,7 @@ export class GatewayService {
   ) {
     this.deploymentConfig = deployment;
     this.usageStore = options.usageStore ? this.publishingUsage(options.usageStore) : undefined;
+    this.requestDetails = options.requestDetails;
     this.virtualModelStore = options.virtualModels;
     this.workspaceStore = options.workspaces;
     this.tunnelStore = options.tunnels;
@@ -701,7 +713,7 @@ export class GatewayService {
     });
     this.timeouts = new TimeoutPolicy();
     this.requests = new RequestExecutor({
-      planRoute: (model, explicitProviderId, explicitConnectionId) => this.planRoute(model, explicitProviderId, explicitConnectionId),
+      planRoute: (model, explicitProviderId, explicitConnectionId, context) => this.planRoute(model, explicitProviderId, explicitConnectionId, context),
       afterPlan: () => this.testAfterPlan?.(),
       chat: (providerId, request, signal, scope, connectionId) => this.chat(providerId, request, signal, scope, connectionId),
       streamChat: (providerId, request, signal, scope, connectionId) => this.streamChat(providerId, request, signal, scope, connectionId),
@@ -818,6 +830,9 @@ export class GatewayService {
     resolver = resolver.onDemand('grok', own('grok').factory, { validation: own('grok').validation });
     resolver = resolver.onDemand('nvidia', own('nvidia').factory, { validateOnSave: true, validation: own('nvidia').validation });
     resolver = resolver.onDemand('coarena', own('coarena').factory, { validation: own('coarena').validation });
+    // Two keyed routers served by the shared OpenAI-compatible adapter, with no dedicated SDK package.
+    resolver = resolver.onDemand('together', own('together').factory, { validation: own('together').validation });
+    resolver = resolver.onDemand('fireworks', own('fireworks').factory, { validation: own('fireworks').validation });
     this.providers = resolver;
     this.credentialLifecycle = new CredentialLifecycle({
       adapterFor: (providerId) => { try { return this.registry.get(providerId); } catch { return undefined; } },
@@ -3279,6 +3294,7 @@ export class GatewayService {
       { name: 'connections', store: this.connectionStore, parse: parseConnectionsBackupState },
       { name: 'apiKeys', store: this.apiKeyStore, parse: parseApiKeyState },
       { name: 'usage', store: this.usageStore, parse: parseUsageState },
+      { name: 'requestDetails', store: this.requestDetails, parse: parseRequestDetailState },
       { name: 'virtualModels', store: this.virtualModelStore, parse: parseVirtualModelState },
       { name: 'skills', store: this.skillStore, parse: parseSkillState },
       { name: 'workspaces', store: this.workspaceStore, parse: parseWorkspaceState },
@@ -4101,6 +4117,18 @@ export class GatewayService {
    * than reached for, which is what lets the loop be tested without a gateway.
    */
   async chatWithFailover(request: ChatRequest, explicitProviderId: string | undefined, signal?: AbortSignal, scope?: RequestScope): Promise<GatewayChatOutcome> {
+    // Fusion cannot be expressed as a route reorder: it owns the whole turn and produces one answer
+    // from several paid turns. It is intercepted here, before the single-route executor and its cache.
+    if (request.model.startsWith('oh/')) {
+      const virtual = await this.virtualModelStore?.get(request.model);
+      if (virtual?.strategy === 'fusion') {
+        if (!virtual.enabled) throw new ProviderError('INVALID_REQUEST', `Virtual model "${request.model}" is disabled.`, {
+          retryable: false,
+          publicMessage: `Virtual model "${request.model}" is disabled. Enable it on the Models page to use it.`,
+        });
+        return this.runFusion(virtual, request, signal, scope);
+      }
+    }
     /**
      * A client request is never deduplicated.
      *
@@ -4186,10 +4214,34 @@ export class GatewayService {
 
   /** Streaming cannot retry after bytes are sent, so failover only covers the first chunk. */
   async streamChatWithFailover(request: ChatRequest, explicitProviderId: string | undefined, signal?: AbortSignal, scope?: RequestScope): Promise<GatewayStreamOutcome> {
+    if (request.model.startsWith('oh/')) {
+      const virtual = await this.virtualModelStore?.get(request.model);
+      if (virtual?.strategy === 'fusion') {
+        if (!virtual.enabled) throw new ProviderError('INVALID_REQUEST', `Virtual model "${request.model}" is disabled.`, {
+          retryable: false,
+          publicMessage: `Virtual model "${request.model}" is disabled. Enable it on the Models page to use it.`,
+        });
+        const outcome = await this.runFusion(virtual, request, signal, scope);
+        // One honest chunk from the judge's complete answer. Inventing per-source deltas here would
+        // pretend a streamed turn that never happened.
+        const text = typeof outcome.response.message.content === 'string' ? outcome.response.message.content : '';
+        async function* chunks() {
+          yield {
+            id: outcome.response.id,
+            providerId: outcome.response.providerId,
+            model: outcome.response.model,
+            delta: { content: text },
+            ...(outcome.response.finishReason ? { finishReason: outcome.response.finishReason } : {}),
+            ...(outcome.response.usage ? { usage: outcome.response.usage } : {}),
+          };
+        }
+        return { chunks: chunks(), attempts: outcome.attempts };
+      }
+    }
     return this.requests.stream(request, explicitProviderId, signal, scope);
   }
 
-  private async planRoute(model: string, explicitProviderId?: string, explicitConnectionId?: string): Promise<RouteDecision> {
+  private async planRoute(model: string, explicitProviderId?: string, explicitConnectionId?: string, context?: PlanRouteContext): Promise<RouteDecision> {
     const connections = await this.listConnections();
     if (explicitConnectionId !== undefined && !connections.some((connection) => connection.id === explicitConnectionId)) {
       throw new ProviderError('INVALID_REQUEST', 'The requested connection does not exist.', {
@@ -4211,7 +4263,7 @@ export class GatewayService {
           publicMessage: `Virtual model "${model}" is disabled. Enable it on the Models page to use it.`,
         });
       }
-      return this.planVirtual(virtual, connections, explicitProviderId, explicitConnectionId);
+      return this.planVirtual(virtual, connections, explicitProviderId, explicitConnectionId, context);
     }
     return this.routing.plan({
       connections,
@@ -4233,12 +4285,19 @@ export class GatewayService {
     connections: Awaited<ReturnType<GatewayService['listConnections']>>,
     explicitProviderId?: string,
     explicitConnectionId?: string,
+    context?: PlanRouteContext,
   ): Promise<RouteDecision> {
     const targets = virtual.targets
       .filter((target) => target.enabled && (explicitConnectionId === undefined || target.connectionId === explicitConnectionId))
       .sort((left, right) => left.priority - right.priority);
     let ordered = targets;
-    if (virtual.strategy === 'round-robin' && targets.length > 1) {
+    if (virtual.strategy === 'smart' && context) {
+      const chosen = await this.resolveSmartChoice(virtual, targets, context);
+      if (chosen) {
+        const at = targets.findIndex((target) => target.connectionId === chosen.connectionId && target.upstreamModelId === chosen.upstreamModelId);
+        if (at > 0) ordered = [targets[at]!, ...targets.filter((_, index) => index !== at)];
+      }
+    } else if (virtual.strategy === 'round-robin' && targets.length > 1) {
       const offset = (this.virtualRotation.get(virtual.id) ?? 0) % targets.length;
       this.virtualRotation.set(virtual.id, offset + 1);
       ordered = [...targets.slice(offset), ...targets.slice(0, offset)];
@@ -4271,6 +4330,256 @@ export class GatewayService {
     return { candidates, skipped };
   }
 
+
+
+  /**
+   * A stable key for one conversation, derived from its first user turn.
+   *
+   * OpenAI-shaped clients resend the whole history on every call, so the first user message identifies
+   * the conversation without adding a header or a public field to `ChatRequest`. Hashing it keeps a
+   * prompt out of the map; the key is opaque and never leaves this process.
+   */
+  private smartSessionKey(virtualId: string, request: ChatRequest): string {
+    const first = request.messages.find((message) => message.role === 'user');
+    const text = first ? (typeof first.content === 'string' ? first.content : JSON.stringify(first.content ?? '')) : '';
+    return createHash('sha256').update(`${virtualId}\u0000${text}`).digest('hex').slice(0, 24);
+  }
+
+  /**
+   * Spends one real turn on the configured router model and reads a JSON decision from its answer.
+   *
+   * No simulated choice and no placeholder response: a model that refuses, times out, returns prose
+   * that is not the promised object, gives a confidence below the configured threshold, or names a
+   * model that is not a target produces no ordering change at all.
+   */
+  private async askSmartRouter(
+    virtual: VirtualModel,
+    targets: readonly VirtualModelTarget[],
+    context: PlanRouteContext,
+  ): Promise<{ choice: string; confidence: number } | undefined> {
+    if (!virtual.routerModel) return undefined;
+    const candidates = [...new Set(targets.map((target) => target.upstreamModelId))];
+    const system = [
+      'You are the routing judge for a multi-account virtual model.',
+      `Choose exactly one of these upstream model ids: ${JSON.stringify(candidates)}.`,
+      'Reply with ONLY a JSON object of the shape {"choice":"<one id>","confidence":0.0}.',
+      'confidence is your own calibrated certainty from 0 to 1. A low confidence means the caller keeps its declared order.',
+    ].join('\n');
+    const routerRequest: ChatRequest = {
+      ...context.request,
+      model: virtual.routerModel,
+      messages: [
+        { role: 'system', content: system },
+        ...context.request.messages.map((message) => ({ ...message })),
+      ],
+      stream: false,
+      tools: undefined,
+      toolChoice: undefined,
+      connectionId: undefined,
+    };
+    try {
+      const outcome = await this.chatWithFailover(routerRequest, undefined, context.signal, context.scope);
+      const raw = typeof outcome.response.message.content === 'string' ? outcome.response.message.content : '';
+      const json = raw.includes('```')
+        ? /\{[\s\S]*?"choice"[\s\S]*?\}/.exec(raw)?.[0]
+        : raw.trim();
+      if (!json) return undefined;
+      const decision: unknown = JSON.parse(json);
+      if (!decision || typeof decision !== 'object') return undefined;
+      const { choice, confidence } = decision as { choice?: unknown; confidence?: unknown };
+      if (typeof choice !== 'string' || typeof confidence !== 'number' || !Number.isFinite(confidence)) return undefined;
+      if (!candidates.includes(choice)) return undefined;
+      if (confidence < (virtual.confidenceThreshold ?? 0.8)) return undefined;
+      return { choice, confidence };
+    } catch {
+      // A router failure is never a reason to fail the caller's turn. Declared target order is the
+      // answer the operator already configured, so it is the safe fallback.
+      return undefined;
+    }
+  }
+
+  private async resolveSmartChoice(
+    virtual: VirtualModel,
+    targets: readonly VirtualModelTarget[],
+    context: PlanRouteContext,
+  ): Promise<VirtualModelTarget | undefined> {
+    const find = (choice: string) => targets.find((target) => target.upstreamModelId === choice);
+    if (virtual.sessionSticky !== false) {
+      const key = this.smartSessionKey(virtual.id, context.request);
+      const remembered = this.smartStickyChoices.get(key);
+      if (remembered) {
+        const target = find(remembered);
+        if (target) return target;
+        this.smartStickyChoices.delete(key);
+      }
+      const decision = await this.askSmartRouter(virtual, targets, context);
+      if (!decision) return undefined;
+      const target = find(decision.choice);
+      if (!target) return undefined;
+      if (!this.smartStickyChoices.has(key)) {
+        this.smartStickyOrder.push(key);
+        if (this.smartStickyOrder.length > 500) {
+          const oldest = this.smartStickyOrder.shift();
+          if (oldest) this.smartStickyChoices.delete(oldest);
+        }
+      }
+      this.smartStickyChoices.set(key, decision.choice);
+      return target;
+    }
+    const decision = await this.askSmartRouter(virtual, targets, context);
+    return decision ? find(decision.choice) : undefined;
+  }
+
+  /**
+   * The fusion judge sees anonymised sources: a vendor's reputation must not decide the synthesis.
+   * It is asked to analyse consensus and contradictions and then write one answer, never to merge text.
+   */
+  private buildFusionJudgePrompt(answers: readonly { source: number; text: string }[]): string {
+    const panel = answers.map((answer) => `[Source ${answer.source}]\n${answer.text}`).join('\n\n');
+    return [
+      `You are the JUDGE in a model-fusion panel. ${answers.length} models independently answered the user's most recent request. Their responses are below, anonymised by source.`,
+      'Do NOT mention that multiple models were used, and do NOT refer to the sources. Produce ONE authoritative final answer addressed directly to the user.',
+      'First analyse consensus, contradictions, partial coverage, unique insights and blind spots internally; then write the best possible final answer grounded in that analysis.',
+      '=== PANEL RESPONSES ===',
+      panel,
+      '=== END PANEL RESPONSES ===',
+      'Now write the final answer to the user\'s original request.',
+    ].join('\n');
+  }
+
+  /** Collect a panel with quorum + grace + hard timeout. A loser keeps running; its answer is ignored. */
+  private collectPanel<T>(calls: readonly Promise<T>[], quorum: number, graceMs: number, hardTimeoutMs: number, signal?: AbortSignal): Promise<Array<T | undefined>> {
+    const output = new Array<T | undefined>(calls.length);
+    let settled = 0;
+    let succeeded = 0;
+    let finished = false;
+    let grace: ReturnType<typeof setTimeout> | undefined;
+    const onAbort = () => finish();
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(hard);
+      if (grace) clearTimeout(grace);
+      signal?.removeEventListener('abort', onAbort);
+      resolve(output);
+    };
+    let resolve!: (value: Array<T | undefined>) => void;
+    const promise = new Promise<Array<T | undefined>>((r) => { resolve = r; });
+    const hard = setTimeout(finish, hardTimeoutMs);
+    signal?.addEventListener('abort', onAbort, { once: true });
+    calls.forEach((call, index) => {
+      void Promise.resolve(call)
+        .then((value) => { output[index] = value; if (value !== undefined) succeeded += 1; })
+        .catch(() => { output[index] = undefined; })
+        .finally(() => {
+          settled += 1;
+          if (settled === calls.length) return finish();
+          if (succeeded >= quorum && !grace) grace = setTimeout(finish, graceMs);
+        });
+    });
+    if (calls.length === 0) finish();
+    return promise;
+  }
+
+  /**
+   * Fusion: every enabled target answers the same prompt in parallel with no tools, then one judge
+   * model synthesises. Zero enabled targets is refused before any turn is paid for; one target is
+   * answered directly because there is nothing to fuse. A client abort is forwarded to every member.
+   */
+  private async runFusion(
+    virtual: VirtualModel,
+    request: ChatRequest,
+    signal?: AbortSignal,
+    scope?: RequestScope,
+  ): Promise<GatewayChatOutcome> {
+    const connections = await this.listConnections();
+    const targets = virtual.targets.filter((target) => target.enabled
+      && connections.some((connection) => connection.id === target.connectionId && connection.enabled));
+    if (targets.length === 0) {
+      throw new ProviderError('INVALID_REQUEST', 'A fusion virtual model has no enabled targets.', {
+        retryable: false,
+        publicMessage: 'This fusion model has no enabled targets. Enable one on the Models page.',
+      });
+    }
+    const controller = new AbortController();
+    const forwardAbort = () => controller.abort();
+    if (signal?.aborted) controller.abort();
+    else signal?.addEventListener('abort', forwardAbort, { once: true });
+    const attempts: GatewayFailoverAttempt[] = [];
+    try {
+      if (targets.length === 1) {
+        const single = targets[0]!;
+        const outcome = await this.chatWithFailover({ ...request, model: single.upstreamModelId, connectionId: single.connectionId }, undefined, controller.signal, scope);
+        attempts.push(...outcome.attempts);
+        return { response: { ...outcome.response, model: request.model }, attempts };
+      }
+      const panelBody: ChatRequest = {
+        ...request,
+        stream: false,
+        tools: undefined,
+        toolChoice: undefined,
+        connectionId: undefined,
+      };
+      const calls = targets.map((target, index) => (async () => {
+        const started = Date.now();
+        try {
+          const outcome = await this.chatWithFailover({ ...panelBody, model: target.upstreamModelId, connectionId: target.connectionId }, undefined, controller.signal, scope);
+          const served = outcome.attempts.find((attempt) => attempt.ok);
+          attempts.push({
+            providerId: served?.providerId ?? outcome.response.providerId,
+            connectionId: target.connectionId,
+            attempt: index + 1,
+            ok: true,
+            latencyMs: Date.now() - started,
+          });
+          return { source: index + 1, text: typeof outcome.response.message.content === 'string' ? outcome.response.message.content : '' };
+        } catch (error) {
+          attempts.push({
+            providerId: 'fusion-panel',
+            connectionId: target.connectionId,
+            attempt: index + 1,
+            ok: false,
+            latencyMs: Date.now() - started,
+            ...(isProviderError(error) ? { errorCode: error.code } : { errorCode: 'FUSION_PANEL_FAILED' }),
+          });
+          return undefined;
+        }
+      })());
+      const settled = await this.collectPanel(
+        calls,
+        Math.min(virtual.quorum ?? 2, targets.length),
+        virtual.graceMs ?? 2_000,
+        virtual.hardTimeoutMs ?? 90_000,
+        controller.signal,
+      );
+      const answers = settled.filter((entry): entry is { source: number; text: string } => entry !== undefined && entry.text.length > 0);
+      if (answers.length === 0) {
+        throw new ProviderError('PROVIDER_UNAVAILABLE', 'Every fusion panel member failed.', {
+          retryable: false,
+          publicMessage: 'No fusion panel member answered, so there is nothing to synthesise.',
+        });
+      }
+      const judgeStarted = Date.now();
+      const judge = await this.chatWithFailover({
+        ...request,
+        model: virtual.judgeModel!,
+        messages: [...request.messages, { role: 'user', content: this.buildFusionJudgePrompt(answers) }],
+        stream: false,
+        connectionId: undefined,
+      }, undefined, controller.signal, scope);
+      const served = judge.attempts.find((attempt) => attempt.ok);
+      attempts.push({
+        providerId: served?.providerId ?? judge.response.providerId,
+        connectionId: served?.connectionId,
+        attempt: targets.length + 1,
+        ok: true,
+        latencyMs: Date.now() - judgeStarted,
+      });
+      return { response: { ...judge.response, model: request.model }, attempts };
+    } finally {
+      signal?.removeEventListener('abort', forwardAbort);
+    }
+  }
 
   private enforceRateLimit(candidate: RouteCandidate) {
     this.routing.enforceRateLimit(candidate);
@@ -4425,6 +4734,74 @@ export class GatewayService {
    */
   get usage(): UsageStore | undefined {
     return this.usageStore;
+  }
+
+  /** The opt-in detail store, or `undefined` when this gateway records no request detail. */
+  get requestDetailStore(): RequestDetailStore | undefined {
+    return this.requestDetails;
+  }
+
+  /** Records one whitelisted, sanitised detail. Absent store is a no-op. */
+  async recordRequestDetail(input: RequestDetailInput): Promise<void> {
+    await this.requestDetails?.record(input).catch(() => undefined);
+  }
+
+  /**
+   * A bounded document read through the gateway's own transport.
+   *
+   * This is deliberately not the transport's `assertDestination` alone: that hook intentionally skips
+   * loopback so a local Ollama base URL keeps working, which is exactly the opposite of what an
+   * arbitrary user-supplied URL needs. Every check below is applied here, including the async DNS
+   * resolution in `assertPublicDestination` — the hostname-text check in `url.ts` cannot see a name
+   * that resolves to 127.0.0.1.
+   */
+  async fetchDocument(input: { url: string; maxBytes?: number; signal?: AbortSignal }): Promise<{ url: string; status: number; contentType: string; bytes: number; truncated: boolean; text: string }> {
+    const { url, maxBytes = 256 * 1024, signal } = input;
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      throw new ProviderError('INVALID_REQUEST', 'url must be an absolute HTTP(S) URL.', { publicMessage: 'url must be an absolute HTTP(S) URL.' });
+    }
+    if (parsed.protocol !== 'https:' || parsed.username || parsed.password) {
+      throw new ProviderError('INVALID_REQUEST', 'Only a public https URL without credentials can be fetched.', { publicMessage: 'Only a public https URL without credentials can be fetched.' });
+    }
+    const hostname = parsed.hostname.replace(/^\[|\]$/, '');
+    if (isLoopbackHostname(hostname) || isPrivateHostname(hostname)) {
+      throw new ProviderError('INVALID_REQUEST', 'Private and loopback destinations cannot be fetched.', { publicMessage: 'Private and loopback destinations cannot be fetched.' });
+    }
+    await assertPublicDestination(hostname, signal).catch((error: unknown) => {
+      throw new ProviderError('INVALID_REQUEST', 'The URL resolved to a private destination.', {
+        publicMessage: 'The URL resolved to a private destination.',
+        cause: error,
+      });
+    });
+    const limit = Number.isInteger(maxBytes) && maxBytes > 0 ? Math.min(maxBytes, 1024 * 1024) : 256 * 1024;
+    const response = await this.transport.request<string>({
+      method: 'GET',
+      url: parsed.toString(),
+      providerId: 'web-fetch',
+      headers: { accept: 'text/plain, text/html;q=0.9, application/json;q=0.8' },
+      ...(signal ? { signal } : {}),
+    });
+    const raw = typeof response.data === 'string' ? response.data : String(response.data ?? '');
+    const bytes = Buffer.byteLength(raw, 'utf8');
+    const truncated = bytes > limit;
+    const text = truncated ? Buffer.from(raw, 'utf8').subarray(0, limit).toString('utf8') : raw;
+    return {
+      url: parsed.toString(),
+      status: response.status,
+      contentType: response.headers.get('content-type') ?? 'application/octet-stream',
+      bytes: truncated ? limit : bytes,
+      truncated,
+      text,
+    };
+  }
+
+  /** Whether a named provider declares a real web-fetch capability. Absent adapters answer false. */
+  async supportsWebFetch(providerId: string): Promise<boolean> {
+    const adapter = await this.resolveAdapter(providerId).catch(() => undefined);
+    return (adapter?.capabilities as Record<string, unknown> | undefined)?.webFetch === true;
   }
 
   /** The virtual-model catalog, or `undefined` when this build has no persisted store. */

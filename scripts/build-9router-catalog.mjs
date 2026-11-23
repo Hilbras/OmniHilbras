@@ -1,25 +1,36 @@
 /**
  * Reads 9router's provider registry and emits one Markdown file: every provider, every model.
  *
- * Run from anywhere:  node scripts/build-9router-catalog.mjs [--check]
+ * Run from anywhere:  node scripts/build-9router-catalog.mjs [--root <9router root>] [--check]
  *
  * `--check` exits non-zero when the committed file differs from what this script generates, which is
  * the only property that makes this document trustworthy: it is derived, so it is either current or
- * wrong, and there is no third state.
+ * wrong, and there is no third state. `--root` (or `NINEROUTER_ROOT`) selects the external tree; the
+ * old path remains the default so older checkouts keep working.
  *
  * The numbers in the header are counted from the parsed data, never typed in, so they cannot drift
  * from the tables below them.
  */
 
 import { readFileSync, readdirSync, writeFileSync, existsSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const REGISTRY = '/home/gin/work/9router/open-sse/providers/registry';
+/**
+ * The 9router tree is not part of this repository. Its location is an input, not a constant: an
+ * explicit `--root` wins, then `NINEROUTER_ROOT`, then the old path this document was first generated
+ * from. A stale catalog used to pass four skipped tests for months because the guard pointed at a
+ * directory that no longer existed on this machine — an absent tree must never look like a green run.
+ */
+const rootArg = process.argv.indexOf('--root');
+const NINE_ROOT = rootArg >= 0
+  ? resolve(process.argv[rootArg + 1] ?? '')
+  : process.env.NINEROUTER_ROOT || '/home/gin/work/9router';
+const REGISTRY = join(NINE_ROOT, 'open-sse', 'providers', 'registry');
 const OUT = join(dirname(fileURLToPath(import.meta.url)), '..', 'docs', 'architecture', '9router-provider-catalog.md');
 
 if (!existsSync(REGISTRY)) {
-  console.error(`Registry not found at ${REGISTRY}. This document is generated from that tree.`);
+  console.error(`Registry not found at ${REGISTRY}. Pass --root <9router root> or set NINEROUTER_ROOT.`);
   process.exit(2);
 }
 
@@ -93,7 +104,7 @@ const out = (line = '') => lines.push(line);
 out('# 9router provider and model catalog');
 out();
 out('**Generated file — do not edit by hand.**');
-out('Source: `open-sse/providers/registry/*.js` in `/home/gin/work/9router`.');
+out(`Source: \`open-sse/providers/registry/*.js\` in \`${NINE_ROOT}\`.`);
 out('Regenerate with `node scripts/build-9router-catalog.mjs`; `node scripts/build-9router-catalog.mjs --check`');
 out('fails when the committed file is stale.');
 out();

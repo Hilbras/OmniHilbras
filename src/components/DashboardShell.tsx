@@ -39,7 +39,7 @@ import { compareVersions } from '../lib/versionCompare.mjs';
  * it. `tests/marketing-claims.test.js` pins which entries are still disabled, so this comment going stale
  * fails a test rather than misleading the next reader quietly.
  */
-type DashboardPage = 'home' | 'overview' | 'providers' | 'models' | 'routing' | 'keys' | 'usage' | 'logs' | 'settings' | 'about' | 'token-saver';
+type DashboardPage = 'home' | 'overview' | 'providers' | 'models' | 'routing' | 'keys' | 'usage' | 'logs' | 'settings' | 'about' | 'token-saver' | 'mitm' | 'proxy-pools' | 'tunnels' | 'skills';
 
 type SidebarItem = {
   label: string;
@@ -74,6 +74,12 @@ const insightItems: SidebarItem[] = [
   // `.env.example`.
   { label: 'Settings', icon: Settings2, to: '/settings', page: 'settings' },
   { label: 'About', icon: Info, to: '/about', page: 'about' },
+  // Four operator stores the gateway really serves. Each page reads its own list route; none of
+  // them carries a "soon" flag because there is a measured response behind every row.
+  { label: 'MITM', icon: Network, to: dashboardRoutes.mitm, page: 'mitm' },
+  { label: 'Proxy pools', icon: Network, to: dashboardRoutes.proxyPools, page: 'proxy-pools' },
+  { label: 'Tunnels', icon: Network, to: dashboardRoutes.tunnels, page: 'tunnels' },
+  { label: 'Skills', icon: Boxes, to: dashboardRoutes.skills, page: 'skills' },
 ];
 
 const sidebarStorageKey = 'omnihilbras-sidebar-collapsed';

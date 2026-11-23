@@ -14,6 +14,7 @@ import { LocalTunnelStore } from './tunnels.js';
 import { LocalMitmStore } from './mitm.js';
 import { LocalProxyPoolStore } from './proxy-pools.js';
 import { LocalProviderNodeStore } from './provider-nodes.js';
+import { LocalRequestDetailStore } from './request-details.js';
 import { defaultConnectionDirectory, LocalConnectionStore, parseMasterKey, type ConnectionStore } from './connections.js';
 import { GatewayService } from './service.js';
 import { CAVEMAN_LEVELS, PONYTAIL_LEVELS, type CavemanLevel, type PonytailLevel } from '@omnihilbras/token-saver';
@@ -294,6 +295,9 @@ export function createGatewayService(config: GatewayConfig = loadGatewayConfig()
     // `LocalUsageStore` writes through `atomicWrite`, so `usage.json` lands at 0600 in the same 0700
     // directory as the credentials, and is bounded by `maxRecords` on write.
     usageStore: createUsageStore({ directory: config.dataDir, backend: config.usageBackend }),
+    // Opt-in: a request-detail file is a deliberate trade of disk for diagnostics, so the default
+    // remains "record nothing but usage". `OMNIHILBRAS_REQUEST_DETAILS=1` turns it on.
+    ...(env.OMNIHILBRAS_REQUEST_DETAILS === '1' ? { requestDetails: new LocalRequestDetailStore({ directory: config.dataDir }) } : {}),
     virtualModels: new LocalVirtualModelStore({ directory: config.dataDir }),
     skills: new LocalSkillStore({ directory: config.dataDir }),
     workspaces: new LocalWorkspaceStore({ directory: config.dataDir }),

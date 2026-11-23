@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -33,21 +33,35 @@ import { fileURLToPath } from 'node:url';
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const SCRIPT = join(ROOT, 'scripts', 'build-9router-catalog.mjs');
 const CATALOG = join(ROOT, 'docs', 'architecture', '9router-provider-catalog.md');
-const REGISTRY = '/home/gin/work/9router/open-sse/providers/registry';
 
-// The catalog documents a tree that is not ours. Skipped, not failed, when it is absent — a checkout
-// of this repository does not contain it, and CI must stay green there.
+/**
+ * Where the external tree lives is an input. `--root` and `NINEROUTER_ROOT` are the two ways to name
+ * it; the old path is the fallback so older checkouts still generate. When a root is *explicitly*
+ * supplied this file must run all four cases and fail on a stale count — the old behaviour skipped
+ * them even with a tree sitting at the path the caller named, which is how 124 stayed in the header
+ * while the registry had 149 entries.
+ */
+const argIndex = process.argv.indexOf('--root');
+const explicitRoot = argIndex >= 0 ? process.argv[argIndex + 1] : process.env.NINEROUTER_ROOT;
+const NINE_ROOT = explicitRoot || '/home/gin/work/9router';
+const REGISTRY = join(NINE_ROOT, 'open-sse', 'providers', 'registry');
+const EXPLICIT = Boolean(explicitRoot);
+
+// The catalog documents a tree that is not ours. Skipped, not failed, when it is absent and nobody
+// named a root — a checkout of this repository does not contain it, and CI must stay green there.
 const sourceTreePresent = existsSync(REGISTRY);
+const scriptArgs = EXPLICIT ? [SCRIPT, '--root', NINE_ROOT] : [SCRIPT];
 
-test('the catalog is either absent or regenerable, never stale', { skip: !sourceTreePresent }, () => {
+test('the catalog is either absent or regenerable, never stale', { skip: !sourceTreePresent && !EXPLICIT }, () => {
   assert.ok(existsSync(SCRIPT), 'the generator script must be committed alongside the document');
   assert.ok(existsSync(CATALOG), 'the catalog must be committed');
+  if (EXPLICIT) assert.ok(sourceTreePresent, `explicit 9router root ${NINE_ROOT} has no registry at ${REGISTRY}`);
   // Byte-identical regeneration. This is the assertion that makes the document trustworthy: it is
   // derived, so it is either current or wrong, and there is no third state.
-  execFileSync(process.execPath, [SCRIPT, '--check'], { cwd: ROOT, stdio: 'pipe' });
+  execFileSync(process.execPath, [...scriptArgs, '--check'], { cwd: ROOT, stdio: 'pipe' });
 });
 
-test('the header counts match what the body actually contains', { skip: !sourceTreePresent }, () => {
+test('the header counts match what the body actually contains', { skip: !sourceTreePresent && !EXPLICIT }, () => {
   const doc = readFileSync(CATALOG, 'utf8');
   const claimed = (label) => {
     const row = new RegExp(`^\\| ${label} \\| (\\d+) \\|$`, 'm').exec(doc);
@@ -60,6 +74,13 @@ test('the header counts match what the body actually contains', { skip: !sourceT
   const entries = claimed('Registry entries');
   const models = claimed('Models declared in the registry');
 
+  if (EXPLICIT) {
+    // 149 `.js` files, but `index.js` is an auto-generated import list, not a provider: 148 entries.
+    // The old header said 124 while the tree had moved on — that is the drift this assertion catches.
+    const files = readdirSync(REGISTRY).filter((file) => file.endsWith('.js'));
+    assert.equal(files.length, 149, 'the current 9router registry has 149 .js files');
+    assert.equal(entries, 148, 'the catalog must count 148 provider entries (149 files less index.js), not the stale 124');
+  }
   assert.equal(headings, entries, 'one heading per registry entry');
   assert.equal(claimed('Entries with a static model list') + claimed('Entries that resolve models at runtime'), entries);
   assert.equal(claimed('Entries that resolve models at runtime'), dynamicRows, 'the two runtime-resolved counts must agree');
@@ -77,7 +98,7 @@ test('the header counts match what the body actually contains', { skip: !sourceT
   assert.ok(entries > 0 && models > 0, 'a catalog with no entries or no models proves nothing');
 });
 
-test('every provider website is a complete URL, not a truncated fragment', { skip: !sourceTreePresent }, () => {
+test('every provider website is a complete URL, not a truncated fragment', { skip: !sourceTreePresent && !EXPLICIT }, () => {
   const doc = readFileSync(CATALOG, 'utf8');
   const links = [...doc.matchAll(/\[site\]\(([^)]*)\)/g)].map((match) => match[1]);
   const broken = links.filter((url) => !/^https?:\/\/[^\s)]+$/.test(url));
@@ -90,7 +111,7 @@ test('every provider website is a complete URL, not a truncated fragment', { ski
   assert.ok(links.length > 0, 'the document should link at least one provider site');
 });
 
-test('no cell leaks raw source across a line boundary', { skip: !sourceTreePresent }, () => {
+test('no cell leaks raw source across a line boundary', { skip: !sourceTreePresent && !EXPLICIT }, () => {
   // The general property behind the previous test: a value pulled out of a source file must not
   // contain a newline, because a value containing one was captured across lines.
   const doc = readFileSync(CATALOG, 'utf8');

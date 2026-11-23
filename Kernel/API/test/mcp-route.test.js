@@ -25,7 +25,7 @@ async function gateway() {
   return {
     base, key,
     close: () => new Promise((resolve) => server.close(resolve)),
-    call: (body) => fetch(`${base}/v1/mcp`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` }, body: JSON.stringify(body) }),
+    call: (body) => fetch(`${base}/v1/mcp`, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', authorization: `Bearer ${key}` }, body: JSON.stringify(body) }),
   };
 }
 
@@ -36,7 +36,8 @@ test('MCP initialize + tools/list + tools/call', async (t) => {
   const init = await gw.call({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} });
   assert.equal(init.status, 200);
   const initBody = await init.json();
-  assert.equal(initBody.result.protocolVersion, '2024-11-05');
+  assert.equal(initBody.result.protocolVersion, '2025-11-25', 'the current protocol version is negotiated');
+  assert.equal(init.headers.get('mcp-protocol-version'), '2025-11-25');
   assert.equal(initBody.result.serverInfo.version, gatewayBuild().version, 'MCP reported a version that is not this build');
   assert.ok(initBody.result.capabilities.tools);
 
@@ -64,7 +65,7 @@ test('MCP refuses an unknown method and a malformed body by name', async (t) => 
   assert.equal(unknownBody.error?.code, -32601, 'an unknown method was not named as such');
 
   const malformed = await fetch(`${gw.base}/v1/mcp`, {
-    method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${gw.key}` }, body: '{',
+    method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', authorization: `Bearer ${gw.key}` }, body: '{',
   });
   assert.equal(malformed.status, 400, 'a body that is not JSON was accepted as a tool call');
 });
@@ -72,6 +73,76 @@ test('MCP refuses an unknown method and a malformed body by name', async (t) => 
 test('MCP requires auth', async (t) => {
   const gw = await gateway();
   t.after(gw.close);
-  const res = await fetch(`${gw.base}/v1/mcp`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize' }) });
+  const res = await fetch(`${gw.base}/v1/mcp`, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize' }) });
   assert.equal(res.status, 401);
+});
+
+
+const MCP_HEADERS = (key) => ({ 'content-type': 'application/json', accept: 'application/json, text/event-stream', authorization: `Bearer ${key}` });
+
+test('MCP negotiates the current version and falls back to 2024-11-05 by name', async (t) => {
+  const gw = await gateway();
+  t.after(gw.close);
+  const older = await fetch(`${gw.base}/v1/mcp`, {
+    method: 'POST', headers: MCP_HEADERS(gw.key),
+    body: JSON.stringify({ jsonrpc: '2.0', id: 10, method: 'initialize', params: { protocolVersion: '2024-11-05' } }),
+  });
+  assert.equal((await older.json()).result.protocolVersion, '2024-11-05', 'an older client is answered in the version it asked for');
+  const unknown = await fetch(`${gw.base}/v1/mcp`, {
+    method: 'POST', headers: MCP_HEADERS(gw.key),
+    body: JSON.stringify({ jsonrpc: '2.0', id: 11, method: 'initialize', params: { protocolVersion: '1999-01-01' } }),
+  });
+  assert.equal((await unknown.json()).result.protocolVersion, '2025-11-25', 'an unknown request version gets the documented fallback');
+});
+
+test('MCP requires the Streamable HTTP Accept header', async (t) => {
+  const gw = await gateway();
+  t.after(gw.close);
+  const res = await fetch(`${gw.base}/v1/mcp`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${gw.key}` },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+  });
+  assert.equal(res.status, 406);
+  assert.equal(res.headers.get('accept'), 'application/json, text/event-stream');
+  assert.equal((await res.json()).error.code, -32000);
+});
+
+test('MCP acknowledges a notification with 202 and no body', async (t) => {
+  const gw = await gateway();
+  t.after(gw.close);
+  const res = await fetch(`${gw.base}/v1/mcp`, {
+    method: 'POST', headers: MCP_HEADERS(gw.key),
+    body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }),
+  });
+  assert.equal(res.status, 202);
+  assert.equal(await res.text(), '', 'a notification has no response channel');
+});
+
+test('MCP refuses GET explicitly and checks MCP-Protocol-Version and Origin', async (t) => {
+  const gw = await gateway();
+  t.after(gw.close);
+  const get = await fetch(`${gw.base}/v1/mcp`, { method: 'GET', headers: MCP_HEADERS(gw.key) });
+  assert.equal(get.status, 405);
+  assert.match(get.headers.get('allow'), /POST/);
+
+  const badVersion = await fetch(`${gw.base}/v1/mcp`, {
+    method: 'POST', headers: { ...MCP_HEADERS(gw.key), 'mcp-protocol-version': '1999-01-01' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+  });
+  assert.equal(badVersion.status, 400);
+  assert.match((await badVersion.json()).error.message, /1999-01-01/);
+
+  const goodVersion = await fetch(`${gw.base}/v1/mcp`, {
+    method: 'POST', headers: { ...MCP_HEADERS(gw.key), 'mcp-protocol-version': '2025-11-25' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' }),
+  });
+  assert.equal(goodVersion.status, 200);
+  assert.equal(goodVersion.headers.get('mcp-protocol-version'), '2025-11-25');
+
+  const badOrigin = await fetch(`${gw.base}/v1/mcp`, {
+    method: 'POST', headers: { ...MCP_HEADERS(gw.key), origin: 'http://not-allowed.example' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/list' }),
+  });
+  assert.equal(badOrigin.status, 403);
 });

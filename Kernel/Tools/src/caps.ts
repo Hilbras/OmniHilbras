@@ -70,6 +70,8 @@ const OPENAI_WIRE = [
   'qwen',
   'qwen-token-plan',
   'tiarina',
+  'together',
+  'fireworks',
   'tokenharbor',
   'unorouter',
   'vengetic',

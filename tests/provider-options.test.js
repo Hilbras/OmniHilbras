@@ -177,7 +177,8 @@ test('THE COUNT, asserted so it cannot drift quietly', () => {
   // Cards 55 -> 56 in 3.38.0 (`deepseek-web-v2`), whose group is `v2-web` — not one the keyed dialog
   // offers — so the options stay 33.
   // Cards 56 -> 57 in 3.43.0 (`numes`): keyed, `free-tier`, so the dialog gains one: 33 -> 34.
-  assert.equal(providerCatalog.length, 58, `the catalog now has ${providerCatalog.length} cards`);
-  assert.equal(providerOptions.length, 35, `the dialog now offers ${providerOptions.length} options`);
+  // 59-60 are the `together` and `fireworks` keyed routers; both are offered by the keyed dialog.
+  assert.equal(providerCatalog.length, 60, `the catalog now has ${providerCatalog.length} cards`);
+  assert.equal(providerOptions.length, 37, `the dialog now offers ${providerOptions.length} options`);
   console.log(`    cards: ${providerCatalog.length}   dialog options: ${providerOptions.length}   ids tested: ${knownIds().length + UNKNOWN_IDS.length}`);
 });

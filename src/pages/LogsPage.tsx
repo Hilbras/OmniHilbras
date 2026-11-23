@@ -1,6 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Download, Pause, Play, Search, X } from 'lucide-react';
-import { getGatewayUsage, openGatewayLogStream, type GatewayLogEvent, type GatewayUsageRecord } from '../lib/gatewayClient';
+import { getGatewayUsage, openGatewayLogStream, requestJson, type GatewayLogEvent, type GatewayUsageRecord } from '../lib/gatewayClient';
+
+/** The opt-in detail store's row. It deliberately has no prompt or response field. */
+type GatewayRequestDetail = {
+  requestId: string;
+  at: string;
+  model: string;
+  providerId?: string;
+  errorText?: string;
+  toolNames?: string[];
+  schemaBytes?: { declared: number; forwarded: number };
+};
 
 /** The most recent events kept on the page. Older ones are dropped, so a long swarm run does not grow the page. */
 const keptEvents = 500;
@@ -78,6 +89,8 @@ export function LogsContent() {
   const [retriesOnly, setRetriesOnly] = useState(false);
   const [page, setPage] = useState(0);
   const [selected, setSelected] = useState<RecordRow | undefined>();
+  const [details, setDetails] = useState<GatewayRequestDetail[] | undefined>();
+  const [detailState, setDetailState] = useState<'idle' | 'loading' | 'ready' | 'unavailable'>('idle');
   const buffered = useRef<RecordRow[]>([]);
   const pausedRef = useRef(paused);
   pausedRef.current = paused;
@@ -110,6 +123,27 @@ export function LogsContent() {
     },
     setConnected,
   ), []);
+
+  // The detail store is opt-in. This reads only what the gateway returned for the selected request;
+  // an empty answer says "not recorded here" rather than starting a timer that guesses a value.
+  useEffect(() => {
+    const requestId = selected && 'requestId' in selected ? selected.requestId : undefined;
+    if (!requestId) { setDetails(undefined); setDetailState('idle'); return; }
+    const controller = new AbortController();
+    setDetailState('loading');
+    requestJson(`/v1/observability/request-details?requestId=${encodeURIComponent(requestId)}`, { signal: controller.signal })
+      .then((answer) => {
+        const reply = answer as { data: GatewayRequestDetail[]; enabled: boolean };
+        setDetails(Array.isArray(reply.data) ? reply.data : []);
+        setDetailState(reply.enabled ? 'ready' : 'unavailable');
+      })
+      .catch((cause: unknown) => {
+        if (cause instanceof DOMException && cause.name === 'AbortError') return;
+        setDetails(undefined);
+        setDetailState('unavailable');
+      });
+    return () => controller.abort();
+  }, [selected]);
 
   const resume = useCallback(() => {
     setPaused(false);
@@ -364,6 +398,21 @@ export function LogsContent() {
                   </li>
                 ))}
               </ul>
+            </div>
+          )}
+          {detailState !== 'idle' && (
+            <div className="mt-3 border-t border-line pt-3">
+              <p className="mono-label">Operator detail (opt-in store, redacted)</p>
+              {detailState === 'loading' && <p className="muted mt-1 text-[11px]">Reading the detail store…</p>}
+              {detailState === 'unavailable' && <p className="muted mt-1 text-[11px]">No detail store configured on this gateway. Usage records never hold content.</p>}
+              {detailState === 'ready' && (details?.length ?? 0) === 0 && <p className="muted mt-1 text-[11px]">Nothing was recorded for this request id.</p>}
+              {(details ?? []).map((detail) => (
+                <dl key={`${detail.requestId}-${detail.at}`} className="mt-1 grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] sm:grid-cols-3">
+                  <div><dt className="muted">Error line</dt><dd className="break-all font-mono">{detail.errorText ?? '—'}</dd></div>
+                  <div><dt className="muted">Tools</dt><dd className="break-all font-mono">{detail.toolNames?.join(', ') ?? '—'}</dd></div>
+                  <div><dt className="muted">Schema bytes</dt><dd className="font-mono">{detail.schemaBytes ? `${detail.schemaBytes.declared} declared / ${detail.schemaBytes.forwarded} sent` : '—'}</dd></div>
+                </dl>
+              ))}
             </div>
           )}
         </section>

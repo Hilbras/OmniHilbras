@@ -31,5 +31,21 @@ export async function handleObservabilityRoute(ctx: RouteContext): Promise<boole
     }, origin);
     return true;
   }
+  if (request.method === 'GET' && url.pathname === `${observabilityPrefix}/request-details`) {
+    const store = service.requestDetailStore;
+    if (!store) {
+      sendJson(response, 200, { object: 'list', data: [], enabled: false, reason: 'This gateway was not configured with a request-detail store.' }, origin);
+      return true;
+    }
+    const requestId = url.searchParams.get('requestId') ?? undefined;
+    const limit = url.searchParams.get('limit');
+    const parsedLimit = limit === null ? undefined : Number(limit);
+    const data = await store.list({
+      ...(requestId ? { requestId } : {}),
+      ...(parsedLimit !== undefined && Number.isSafeInteger(parsedLimit) && parsedLimit > 0 ? { limit: Math.min(parsedLimit, 200) } : {}),
+    });
+    sendJson(response, 200, { object: 'list', data, enabled: true }, origin);
+    return true;
+  }
   return false;
 }

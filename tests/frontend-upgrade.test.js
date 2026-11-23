@@ -27,6 +27,10 @@ const PAGES = [
   'SettingsPage',
   'AboutPage',
   'TokenSaverPage',
+  'MitmPage',
+  'ProxyPoolsPage',
+  'TunnelsPage',
+  'SkillsPage',
 ];
 
 test('no dashboard page is imported into the entry chunk', async () => {
@@ -36,7 +40,7 @@ test('no dashboard page is imported into the entry chunk', async () => {
   assert.match(app, /from '\.\/lib\/pageChunks'/, 'the router no longer reads the lazy page map');
 });
 
-test('every page is a lazy chunk, and the map names all eleven', async () => {
+test('every page is a lazy chunk, and the map names every page', async () => {
   const chunks = await read('src/lib/pageChunks.ts');
   const loaded = [...chunks.matchAll(/lazy\(\(\) => import\('\.\.\/pages\/([A-Za-z]+)'\)/g)].map((match) => match[1]);
   assert.deepEqual([...loaded].sort(), [...PAGES].sort(), 'a page is missing from the lazy map, or one was added without it');

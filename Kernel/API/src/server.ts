@@ -32,6 +32,7 @@ import { handleLocaleRoute } from './routes/locale.js';
 import { handleRuntimeRoute } from './routes/runtime.js';
 import { handleMediaRoute } from './routes/media.js';
 import { handleMcpRoute } from './routes/mcp.js';
+import { handleFetchRoute } from './routes/fetch.js';
 import type { RouteContext } from './routes/route-context.js';
 import type { ApiKeyStore } from './core/api-keys.js';
 import type { ConnectionStore } from './core/connections.js';
@@ -120,6 +121,7 @@ const routes = [
   handleRuntimeRoute,
   handleMediaRoute,
   handleMcpRoute,
+  handleFetchRoute,
   // Last, because it carries the authentication gate for the LLM surface and must not shadow
   // anything above.
   handleInferenceRoute,
@@ -218,7 +220,7 @@ export function createGatewayServer(service: GatewayService, options: GatewaySer
     };
     const responseOrigin = allowedOrigin ? requestOrigin : undefined;
     setCors(response, responseOrigin);
-    if (request.url?.startsWith('/v1/connections') || request.url?.startsWith('/v1/keys') || request.url?.startsWith('/v1/settings') || request.url?.startsWith('/v1/usage') || request.url?.startsWith('/v1/oauth') || request.url?.startsWith('/v1/virtual-models') || request.url?.startsWith('/v1/skills') || request.url?.startsWith('/v1/workspaces') || request.url?.startsWith('/v1/tunnels') || request.url?.startsWith('/v1/mitm') || request.url?.startsWith('/v1/proxy-pools') || request.url?.startsWith('/v1/provider-nodes') || request.url?.startsWith('/v1/observability') || request.url?.startsWith('/v1/pxpipe') || request.url?.startsWith('/v1/locale') || request.url?.startsWith('/v1/runtime') || request.url?.startsWith('/v1/audio') || request.url?.startsWith('/v1/search') || request.url?.startsWith('/v1/token-saver') || request.url?.startsWith('/v1/backup')) response.setHeader('cache-control', 'no-store');
+    if (request.url?.startsWith('/v1/connections') || request.url?.startsWith('/v1/keys') || request.url?.startsWith('/v1/settings') || request.url?.startsWith('/v1/usage') || request.url?.startsWith('/v1/oauth') || request.url?.startsWith('/v1/virtual-models') || request.url?.startsWith('/v1/skills') || request.url?.startsWith('/v1/workspaces') || request.url?.startsWith('/v1/tunnels') || request.url?.startsWith('/v1/mitm') || request.url?.startsWith('/v1/proxy-pools') || request.url?.startsWith('/v1/provider-nodes') || request.url?.startsWith('/v1/observability') || request.url?.startsWith('/v1/pxpipe') || request.url?.startsWith('/v1/locale') || request.url?.startsWith('/v1/runtime') || request.url?.startsWith('/v1/fetch') || request.url?.startsWith('/v1/audio') || request.url?.startsWith('/v1/search') || request.url?.startsWith('/v1/token-saver') || request.url?.startsWith('/v1/backup')) response.setHeader('cache-control', 'no-store');
     /**
      * The LLM surface, counted per caller.
      *
@@ -403,7 +405,7 @@ export async function startGatewayServer(options: {
  * were already reachable, because `authorize()` returns before it can refuse anything. What changed is that
  * a gateway *with* keys enforced now answers the navigation the same way a gateway without them does.
  */
-const MANAGEMENT_PREFIXES = ['/metrics', '/v1/connections', '/v1/keys', '/v1/oauth', '/v1/settings', '/v1/web-cookie', '/v1/routing', '/v1/usage', '/v1/providers', '/v1/logs', '/v1/events', '/v1/health', '/v1/system', '/v1/backup', '/v1/token-saver', '/v1/virtual-models', '/v1/skills', '/v1/workspaces', '/v1/tunnels', '/v1/mitm', '/v1/proxy-pools', '/v1/provider-nodes', '/v1/observability', '/v1/pxpipe', '/v1/locale', '/v1/audio/speech', '/v1/audio/transcriptions', '/v1/search', '/v1/runtime'] as const;
+const MANAGEMENT_PREFIXES = ['/metrics', '/v1/connections', '/v1/keys', '/v1/oauth', '/v1/settings', '/v1/web-cookie', '/v1/routing', '/v1/usage', '/v1/providers', '/v1/logs', '/v1/events', '/v1/health', '/v1/system', '/v1/backup', '/v1/token-saver', '/v1/virtual-models', '/v1/skills', '/v1/workspaces', '/v1/tunnels', '/v1/mitm', '/v1/proxy-pools', '/v1/provider-nodes', '/v1/observability', '/v1/pxpipe', '/v1/locale', '/v1/audio/speech', '/v1/audio/transcriptions', '/v1/search', '/v1/runtime', '/v1/fetch'] as const;
 
 function isManagementPath(pathname: string) {
   return MANAGEMENT_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));

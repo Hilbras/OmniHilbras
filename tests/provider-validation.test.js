@@ -54,3 +54,22 @@ test('every own-provider factory forwards the gateway transport', async () => {
     assert.equal(adapter.transport, service.transport, `${id} is registered without the gateway transport`);
   }
 });
+
+test('the together and fireworks registrations are real OpenAI-compatible chat adapters', async () => {
+  const expected = {
+    together: 'api.together.xyz',
+    fireworks: 'api.fireworks.ai',
+  };
+  for (const [id, host] of Object.entries(expected)) {
+    const transport = scriptedTransport({ wireFormat: 'openai', catalog: ['router-model'] });
+    const adapter = OWN_PROVIDER_ADAPTERS[id].create({ transport });
+    assert.equal(adapter.id, id);
+    assert.equal(OWN_PROVIDER_ADAPTERS[id].validation, 'none', `${id} must declare why Check cannot prove a public-catalog key`);
+    const response = await adapter.chat({ model: 'router-model', messages: [{ role: 'user', content: 'ping' }] }, { credential: { type: 'api-key', value: 'key' } });
+    assert.ok(response.message, `${id} did not answer a scripted chat turn`);
+    const chatCall = transport.seen.find((call) => /chat\/completions/.test(call.url));
+    assert.ok(chatCall, `${id} never sent a chat request`);
+    assert.equal(new URL(chatCall.url).hostname, host);
+    assert.match(chatCall.body ?? '', /router-model/, `${id} dropped the requested model`);
+  }
+});

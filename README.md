@@ -24,7 +24,7 @@
   <a href="./CONTRIBUTING.md">Contributing</a>
 </p>
 
-**Current version: 3.95.0**
+**Current version: 3.96.0**
 
 OmniHilbras sits between your application and the model providers you already use. It gives every client one
 OpenAI-compatible endpoint, keeps credentials on your machine, and decides which saved connection serves each
@@ -316,6 +316,10 @@ provider accounts. Disabling the card stops the alias without deleting its targe
 | `priority` | Lower target priority first — usually a primary plus fallbacks |
 | `round-robin` | Rotate the enabled targets in order |
 | `fastest` | Prefer the account with a measured faster round trip; unmeasured targets last |
+| `smart` | Spend one extra billable router turn; use its choice only above the configured confidence, and reuse it per conversation when sticky |
+| `fusion` | Ask every enabled target in parallel (one billable turn each), then one billable judge turn synthesises anonymised `Source N` answers |
+
+`smart` needs a concrete `routerModel` id; a low-confidence or failed router call falls back to declared order. `fusion` needs a concrete `judgeModel` id, refuses to start with no enabled panel member, forwards a client abort to every outstanding member, and never invents an answer when all members fail. Both strategies are disclosed as extra costs on the Models page before saving.
 
 Each target becomes an ordinary route candidate with an upstream model override, so health, credentials, rate
 limits, concurrency and the failure rules above apply unchanged. `GET /v1/models` lists enabled virtual models
@@ -370,6 +374,10 @@ One React Router app mounted at `/dashboard`; client-side navigation never reloa
 | `/dashboard/logs` | Live request log |
 | `/dashboard/settings` | Loaded configuration and desktop settings |
 | `/dashboard/token-saver` | Measured savings from context compression |
+| `/dashboard/mitm` | Saved MITM profiles from `GET /v1/mitm` |
+| `/dashboard/proxy-pools` | Saved proxy pools from `GET /v1/proxy-pools` |
+| `/dashboard/tunnels` | Saved tunnels from `GET /v1/tunnels` |
+| `/dashboard/skills` | Saved skills from `GET /v1/skills` |
 | `/dashboard/about` | Build provenance and the limits of this installation |
 
 There is no Overview page: the earlier one had no data source and was removed rather than kept. `/dashboard`

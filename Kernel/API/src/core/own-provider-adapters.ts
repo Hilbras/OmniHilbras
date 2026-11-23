@@ -1,7 +1,7 @@
 import { providerClientHeaders } from './provider-client-identity.js';
 import { providerResponsesPath } from './provider-responses-lane.js';
 import type { ProviderAdapter } from './index.js';
-import type { OpenAICompatibleAdapterOptions } from '@omnihilbras/sdk-openai';
+import { OpenAICompatibleAdapter, type OpenAICompatibleAdapterOptions } from '@omnihilbras/sdk-openai';
 import type { CredentialValidationStrategy } from './provider-resolver.js';
 
 import { AgnesAiAdapter } from '@omnihilbras/sdk-agnes-ai';
@@ -50,6 +50,20 @@ export type OwnAdapterEntry = {
 const withTransport = (options?: OwnAdapterOptions): OpenAICompatibleAdapterOptions =>
   options?.transport ? { transport: options.transport } : {};
 
+/**
+ * A keyed OpenAI-compatible router with no dedicated SDK package.
+ *
+ * `validation: 'none'` is declared, not inherited: these routers publish a catalog that answers a
+ * bogus key, so an authenticated-catalog Check would report green for any string. The card says API
+ * key and the gateway sends it; proving it belongs to a person is the model request's job.
+ */
+const openAiRouter = (id: string, name: string, baseUrl: string): OwnAdapterEntry => ({
+  validation: 'none',
+  create: (options) => new OpenAICompatibleAdapter({
+    id, name, baseUrl: options?.endpoint ?? baseUrl,
+  }, withTransport(options)),
+});
+
 export const OWN_PROVIDER_ADAPTERS: Readonly<Record<string, OwnAdapterEntry>> = Object.freeze({
   'agnes-ai': { validation: 'none', create: (options) => new AgnesAiAdapter(withTransport(options)) },
   // AgentRouter gates on a client identity. Its own package owns the adapter; the gateway supplies the
@@ -86,4 +100,6 @@ export const OWN_PROVIDER_ADAPTERS: Readonly<Record<string, OwnAdapterEntry>> = 
   // the key with a real 1-token inference. This is why the strategy lives beside the factory.
   'nvidia': { validation: 'credential', create: (options) => new NvidiaAdapter(withTransport(options)) },
   'coarena': { validation: 'none', create: (options) => new CoarenaAdapter(withTransport(options)) },
+  'together': openAiRouter('together', 'Together AI', 'https://api.together.xyz/v1'),
+  'fireworks': openAiRouter('fireworks', 'Fireworks AI', 'https://api.fireworks.ai/inference/v1'),
 });

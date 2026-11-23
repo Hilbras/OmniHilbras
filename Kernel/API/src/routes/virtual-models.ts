@@ -42,6 +42,12 @@ function parseBody(raw: unknown, forcedId?: string): VirtualModelInput {
   if (raw.strategy !== undefined && typeof raw.strategy !== 'string') throw invalidRequest('strategy must be a string.');
   if (raw.name !== undefined && typeof raw.name !== 'string') throw invalidRequest('name must be a string.');
   if (raw.enabled !== undefined && typeof raw.enabled !== 'boolean') throw invalidRequest('enabled must be a boolean.');
+  const optionalStrings = ['routerModel', 'judgeModel'];
+  for (const field of optionalStrings) if (raw[field] !== undefined && typeof raw[field] !== 'string') throw invalidRequest(`${field} must be a string.`);
+  for (const field of ['confidenceThreshold', 'quorum', 'graceMs', 'hardTimeoutMs'] as const) {
+    if (raw[field] !== undefined && typeof raw[field] !== 'number') throw invalidRequest(`${field} must be a number.`);
+  }
+  if (raw.sessionSticky !== undefined && typeof raw.sessionSticky !== 'boolean') throw invalidRequest('sessionSticky must be a boolean.');
   const targets = (raw.targets ?? []).map((target) => {
     if (!isRecord(target)) throw invalidRequest('Every target must be an object.');
     if (typeof target.connectionId !== 'string') throw invalidRequest('Every target needs a connectionId.');
@@ -59,6 +65,13 @@ function parseBody(raw: unknown, forcedId?: string): VirtualModelInput {
       ...(typeof raw.name === 'string' ? { name: raw.name } : {}),
       ...(typeof raw.enabled === 'boolean' ? { enabled: raw.enabled } : {}),
       ...(typeof raw.strategy === 'string' ? { strategy: raw.strategy as VirtualModelInput['strategy'] } : {}),
+      ...(typeof raw.routerModel === 'string' ? { routerModel: raw.routerModel } : {}),
+      ...(typeof raw.confidenceThreshold === 'number' ? { confidenceThreshold: raw.confidenceThreshold } : {}),
+      ...(typeof raw.sessionSticky === 'boolean' ? { sessionSticky: raw.sessionSticky } : {}),
+      ...(typeof raw.judgeModel === 'string' ? { judgeModel: raw.judgeModel } : {}),
+      ...(typeof raw.quorum === 'number' ? { quorum: raw.quorum } : {}),
+      ...(typeof raw.graceMs === 'number' ? { graceMs: raw.graceMs } : {}),
+      ...(typeof raw.hardTimeoutMs === 'number' ? { hardTimeoutMs: raw.hardTimeoutMs } : {}),
       targets,
     });
   } catch (error) {

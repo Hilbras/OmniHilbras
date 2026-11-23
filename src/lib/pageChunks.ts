@@ -28,6 +28,10 @@ export const LogsContent = lazy(() => import('../pages/LogsPage').then((module) 
 export const SettingsContent = lazy(() => import('../pages/SettingsPage').then((module) => ({ default: module.SettingsContent })));
 export const AboutContent = lazy(() => import('../pages/AboutPage').then((module) => ({ default: module.AboutContent })));
 export const TokenSaverContent = lazy(() => import('../pages/TokenSaverPage').then((module) => ({ default: module.TokenSaverContent })));
+export const MitmContent = lazy(() => import('../pages/MitmPage').then((module) => ({ default: module.MitmContent })));
+export const ProxyPoolsContent = lazy(() => import('../pages/ProxyPoolsPage').then((module) => ({ default: module.ProxyPoolsContent })));
+export const TunnelsContent = lazy(() => import('../pages/TunnelsPage').then((module) => ({ default: module.TunnelsContent })));
+export const SkillsContent = lazy(() => import('../pages/SkillsPage').then((module) => ({ default: module.SkillsContent })));
 
 /**
  * The module behind each nav path, for the preload.
@@ -47,6 +51,10 @@ const prefetchable: Record<string, () => Promise<unknown>> = {
   '/settings': () => import('../pages/SettingsPage'),
   '/about': () => import('../pages/AboutPage'),
   '/token-saver': () => import('../pages/TokenSaverPage'),
+  '/mitm': () => import('../pages/MitmPage'),
+  '/proxy-pools': () => import('../pages/ProxyPoolsPage'),
+  '/tunnels': () => import('../pages/TunnelsPage'),
+  '/skills': () => import('../pages/SkillsPage'),
 };
 
 /**

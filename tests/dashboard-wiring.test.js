@@ -350,3 +350,20 @@ test('the usage page says which window it is showing, and what is in it', () => 
   // e2e stub, which answers `{ object: 'list', data: [] }`. A missing figure is a dash, never a crash.
   assert.doesNotMatch(page, /summary\.totals\./, 'the window line dereferences a totals object that may be absent');
 });
+
+test('the four operator pages read only gateways routes that exist', () => {
+  const routes = read('src/lib/routes.ts');
+  const app = read('src/dashboardApp.tsx');
+  const shell = read('src/components/DashboardShell.tsx');
+  const clients = read('src/lib/gatewayClient.ts');
+  const paths = { mitm: '/v1/mitm', proxyPools: '/v1/proxy-pools', tunnels: '/v1/tunnels', skills: '/v1/skills' };
+  for (const [name, path] of Object.entries(paths)) {
+    assert.match(clients, new RegExp(`listGateway${name[0].toUpperCase()}${name.slice(1)}`), `${name} has no gateway client call`);
+    assert.ok(clients.includes(`'${path}'`), `the client never asks ${path}`);
+    assert.match(app, new RegExp(`dashboardRoutes\\.${name}`), `${name} has no router entry`);
+    assert.doesNotMatch(shell, new RegExp(`label: '[^']+',[^\\n]*page: '${name}'[^\\n]*pending: true`), `${name} is still a "soon" entry`);
+    assert.match(routes, new RegExp(`${name}: '/`), `${name} is not a declared router path`);
+  }
+  assert.match(read('src/components/OperatorRecordsPage.tsx'), /setError\(cause instanceof Error \? cause\.message/, 'a gateway refusal is not shown verbatim');
+  assert.doesNotMatch(read('src/components/OperatorRecordsPage.tsx'), /setTimeout|setInterval/, 'a timer changes operator state');
+});

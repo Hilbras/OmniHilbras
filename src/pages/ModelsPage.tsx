@@ -31,10 +31,25 @@ const strategies: Array<{ value: GatewayVirtualModel['strategy']; label: string;
   { value: 'priority', label: 'Priority', hint: 'Try the lowest-numbered target first.' },
   { value: 'round-robin', label: 'Round robin', hint: 'Rotate targets in order.' },
   { value: 'fastest', label: 'Fastest', hint: 'Prefer the measured fastest account; unmeasured targets come last.' },
+  { value: 'smart', label: 'Smart', hint: 'One billable router turn picks a target by confidence.' },
+  { value: 'fusion', label: 'Fusion', hint: 'One billable turn per panel member plus one judge turn.' },
 ];
 
 type DraftTarget = { connectionId: string; upstreamModelId: string; priority: number; enabled: boolean };
-type Draft = { id: string; name: string; strategy: GatewayVirtualModel['strategy']; enabled: boolean; targets: DraftTarget[] };
+type Draft = {
+  id: string;
+  name: string;
+  strategy: GatewayVirtualModel['strategy'];
+  enabled: boolean;
+  targets: DraftTarget[];
+  routerModel: string;
+  confidenceThreshold: number;
+  sessionSticky: boolean;
+  judgeModel: string;
+  quorum: number;
+  graceMs: number;
+  hardTimeoutMs: number;
+};
 
 function emptyDraft(connections: GatewayConnection[]): Draft {
   const first = connections[0];
@@ -44,6 +59,13 @@ function emptyDraft(connections: GatewayConnection[]): Draft {
     strategy: 'priority',
     enabled: true,
     targets: first ? [{ connectionId: first.id, upstreamModelId: first.modelIds[0] ?? '', priority: 1, enabled: true }] : [],
+    routerModel: '',
+    confidenceThreshold: 0.8,
+    sessionSticky: true,
+    judgeModel: '',
+    quorum: 2,
+    graceMs: 2000,
+    hardTimeoutMs: 90000,
   };
 }
 
@@ -54,6 +76,13 @@ function toDraft(model: GatewayVirtualModel): Draft {
     strategy: model.strategy,
     enabled: model.enabled,
     targets: model.targets.map((target) => ({ ...target })),
+    routerModel: model.routerModel ?? '',
+    confidenceThreshold: model.confidenceThreshold ?? 0.8,
+    sessionSticky: model.sessionSticky ?? true,
+    judgeModel: model.judgeModel ?? '',
+    quorum: model.quorum ?? 2,
+    graceMs: model.graceMs ?? 2000,
+    hardTimeoutMs: model.hardTimeoutMs ?? 90000,
   };
 }
 
@@ -164,6 +193,14 @@ export function ModelsContent() {
       setError('Add at least one target.');
       return;
     }
+    if (draft.strategy === 'smart' && !draft.routerModel.trim()) {
+      setError('Smart needs a concrete router model id (not an oh/ id).');
+      return;
+    }
+    if (draft.strategy === 'fusion' && !draft.judgeModel.trim()) {
+      setError('Fusion needs a concrete judge model id (not an oh/ id).');
+      return;
+    }
     setSaving(true);
     setError(undefined);
     try {
@@ -171,6 +208,17 @@ export function ModelsContent() {
         name: draft.name || draft.id.slice(3),
         enabled: draft.enabled,
         strategy: draft.strategy,
+        ...(draft.strategy === 'smart' ? {
+          routerModel: draft.routerModel,
+          confidenceThreshold: draft.confidenceThreshold,
+          sessionSticky: draft.sessionSticky,
+        } : {}),
+        ...(draft.strategy === 'fusion' ? {
+          judgeModel: draft.judgeModel,
+          quorum: draft.quorum,
+          graceMs: draft.graceMs,
+          hardTimeoutMs: draft.hardTimeoutMs,
+        } : {}),
         targets: draft.targets.map((target) => ({
           connectionId: target.connectionId,
           upstreamModelId: target.upstreamModelId,
@@ -416,6 +464,28 @@ export function ModelsContent() {
               <label className="block sm:col-span-2"><span className="mono-label mb-1.5 block">Public model id</span><input value={draft.id} onChange={(event) => setDraft((current) => current ? { ...current, id: event.target.value } : current)} placeholder="oh/chat" className="input font-mono" /><span className={`mt-1 block text-[10px] ${draft.id.startsWith('oh/') && draft.id.length > 3 ? 'text-muted' : 'text-danger'}`}>Must start with <code className="font-mono">oh/</code>. Clients send this exact id.</span></label>
               <label className="block"><span className="mono-label mb-1.5 block">Display name</span><input value={draft.name} onChange={(event) => setDraft((current) => current ? { ...current, name: event.target.value } : current)} placeholder="Chat" className="input" /></label>
               <label className="block"><span className="mono-label mb-1.5 block">Strategy</span><select value={draft.strategy} onChange={(event) => setDraft((current) => current ? { ...current, strategy: event.target.value as Draft['strategy'] } : current)} className="input">{strategies.map((strategy) => <option key={strategy.value} value={strategy.value}>{strategy.label} — {strategy.hint}</option>)}</select></label>
+              {(draft.strategy === 'smart' || draft.strategy === 'fusion') && (
+                <p role="note" className="rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-[11px] text-warning sm:col-span-2">
+                  {draft.strategy === 'smart'
+                    ? 'Smart spends one additional billable router turn before each new conversation. Low confidence or a router error keeps the declared target order.'
+                    : 'Fusion spends one billable turn on every enabled target plus one billable judge turn. Panel answers are anonymised as Source N before the judge sees them.'}
+                </p>
+              )}
+              {draft.strategy === 'smart' && (
+                <>
+                  <label className="block sm:col-span-2"><span className="mono-label mb-1.5 block">Router model id</span><input value={draft.routerModel} onChange={(event) => setDraft((current) => current ? { ...current, routerModel: event.target.value } : current)} placeholder="openai/gpt-4o-mini" className="input font-mono" /><span className="muted mt-1 block text-[10px]">A concrete model the gateway can call. It must not be an <code className="font-mono">oh/</code> id.</span></label>
+                  <label className="block"><span className="mono-label mb-1.5 block">Confidence threshold (0–1)</span><input type="number" min={0} max={1} step={0.05} value={draft.confidenceThreshold} onChange={(event) => setDraft((current) => current ? { ...current, confidenceThreshold: Number(event.target.value) } : current)} className="input" /></label>
+                  <label className="flex items-center gap-2 self-end pb-2 text-xs text-muted"><input type="checkbox" checked={draft.sessionSticky} onChange={(event) => setDraft((current) => current ? { ...current, sessionSticky: event.target.checked } : current)} /> Sticky per conversation</label>
+                </>
+              )}
+              {draft.strategy === 'fusion' && (
+                <>
+                  <label className="block sm:col-span-2"><span className="mono-label mb-1.5 block">Judge model id</span><input value={draft.judgeModel} onChange={(event) => setDraft((current) => current ? { ...current, judgeModel: event.target.value } : current)} placeholder="openai/gpt-4o-mini" className="input font-mono" /><span className="muted mt-1 block text-[10px]">A concrete model that synthesises the panel. It must not be an <code className="font-mono">oh/</code> id.</span></label>
+                  <label className="block"><span className="mono-label mb-1.5 block">Quorum</span><input type="number" min={1} value={draft.quorum} onChange={(event) => setDraft((current) => current ? { ...current, quorum: Number(event.target.value) } : current)} className="input" /></label>
+                  <label className="block"><span className="mono-label mb-1.5 block">Grace after quorum (ms)</span><input type="number" min={0} value={draft.graceMs} onChange={(event) => setDraft((current) => current ? { ...current, graceMs: Number(event.target.value) } : current)} className="input" /></label>
+                  <label className="block"><span className="mono-label mb-1.5 block">Hard timeout (ms)</span><input type="number" min={0} value={draft.hardTimeoutMs} onChange={(event) => setDraft((current) => current ? { ...current, hardTimeoutMs: Number(event.target.value) } : current)} className="input" /></label>
+                </>
+              )}
             </div>
 
             <div className="mt-5">

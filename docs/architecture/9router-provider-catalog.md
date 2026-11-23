@@ -1,16 +1,16 @@
 # 9router provider and model catalog
 
 **Generated file — do not edit by hand.**
-Source: `open-sse/providers/registry/*.js` in `/home/gin/work/9router`.
+Source: `open-sse/providers/registry/*.js` in `/mnt/sda3/work/projects.old/9router`.
 Regenerate with `node scripts/build-9router-catalog.mjs`; `node scripts/build-9router-catalog.mjs --check`
 fails when the committed file is stale.
 
 | | Count |
 | --- | --- |
-| Registry entries | 124 |
-| Models declared in the registry | 1055 |
-| Entries with a static model list | 93 |
-| Entries that resolve models at runtime | 31 |
+| Registry entries | 148 |
+| Models declared in the registry | 1384 |
+| Entries with a static model list | 115 |
+| Entries that resolve models at runtime | 33 |
 
 A model id here is a **string the registry declares**. Nothing in this file is a measurement:
 none of it was confirmed by calling a provider, and a model id being present is not evidence
@@ -21,23 +21,23 @@ entries list models that only a paid tier serves.
 
 | Category | Entries |
 | --- | --- |
-| `apikey` | 78 |
-| `oauth` | 21 |
-| `freeTier` | 18 |
+| `apikey` | 91 |
+| `oauth` | 25 |
+| `freeTier` | 20 |
+| `webCookie` | 7 |
 | `free` | 5 |
-| `webCookie` | 2 |
 
 ## Models by kind
 
 | Kind | Models |
 | --- | --- |
-| chat / language | 864 |
-| image generation (`image`) | 92 |
-| embeddings (`embedding`) | 34 |
-| text-to-speech (`tts`) | 29 |
-| speech-to-text (`stt`) | 22 |
-| video (`video`) | 10 |
-| system (non-LLM) (`systemone`) | 4 |
+| chat / language | 1006 |
+| embeddings (`embedding`) | 131 |
+| image generation (`image`) | 117 |
+| text-to-speech (`tts`) | 47 |
+| video (`video`) | 44 |
+| speech-to-text (`stt`) | 25 |
+| system (non-LLM) (`systemone`) | 14 |
 
 ## Providers
 
@@ -111,12 +111,23 @@ something other than chat.
 | `best` | Best (Nano + Universal) | speech-to-text |
 | `nano` | Nano (Fast) | speech-to-text |
 
+#### `atria` — Atria Dawn <sub>[site](https://atria-asi.ai)</sub>
+
+| Model id | Name | Kind |
+| --- | --- | --- |
+| `Atria-Dawn-Preview` | Atria Dawn Preview | chat |
+
 #### `aws-polly` — AWS Polly <sub>[site](https://aws.amazon.com/polly/) · `tts`</sub>
 
 - No static model list. This entry resolves its models at runtime — from the account, the
   provider's own catalogue endpoint, or a local daemon — so nothing can be enumerated here.
 
 #### `azure` — Azure OpenAI <sub>[site](https://azure.microsoft.com/en-us/products/ai-services/openai-service)</sub>
+
+- No static model list. This entry resolves its models at runtime — from the account, the
+  provider's own catalogue endpoint, or a local daemon — so nothing can be enumerated here.
+
+#### `bai` — B.AI <sub>[site](https://b.ai)</sub>
 
 - No static model list. This entry resolves its models at runtime — from the account, the
   provider's own catalogue endpoint, or a local daemon — so nothing can be enumerated here.
@@ -132,6 +143,25 @@ something other than chat.
 | `kimi-k2.6` | Kimi K2.6 | chat |
 | `qwen3.5-397b-a17b` | Qwen 3.5 397B A17B | chat |
 | `qwen3.5-27b` | Qwen 3.5 27B | chat |
+
+#### `bedrock-xai` — AWS Bedrock (xAI) <sub>[site](https://aws.amazon.com/bedrock/)</sub>
+
+| Model id | Name | Kind |
+| --- | --- | --- |
+| `us.xai.grok-4.6` | Grok 4.6 | chat |
+| `global.xai.grok-4.6` | Grok 4.6 (global) | chat |
+
+#### `bedrock` — AWS Bedrock <sub>[site](https://aws.amazon.com/bedrock/)</sub>
+
+| Model id | Name | Kind |
+| --- | --- | --- |
+| `us.anthropic.claude-opus-5` | Claude Opus 5 | chat |
+| `us.anthropic.claude-sonnet-5` | Claude Sonnet 5 | chat |
+| `us.anthropic.claude-fable-5` | Claude Fable 5 | chat |
+| `us.anthropic.claude-opus-4-8` | Claude Opus 4.8 | chat |
+| `us.anthropic.claude-opus-4-7` | Claude Opus 4.7 | chat |
+| `us.anthropic.claude-sonnet-4-6` | Claude Sonnet 4.6 | chat |
+| `us.anthropic.claude-3-haiku-20240307-v1:0` | Claude 3 Haiku | chat |
 
 #### `black-forest-labs` — Black Forest Labs <sub>[site](https://blackforestlabs.ai) · `image`</sub>
 
@@ -225,6 +255,7 @@ something other than chat.
 | --- | --- | --- |
 | `deepseek/deepseek-v4-pro` | DeepSeek V4 Pro | chat |
 | `deepseek/deepseek-v4-flash` | DeepSeek V4 Flash | chat |
+| `moonshotai/Kimi-K3.1-Pro` | Kimi K3.1 Pro | chat |
 | `moonshotai/Kimi-K2.7-Code` | Kimi K2.7 Code | chat |
 | `moonshotai/Kimi-K2.7-Code-Highspeed` | Kimi K2.7 Code HighSpeed | chat |
 | `moonshotai/Kimi-K2.6` | Kimi K2.6 | chat |
@@ -245,6 +276,16 @@ something other than chat.
 | `stepfun/Step-3.7-Flash` | Step 3.7 Flash | chat |
 | `stepfun/Step-3.5-Flash` | Step 3.5 Flash | chat |
 | `nvidia/nemotron-3-ultra-550b-a55b` | Nemotron 3 Ultra | chat |
+| `google/gemini-4-carbon` | Gemini 4 Carbon | chat |
+| `claude-fable-5-2` | Claude Fable 5.2 | chat |
+
+#### `dahl` — Dahl Inference <sub>[site](https://dahl.global)</sub>
+
+| Model id | Name | Kind |
+| --- | --- | --- |
+| `zai-org/GLM-5.3-Flash` | GLM-5.3 Flash | chat |
+| `deepseek-ai/DeepSeek-V4-Flash-0731` | DeepSeek V4 Flash 0731 | chat |
+| `MiniMaxAI/MiniMax-M2.7` | MiniMax M2.7 | chat |
 
 #### `deepgram` — Deepgram <sub>[site](https://deepgram.com) · `stt`</sub>
 
@@ -268,7 +309,7 @@ something other than chat.
 | `deepseek-chat` | DeepSeek V3.2 Chat | chat |
 | `deepseek-reasoner` | DeepSeek V3.2 Reasoner | chat |
 
-#### `elevenlabs` — ElevenLabs <sub>[site](https://elevenlabs.io) · `tts`</sub>
+#### `elevenlabs` — ElevenLabs <sub>[site](https://elevenlabs.io) · `tts`, `stt`</sub>
 
 - No static model list. This entry resolves its models at runtime — from the account, the
   provider's own catalogue endpoint, or a local daemon — so nothing can be enumerated here.
@@ -339,19 +380,6 @@ something other than chat.
 | `glm-4.6v` | GLM 4.6V (Vision) | chat |
 | `glm-4.6` | GLM-4.6 | chat |
 | `glm-4.5-air` | GLM-4.5-Air | chat |
-
-#### `glm` — GLM Coding <sub>[site](https://open.bigmodel.cn) · `llm`, `webSearch`</sub>
-
-| Model id | Name | Kind |
-| --- | --- | --- |
-| `glm-5.3` | GLM 5.3 | chat |
-| `glm-5.3-flash` | GLM 5.3 Flash (Vision) | chat |
-| `glm-5.2` | GLM 5.2 | chat |
-| `glm-5.1` | GLM 5.1 | chat |
-| `glm-5-turbo` | GLM 5 Turbo | chat |
-| `glm-5` | GLM 5 | chat |
-| `glm-4.7` | GLM 4.7 | chat |
-| `glm-4.6v` | GLM 4.6V (Vision) | chat |
 
 #### `google-pse` — Google PSE <sub>[site](https://programmablesearchengine.google.com) · `webSearch`</sub>
 
@@ -504,6 +532,13 @@ something other than chat.
 | `morph-qwen36-27b` | Qwen 3.6 27B (Morph) | chat |
 | `morph-dsv4flash` | DeepSeek V4 Flash (Morph) | chat |
 
+#### `nace` — Nace Drex <sub>[site](https://console.nace.ai) · `systemone`</sub>
+
+| Model id | Name | Kind |
+| --- | --- | --- |
+| `drex-max` | Drex Max | system (non-LLM) |
+| `drex-v2.0` | Drex 2.0 | system (non-LLM) |
+
 #### `nanobanana` — NanoBanana API <sub>[site](https://nanobananaapi.ai) · `image`</sub>
 
 | Model id | Name | Kind |
@@ -518,10 +553,124 @@ something other than chat.
 | `meta-llama/Llama-3.3-70B-Instruct` | Llama 3.3 70B Instruct | chat |
 | `Qwen/Qwen3-Embedding-8B` | Qwen3 Embedding 8B | embeddings |
 
-#### `ollama-local` — Ollama Local <sub>[site](https://ollama.com) · `llm`</sub>
+#### `ollama-local` — Ollama Local <sub>[site](https://ollama.com) · `llm`, `systemone`, `tts`, `embedding`</sub>
 
-- No static model list. This entry resolves its models at runtime — from the account, the
-  provider's own catalogue endpoint, or a local daemon — so nothing can be enumerated here.
+| Model id | Name | Kind |
+| --- | --- | --- |
+| `clef` | Clef | system (non-LLM) |
+| `clef-flash` | Clef Flash | system (non-LLM) |
+| `phonon:latest` | Phonon (Latest) | text-to-speech |
+| `phonon` | Phonon | text-to-speech |
+| `phonon:multilingual` | Phonon Multilingual | text-to-speech |
+| `phonon:40m-multilingual` | Phonon 40M Multilingual | text-to-speech |
+| `phonon:en` | Phonon English | text-to-speech |
+| `phonon:31m-en` | Phonon 31M English | text-to-speech |
+| `phonon:40m-en` | Phonon 40M English | text-to-speech |
+| `phonon:de` | Phonon German | text-to-speech |
+| `phonon:40m-de` | Phonon 40M German | text-to-speech |
+| `phonon:es` | Phonon Spanish | text-to-speech |
+| `phonon:40m-es` | Phonon 40M Spanish | text-to-speech |
+| `phonon:fr` | Phonon French | text-to-speech |
+| `phonon:40m-fr` | Phonon 40M French | text-to-speech |
+| `phonon:pt` | Phonon Portuguese | text-to-speech |
+| `phonon:40m-pt` | Phonon 40M Portuguese | text-to-speech |
+| `nomic-embed-text` | Nomic Embed Text | embeddings |
+| `nomic-embed-text:latest` | Nomic Embed Text (Latest) | embeddings |
+| `nomic-embed-text:v1.5` | Nomic Embed Text v1.5 | embeddings |
+| `nomic-embed-text:137m-v1.5-fp16` | Nomic Embed Text 137M v1.5 (FP16) | embeddings |
+| `nomic-embed-text-v2-moe` | Nomic Embed Text v2 MoE | embeddings |
+| `nomic-embed-text-v2-moe:latest` | Nomic Embed Text v2 MoE (Latest) | embeddings |
+| `qwen3-embedding` | Qwen3 Embedding | embeddings |
+| `qwen3-embedding:latest` | Qwen3 Embedding (Latest) | embeddings |
+| `qwen3-embedding:8b` | Qwen3 Embedding 8B | embeddings |
+| `qwen3-embedding:8b-q4_K_M` | Qwen3 Embedding 8B (Q4_K_M) | embeddings |
+| `qwen3-embedding:8b-q8_0` | Qwen3 Embedding 8B (Q8_0) | embeddings |
+| `qwen3-embedding:8b-fp16` | Qwen3 Embedding 8B (FP16) | embeddings |
+| `qwen3-embedding:4b` | Qwen3 Embedding 4B | embeddings |
+| `qwen3-embedding:4b-q4_K_M` | Qwen3 Embedding 4B (Q4_K_M) | embeddings |
+| `qwen3-embedding:4b-q8_0` | Qwen3 Embedding 4B (Q8_0) | embeddings |
+| `qwen3-embedding:4b-fp16` | Qwen3 Embedding 4B (FP16) | embeddings |
+| `qwen3-embedding:0.6b` | Qwen3 Embedding 0.6B | embeddings |
+| `qwen3-embedding:0.6b-q8_0` | Qwen3 Embedding 0.6B (Q8_0) | embeddings |
+| `qwen3-embedding:0.6b-fp16` | Qwen3 Embedding 0.6B (FP16) | embeddings |
+| `bge-m3` | BGE M3 | embeddings |
+| `bge-m3:latest` | BGE M3 (Latest) | embeddings |
+| `bge-m3:567m` | BGE M3 567M | embeddings |
+| `bge-m3:567m-fp16` | BGE M3 567M (FP16) | embeddings |
+| `bge-large` | BGE Large | embeddings |
+| `bge-large:latest` | BGE Large (Latest) | embeddings |
+| `bge-large:335m` | BGE Large 335M | embeddings |
+| `bge-large:335m-en-v1.5-fp16` | BGE Large 335M EN v1.5 (FP16) | embeddings |
+| `mxbai-embed-large` | mxbai Embed Large | embeddings |
+| `mxbai-embed-large:latest` | mxbai Embed Large (Latest) | embeddings |
+| `mxbai-embed-large:335m` | mxbai Embed Large 335M | embeddings |
+| `mxbai-embed-large:v1` | mxbai Embed Large v1 | embeddings |
+| `mxbai-embed-large:335m-v1-fp16` | mxbai Embed Large 335M v1 (FP16) | embeddings |
+| `embeddinggemma` | EmbeddingGemma | embeddings |
+| `embeddinggemma:latest` | EmbeddingGemma (Latest) | embeddings |
+| `embeddinggemma:300m` | EmbeddingGemma 300M | embeddings |
+| `embeddinggemma:300m-bf16` | EmbeddingGemma 300M (BF16) | embeddings |
+| `embeddinggemma:300m-qat-q4_0` | EmbeddingGemma 300M (QAT Q4_0) | embeddings |
+| `embeddinggemma:300m-qat-q8_0` | EmbeddingGemma 300M (QAT Q8_0) | embeddings |
+| `embeddinggemma-2` | EmbeddingGemma 2 | embeddings |
+| `embeddinggemma-2:latest` | EmbeddingGemma 2 (Latest) | embeddings |
+| `embeddinggemma-2:740m` | EmbeddingGemma 2 740M | embeddings |
+| `embeddinggemma-2:740m-bf16` | EmbeddingGemma 2 740M (BF16) | embeddings |
+| `embeddinggemma-2:740m-q8_0` | EmbeddingGemma 2 740M (Q8_0) | embeddings |
+| `embeddinggemma-2:570m` | EmbeddingGemma 2 570M | embeddings |
+| `embeddinggemma-2:570m-bf16-text-audio` | EmbeddingGemma 2 570M Audio (BF16) | embeddings |
+| `embeddinggemma-2:570m-q8_0-text-audio` | EmbeddingGemma 2 570M Audio (Q8_0) | embeddings |
+| `embeddinggemma-2:440m` | EmbeddingGemma 2 440M | embeddings |
+| `embeddinggemma-2:440m-bf16-text-vision` | EmbeddingGemma 2 440M Vision (BF16) | embeddings |
+| `embeddinggemma-2:440m-q8_0-text-vision` | EmbeddingGemma 2 440M Vision (Q8_0) | embeddings |
+| `embeddinggemma-2:270m` | EmbeddingGemma 2 270M | embeddings |
+| `embeddinggemma-2:270m-bf16-text` | EmbeddingGemma 2 270M Text (BF16) | embeddings |
+| `embeddinggemma-2:270m-q8_0-text` | EmbeddingGemma 2 270M Text (Q8_0) | embeddings |
+| `all-minilm` | All-MiniLM | embeddings |
+| `all-minilm:latest` | All-MiniLM (Latest) | embeddings |
+| `all-minilm:33m` | All-MiniLM 33M (L12) | embeddings |
+| `all-minilm:22m` | All-MiniLM 22M (L6) | embeddings |
+| `all-minilm:l12-v2` | All-MiniLM L12 v2 | embeddings |
+| `all-minilm:l6-v2` | All-MiniLM L6 v2 | embeddings |
+| `all-minilm:33m-l12-v2-fp16` | All-MiniLM 33M L12 v2 (FP16) | embeddings |
+| `all-minilm:22m-l6-v2-fp16` | All-MiniLM 22M L6 v2 (FP16) | embeddings |
+| `snowflake-arctic-embed` | Snowflake Arctic Embed | embeddings |
+| `snowflake-arctic-embed:latest` | Snowflake Arctic Embed (Latest) | embeddings |
+| `snowflake-arctic-embed:335m` | Snowflake Arctic Embed 335M (L) | embeddings |
+| `snowflake-arctic-embed:137m` | Snowflake Arctic Embed 137M (M-Long) | embeddings |
+| `snowflake-arctic-embed:110m` | Snowflake Arctic Embed 110M (M) | embeddings |
+| `snowflake-arctic-embed:33m` | Snowflake Arctic Embed 33M (S) | embeddings |
+| `snowflake-arctic-embed:22m` | Snowflake Arctic Embed 22M (XS) | embeddings |
+| `snowflake-arctic-embed:l` | Snowflake Arctic Embed L | embeddings |
+| `snowflake-arctic-embed:m` | Snowflake Arctic Embed M | embeddings |
+| `snowflake-arctic-embed:m-long` | Snowflake Arctic Embed M-Long | embeddings |
+| `snowflake-arctic-embed:s` | Snowflake Arctic Embed S | embeddings |
+| `snowflake-arctic-embed:xs` | Snowflake Arctic Embed XS | embeddings |
+| `snowflake-arctic-embed:335m-l-fp16` | Snowflake Arctic Embed 335M L (FP16) | embeddings |
+| `snowflake-arctic-embed:137m-m-long-fp16` | Snowflake Arctic Embed 137M M-Long (FP16) | embeddings |
+| `snowflake-arctic-embed:110m-m-fp16` | Snowflake Arctic Embed 110M M (FP16) | embeddings |
+| `snowflake-arctic-embed:33m-s-fp16` | Snowflake Arctic Embed 33M S (FP16) | embeddings |
+| `snowflake-arctic-embed:22m-xs-fp16` | Snowflake Arctic Embed 22M XS (FP16) | embeddings |
+| `snowflake-arctic-embed2` | Snowflake Arctic Embed 2 | embeddings |
+| `snowflake-arctic-embed2:latest` | Snowflake Arctic Embed 2 (Latest) | embeddings |
+| `snowflake-arctic-embed2:568m` | Snowflake Arctic Embed 2 568M | embeddings |
+| `snowflake-arctic-embed2:568m-l-fp16` | Snowflake Arctic Embed 2 568M L (FP16) | embeddings |
+| `granite-embedding` | Granite Embedding | embeddings |
+| `granite-embedding:latest` | Granite Embedding (Latest) | embeddings |
+| `granite-embedding:278m` | Granite Embedding 278M (Multilingual) | embeddings |
+| `granite-embedding:30m` | Granite Embedding 30M (EN) | embeddings |
+| `granite-embedding:30m-en` | Granite Embedding 30M EN | embeddings |
+| `granite-embedding:278m-fp16` | Granite Embedding 278M (FP16) | embeddings |
+| `granite-embedding:30m-en-fp16` | Granite Embedding 30M EN (FP16) | embeddings |
+| `paraphrase-multilingual` | Paraphrase Multilingual | embeddings |
+| `paraphrase-multilingual:latest` | Paraphrase Multilingual (Latest) | embeddings |
+| `paraphrase-multilingual:278m` | Paraphrase Multilingual 278M | embeddings |
+| `paraphrase-multilingual:278m-mpnet-base-v2-fp16` | Paraphrase Multilingual 278M (FP16) | embeddings |
+| `laya` | Laya | embeddings |
+| `laya:latest` | Laya (Latest) | embeddings |
+| `laya:421m-english-bf16` | Laya 421M English (BF16) | embeddings |
+| `laya:322m-multilingual-bf16` | Laya 322M Multilingual (BF16) | embeddings |
+| `laya:421m-typed-decisions-bf16` | Laya 421M Decisions (BF16) | embeddings |
 
 #### `ollama-search` — Ollama Search <sub>[site](https://ollama.com) · `webSearch`</sub>
 
@@ -573,41 +722,56 @@ something other than chat.
 
 | Model id | Name | Kind |
 | --- | --- | --- |
-| `deepseek-flash` | DeepSeek V4.1 Flash | chat |
+| `deepseek-flash` | DeepSeek Flash | chat |
 | `glm-5.3-flash` | GLM 5.3 Flash (Vision) | chat |
 | `glm-5.3` | GLM 5.3 | chat |
 | `glm-5.2` | GLM 5.2 | chat |
 | `glm-5.1` | GLM 5.1 | chat |
+| `glm-5` | GLM 5 | chat |
 | `kimi-k2.7-code` | Kimi K2.7 Code | chat |
 | `kimi-k2.6` | Kimi K2.6 | chat |
+| `kimi-k2.5` | Kimi K2.5 | chat |
 | `kimi-k3` | Kimi K3 | chat |
+| `kimi-k3.1-pro` | Kimi K3.1 Pro | chat |
 | `deepseek-v4-pro` | DeepSeek V4 Pro | chat |
 | `deepseek-v4-flash` | DeepSeek V4 Flash | chat |
 | `deepseek-v4-flash-vision-exp` | DeepSeek V4 Flash Vision (Exp) | chat |
+| `deepseek-v4.1-flash` | DeepSeek V4.1 Flash | chat |
 | `longcat-2.0` | LongCat 2.0 | chat |
+| `mimo-v2.6-flash` | MiMo V2.6 Flash | chat |
+| `mimo-v2.6-pro` | MiMo V2.6 Pro | chat |
 | `mimo-v2.5` | MiMo V2.5 | chat |
 | `mimo-v2.5-pro` | MiMo V2.5 Pro | chat |
+| `mimo-v2-pro` | MiMo V2 Pro | chat |
+| `mimo-v2-omni` | MiMo V2 Omni | chat |
 | `minimax-m3` | MiniMax M3 | chat |
 | `minimax-m2.7` | MiniMax M2.7 | chat |
 | `minimax-m2.5` | MiniMax M2.5 | chat |
+| `space-bunny-free` | Space Bunny Free | chat |
 | `qwen3.8-max` | Qwen 3.8 Max | chat |
 | `qwen3.8-flash` | Qwen 3.8 Flash | chat |
 | `qwen3.7-max` | Qwen 3.7 Max | chat |
 | `qwen3.7-plus` | Qwen 3.7 Plus | chat |
 | `qwen3.6-plus` | Qwen 3.6 Plus | chat |
+| `qwen3.5-plus` | Qwen 3.5 Plus | chat |
 | `hy4-preview` | Hy4 Preview | chat |
 | `hy3` | Hy3 | chat |
+| `hy3-preview` | Hy3 Preview | chat |
+| `omen-alpha` | Omen Alpha | chat |
+| `grok-4.7` | Grok 4.7 | chat |
 | `grok-4.6` | Grok 4.6 | chat |
+| `grok-4.5` | Grok 4.5 | chat |
 | `gpt-5.6-luna` | GPT 5.6 Luna | chat |
+| `gpt-6-luna` | GPT 6 Luna | chat |
 | `muse-spark-1.2-contributor` | Muse Spark 1.2 Contributor | chat |
 | `muse-spark-1.3-contributor` | Muse Spark 1.3 Contributor | chat |
+| `claude-haiku-5-5` | Claude Haiku 5.5 | chat |
 
 #### `opencode-zen` — OpenCode Zen <sub>[site](https://opencode.ai/auth) · `llm`, `systemone`</sub>
 
 | Model id | Name | Kind |
 | --- | --- | --- |
 | `claude-fable-5` | Claude Fable 5 | chat |
-| `claude-fable-5-1` | Claude Fable 5.1 | chat |
 | `claude-opus-5` | Claude Opus 5 | chat |
 | `claude-opus-4-8` | Claude Opus 4.8 | chat |
 | `claude-opus-4-7` | Claude Opus 4.7 | chat |
@@ -716,6 +880,17 @@ something other than chat.
 | `recraftv3` | Recraft V3 | image generation |
 | `recraftv2` | Recraft V2 | image generation |
 
+#### `runcrate` — Runcrate <sub>[site](https://www.runcrate.ai/inference/free?utm_source=9router&utm_medium=directory&utm_campaign=gpu_pricing)</sub>
+
+| Model id | Name | Kind |
+| --- | --- | --- |
+| `deepseek-ai/DeepSeek-V4.1-Flash` | DeepSeek V4.1 Flash | chat |
+| `deepseek-ai/DeepSeek-V4.1-Flash-1017` | DeepSeek V4.1 Flash 1017 | chat |
+| `zai-org/GLM-5.3` | GLM 5.3 | chat |
+| `zai-org/GLM-5.3-Flash` | GLM 5.3 Flash | chat |
+| `Qwen/Qwen3.8-Flash` | Qwen3.8 Flash | chat |
+| `openai/gpt-oss-120b` | gpt-oss 120B | chat |
+
 #### `runwayml` — Runway ML <sub>[site](https://runwayml.com) · `image`</sub>
 
 | Model id | Name | Kind |
@@ -761,6 +936,26 @@ something other than chat.
 | --- | --- | --- |
 | `kokoro` | Kokoro (self-hosted) | text-to-speech |
 
+#### `sensenova-intl` — SenseNova (Intl) <sub>[site](https://platform.sensenova.ai) · `llm`, `image`, `imageToText`</sub>
+
+| Model id | Name | Kind |
+| --- | --- | --- |
+| `sensenova-6.8-flash` | SenseNova 6.8 Flash | chat |
+| `sensenova-6.8-flash-lite` | SenseNova 6.8 Flash Lite | chat |
+| `sensenova-6.7-flash-lite` | SenseNova 6.7 Flash Lite | chat |
+
+#### `sensenova` — SenseNova <sub>[site](https://token.sensenova.cn) · `llm`, `image`, `imageToText`</sub>
+
+| Model id | Name | Kind |
+| --- | --- | --- |
+| `sensenova-6.8-flash` | SenseNova 6.8 Flash | chat |
+| `sensenova-6.8-flash-lite` | SenseNova 6.8 Flash Lite | chat |
+| `deepseek-flash` | DeepSeek V4.1 Flash | chat |
+| `deepseek-v4-flash` | DeepSeek V4 Flash | chat |
+| `glm-5.3` | GLM-5.3 | chat |
+| `glm-5.2` | GLM-5.2 | chat |
+| `kimi-k3` | Kimi K3 | chat |
+
 #### `serper` — Serper <sub>[site](https://serper.dev) · `webSearch`</sub>
 
 - No static model list. This entry resolves its models at runtime — from the account, the
@@ -797,6 +992,20 @@ something other than chat.
 | `sd3.5-large-turbo` | Stable Diffusion 3.5 Large Turbo | image generation |
 | `sd3.5-medium` | Stable Diffusion 3.5 Medium | image generation |
 
+#### `synthetic` — Synthetic <sub>[site](https://synthetic.new)</sub>
+
+| Model id | Name | Kind |
+| --- | --- | --- |
+| `hf:zai-org/GLM-5.3` | GLM 5.3 | chat |
+| `hf:zai-org/GLM-5.3-Flash` | GLM 5.3 Flash | chat |
+| `hf:zai-org/GLM-4.7-Flash` | GLM 4.7 Flash | chat |
+| `hf:moonshotai/Kimi-K3` | Kimi K3 | chat |
+| `hf:deepseek-ai/DeepSeek-V4.1-Flash` | DeepSeek V4.1 Flash | chat |
+| `hf:deepseek-ai/DeepSeek-V4.1-Flash-1017` | DeepSeek V4.1 Flash 1017 | chat |
+| `hf:Qwen/Qwen3.8-27B` | Qwen3.8 27B | chat |
+| `hf:openai/gpt-oss-120b` | GPT-OSS 120B | chat |
+| `hf:nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4` | Nemotron 3 Super 120B | chat |
+
 #### `tavily` — Tavily <sub>[site](https://tavily.com) · `webSearch`, `webFetch`</sub>
 
 - No static model list. This entry resolves its models at runtime — from the account, the
@@ -809,6 +1018,11 @@ something other than chat.
 | `hunyuan-turbos-latest` | Hunyuan TurboS Latest | chat |
 | `hunyuan-t1-latest` | Hunyuan T1 Latest | chat |
 
+#### `tinyfish` — TinyFish <sub>[site](https://www.tinyfish.ai/) · `webSearch`, `webFetch`</sub>
+
+- No static model list. This entry resolves its models at runtime — from the account, the
+  provider's own catalogue endpoint, or a local daemon — so nothing can be enumerated here.
+
 #### `together` — Together AI <sub>[site](https://www.together.ai) · `llm`, `embedding`</sub>
 
 | Model id | Name | Kind |
@@ -819,6 +1033,17 @@ something other than chat.
 | `meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8` | Llama 4 Maverick | chat |
 | `BAAI/bge-large-en-v1.5` | BGE Large EN v1.5 | embeddings |
 | `togethercomputer/m2-bert-80M-8k-retrieval` | M2 BERT 80M 8K | embeddings |
+
+#### `tokenharbor` — Token Harbor <sub>[site](https://tokenharbor.ai)</sub>
+
+| Model id | Name | Kind |
+| --- | --- | --- |
+| `claude-opus-5.5` | Claude Opus 5.5 | chat |
+| `claude-sonnet-5` | Claude Sonnet 5 | chat |
+| `gpt-6-astra` | GPT-6 Astra | chat |
+| `gpt-6-sol` | GPT-6 Sol | chat |
+| `deepseek-v4.1-flash:free` | DeepSeek V4.1 Flash (Free) | chat |
+| `grok-4.7` | Grok 4.7 | chat |
 
 #### `tokenrouter` — TokenRouter <sub>[site](https://www.tokenrouter.com) · `llm`, `embedding`, `image`</sub>
 
@@ -852,6 +1077,13 @@ something other than chat.
 - No static model list. This entry resolves its models at runtime — from the account, the
   provider's own catalogue endpoint, or a local daemon — so nothing can be enumerated here.
 
+#### `v1m` — v1m (System One) <sub>[site](https://v1m.ir) · `systemone`</sub>
+
+| Model id | Name | Kind |
+| --- | --- | --- |
+| `rev-latest` | v1m Rev Latest (Calibrated) | system (non-LLM) |
+| `v1m-decision-engine` | v1m Decision Engine | system (non-LLM) |
+
 #### `venice` — Venice AI <sub>[site](https://venice.ai) · `llm`, `embedding`, `image`</sub>
 
 | Model id | Name | Kind |
@@ -871,6 +1103,14 @@ something other than chat.
 | `venice-sd35` | Venice SD3.5 | image generation |
 | `flux-2-pro` | FLUX.2 Pro | image generation |
 | `gpt-image-2` | GPT Image 2 (via Venice) | image generation |
+
+#### `veoaifree-web` — Veo AI Free Web <sub>[site](https://veoaifree.com) · `image`, `video`</sub>
+
+| Model id | Name | Kind |
+| --- | --- | --- |
+| `veo` | VEO 3.1 (Free) | video |
+| `seedance` | Seedance (Free) | video |
+| `nano-banana` | Nano Banana (Free) | image generation |
 
 #### `vercel-ai-gateway` — Vercel AI Gateway <sub>[site](https://vercel.com/ai-gateway) · `llm`, `embedding`, `image`, `imageToText`, `webSearch`</sub>
 
@@ -916,15 +1156,12 @@ something other than chat.
 
 | Model id | Name | Kind |
 | --- | --- | --- |
-| `mimo-v2.5-pro` | MiMo V2.5 Pro | chat |
-| `mimo-v2.5-pro-claude` | MiMo V2.5 Pro (Claude Native) | chat |
-| `mimo-v2.5` | MiMo V2.5 | chat |
-| `mimo-v2-pro` | MiMo V2 Pro | chat |
-| `mimo-v2-omni` | MiMo V2 Omni | chat |
-| `mimo-v2-tts` | MiMo V2 TTS | chat |
-| `mimo-v2.5-tts` | MiMo V2.5 TTS | chat |
-| `mimo-v2.5-tts-voiceclone` | MiMo V2.5 TTS Voice Clone | chat |
-| `mimo-v2.5-tts-voicedesign` | MiMo V2.5 TTS Voice Design | chat |
+| `mimo-v2.6-pro` | MiMo V2.6 Pro | chat |
+| `mimo-v2.6-flash` | MiMo V2.6 Flash | chat |
+| `mimo-v2.5-asr` | MiMo V2.5 ASR | speech-to-text |
+| `mimo-v2.5-tts` | MiMo V2.5 TTS | text-to-speech |
+| `mimo-v2.5-tts-voiceclone` | MiMo V2.5 TTS Voice Clone | text-to-speech |
+| `mimo-v2.5-tts-voicedesign` | MiMo V2.5 TTS Voice Design | text-to-speech |
 
 #### `xquik` — Xquik <sub>[site](https://docs.xquik.com/api-reference/x/search-tweets) · `webSearch`</sub>
 
@@ -994,6 +1231,10 @@ something other than chat.
 
 | Model id | Name | Kind |
 | --- | --- | --- |
+| `claude-opus-5.5` | Claude Opus 5.5 | chat |
+| `claude-opus-5.5-thinking` | Claude Opus 5.5 (Thinking) | chat |
+| `claude-opus-5.5-agentic` | Claude Opus 5.5 (Agentic) | chat |
+| `claude-opus-5.5-thinking-agentic` | Claude Opus 5.5 (Thinking + Agentic) | chat |
 | `claude-opus-5` | Claude Opus 5 | chat |
 | `claude-opus-5-thinking` | Claude Opus 5 (Thinking) | chat |
 | `claude-opus-5-agentic` | Claude Opus 5 (Agentic) | chat |
@@ -1056,6 +1297,15 @@ something other than chat.
 
 ### freeTier
 
+#### `agnes` — Agnes AI <sub>[site](https://agnes-ai.com)</sub>
+
+| Model id | Name | Kind |
+| --- | --- | --- |
+| `agnes-2.5-flash` | Agnes 2.5 Flash | chat |
+| `agnes-2.5-pro` | Agnes 2.5 Pro | chat |
+| `agnes-2.5-pro-beta` | Agnes 2.5 Pro Beta | chat |
+| `agnes-3.0-flash` | Agnes 3.0 Flash | chat |
+
 #### `api-airforce` — API.airforce <sub>[site](https://api.airforce)</sub>
 
 | Model id | Name | Kind |
@@ -1105,10 +1355,11 @@ something other than chat.
 | `glm-4-7-251222` | GLM 4.7 | chat |
 | `gpt-oss-120b-250805` | GPT-OSS-120B | chat |
 
-#### `cloudflare-ai` — Cloudflare <sub>[site](https://developers.cloudflare.com/workers-ai/) · `llm`, `image`</sub>
+#### `cloudflare-ai` — Cloudflare <sub>[site](https://developers.cloudflare.com/workers-ai/) · `llm`, `image`, `systemone`</sub>
 
 | Model id | Name | Kind |
 | --- | --- | --- |
+| `@cf/cloudflare/clef-flash` | Clef Flash | system (non-LLM) |
 | `@cf/meta/llama-3.2-1b-instruct` | Llama 3.2 1B Instruct | chat |
 | `@cf/meta/llama-3.2-3b-instruct` | Llama 3.2 3B Instruct | chat |
 | `@cf/meta/llama-3.1-8b-instruct-fp8-fast` | Llama 3.1 8B Instruct FP8 Fast | chat |
@@ -1148,6 +1399,7 @@ something other than chat.
 
 | Model id | Name | Kind |
 | --- | --- | --- |
+| `gemini-4-argon` | Gemini 4 Argon | chat |
 | `gemini-3.8-flash` | Gemini 3.8 Flash | chat |
 | `gemini-3.7-flash` | Gemini 3.7 Flash | chat |
 | `gemini-3.6-flash` | Gemini 3.6 Flash | chat |
@@ -1170,6 +1422,7 @@ something other than chat.
 | `gemini-2.5-flash` | Gemini 2.5 Flash | speech-to-text |
 | `gemini-2.5-flash-lite` | Gemini 2.5 Flash Lite (Cheapest) | speech-to-text |
 | `gemini-2.0-flash` | Gemini 2.0 Flash | speech-to-text |
+| `gemini-2.5-flash-native-audio-preview-09-17` | Gemini Live Transcription (Realtime) | speech-to-text |
 | `gemini-3.1-flash-tts-preview` | Gemini 3.1 Flash TTS | text-to-speech |
 | `gemini-2.5-flash-preview-tts` | Gemini 2.5 Flash TTS | text-to-speech |
 | `gemini-2.5-pro-preview-tts` | Gemini 2.5 Pro TTS | text-to-speech |
@@ -1209,23 +1462,35 @@ something other than chat.
 - No static model list. This entry resolves its models at runtime — from the account, the
   provider's own catalogue endpoint, or a local daemon — so nothing can be enumerated here.
 
+#### `nous` — Nous Research <sub>[site](https://nousresearch.com) · `llm`, `imageToText`</sub>
+
+- No static model list. This entry resolves its models at runtime — from the account, the
+  provider's own catalogue endpoint, or a local daemon — so nothing can be enumerated here.
+
 #### `nvidia` — NVIDIA NIM <sub>[site](https://developer.nvidia.com/nim) · `llm`, `tts`, `embedding`</sub>
 
 | Model id | Name | Kind |
 | --- | --- | --- |
+| `nvidia/nemotron-3.5-lightning-30b-a3b` | Nemotron 3.5 Lightning | chat |
+| `nvidia/nemotron-3.5-bolt-e4b` | Nemotron 3.5 Bolt | chat |
+| `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` | Nemotron 3 Nano Omni | chat |
+| `nvidia/nemotron-3-ultra-550b-a55b` | Nemotron 3 Ultra | chat |
+| `poolside/laguna-xs-2.1` | Laguna XS 2.1 | chat |
+| `meta/llama-guard-4-12b` | Llama Guard 4 12B | chat |
+| `nvidia/riva-translate-4b-instruct-v2` | Riva Translate 4B v2 | chat |
+| `meta/llama-3.3-70b-instruct` | Llama 3.3 70B Instruct | chat |
 | `minimaxai/minimax-m2.7` | MiniMax M2.7 | chat |
 | `minimaxai/minimax-m3` | MiniMax M3 | chat |
 | `z-ai/glm-5.2` | GLM 5.2 | chat |
 | `deepseek-ai/deepseek-v4-pro` | DeepSeek V4 Pro | chat |
 | `deepseek-ai/deepseek-v4-flash` | DeepSeek V4 Flash | chat |
 | `moonshotai/kimi-k2.6` | Kimi K2.6 | chat |
-| `nvidia/nemotron-3-ultra-550b-a55b` | Nemotron 3 Ultra | chat |
 | `nvidia/nv-embedqa-e5-v5` | NV EmbedQA E5 v5 | embeddings |
 | `nvidia/parakeet-ctc-1.1b-asr` | Parakeet CTC 1.1B | speech-to-text |
 | `fastpitch` | FastPitch | text-to-speech |
 | `tacotron2` | Tacotron2 | text-to-speech |
 
-#### `ollama` — Ollama Cloud <sub>[site](https://ollama.com) · `llm`, `webFetch`</sub>
+#### `ollama` — Ollama Cloud <sub>[site](https://ollama.com) · `llm`, `webFetch`, `systemone`</sub>
 
 | Model id | Name | Kind |
 | --- | --- | --- |
@@ -1237,6 +1502,9 @@ something other than chat.
 | `qwen3.5` | Qwen3.5 | chat |
 | `minimax-m3` | MiniMax M3 | chat |
 | `deepseek-v4.1-flash:cloud` | DeepSeek V4.1 Flash | chat |
+| `clef` | Clef | system (non-LLM) |
+| `clef-flash` | Clef Flash | system (non-LLM) |
+| `clef:cloud` | Clef (Cloud) | system (non-LLM) |
 
 #### `openrouter` — OpenRouter <sub>[site](https://openrouter.ai) · `llm`, `embedding`, `tts`, `imageToText`, `video`, `systemone`</sub>
 
@@ -1282,6 +1550,7 @@ something other than chat.
 
 | Model id | Name | Kind |
 | --- | --- | --- |
+| `gemini-4-argon` | Gemini 4 Argon | chat |
 | `gemini-3.1-pro-preview` | Gemini 3.1 Pro Preview | chat |
 | `gemini-3.1-flash-lite-preview` | Gemini 3.1 Flash Lite Preview | chat |
 | `gemini-3-flash-preview` | Gemini 3 Flash Preview | chat |
@@ -1297,6 +1566,13 @@ something other than chat.
 
 | Model id | Name | Kind |
 | --- | --- | --- |
+| `gemini-4-carbon-high` | Gemini 4 Carbon (High) | chat |
+| `gemini-4-carbon-medium` | Gemini 4 Carbon (Medium) | chat |
+| `gemini-4-carbon-low` | Gemini 4 Carbon (Low) | chat |
+| `gemini-4-carbon` | Gemini 4 Carbon | chat |
+| `gemini-4-argon-high` | Gemini 4 Argon (High) | chat |
+| `gemini-4-argon-medium` | Gemini 4 Argon (Medium) | chat |
+| `gemini-4-argon-low` | Gemini 4 Argon (Low) | chat |
 | `gemini-3.8-flash-high` | Gemini 3.8 Flash (High) | chat |
 | `gemini-3.8-flash-medium` | Gemini 3.8 Flash (Medium) | chat |
 | `gemini-3.8-flash-low` | Gemini 3.8 Flash (Low) | chat |
@@ -1307,26 +1583,33 @@ something other than chat.
 | `gemini-3.6-flash-high` | Gemini 3.6 Flash (High) | chat |
 | `gemini-3.6-flash-medium` | Gemini 3.6 Flash (Medium) | chat |
 | `gemini-3.6-flash-low` | Gemini 3.6 Flash (Low) | chat |
-| `gemini-3.5-flash-high` | Gemini 3.5 Flash (High) | chat |
-| `gemini-3-flash-agent` | Gemini 3.5 Flash (High) | chat |
-| `gemini-3.5-flash-low` | Gemini 3.5 Flash (Medium) | chat |
-| `gemini-3.5-flash-extra-low` | Gemini 3.5 Flash (Low) | chat |
+| `gemini-3.1-pro-high` | Gemini 3.1 Pro (High) | chat |
 | `gemini-pro-agent` | Gemini 3.1 Pro (High) | chat |
 | `gemini-3.1-pro-low` | Gemini 3.1 Pro (Low) | chat |
+| `claude-sonnet-5-5-high` | Claude Sonnet 5.5 (High) | chat |
+| `claude-sonnet-5-5-medium` | Claude Sonnet 5.5 (Medium) | chat |
+| `claude-sonnet-5-5-low` | Claude Sonnet 5.5 (Low) | chat |
+| `claude-sonnet-5-5` | Claude Sonnet 5.5 (Thinking) | chat |
+| `claude-opus-5-5-high` | Claude Opus 5.5 (High) | chat |
+| `claude-opus-5-5-medium` | Claude Opus 5.5 (Medium) | chat |
+| `claude-opus-5-5-low` | Claude Opus 5.5 (Low) | chat |
+| `claude-opus-5-5` | Claude Opus 5.5 (Thinking) | chat |
 | `claude-sonnet-4-6` | Claude Sonnet 4.6 (Thinking) | chat |
 | `claude-opus-4-6-thinking` | Claude Opus 4.6 (Thinking) | chat |
 | `gpt-oss-120b-medium` | GPT-OSS 120B (Medium) | chat |
-| `gemini-3-flash` | Gemini 3 Flash | chat |
 | `gemini-3.1-flash-image` | Gemini 3.1 Flash (Image) | image generation |
 
 #### `claude` — Claude Code <sub>[site](https://claude.ai)</sub>
 
 | Model id | Name | Kind |
 | --- | --- | --- |
+| `claude-fable-5-2` | Claude Fable 5.2 | chat |
+| `claude-opus-5-5` | Claude Opus 5.5 | chat |
 | `claude-opus-5` | Claude Opus 5 | chat |
-| `claude-fable-5-1` | Claude Fable 5.1 | chat |
 | `claude-fable-5` | Claude Fable 5 | chat |
+| `claude-sonnet-5-5` | Claude Sonnet 5.5 | chat |
 | `claude-sonnet-5` | Claude Sonnet 5 | chat |
+| `claude-haiku-5-5` | Claude Haiku 5.5 | chat |
 | `claude-haiku-4-5-20251001` | Claude 4.5 Haiku | chat |
 
 #### `cline` — Cline <sub>[site](https://cline.bot)</sub>
@@ -1363,15 +1646,13 @@ something other than chat.
 | --- | --- | --- |
 | `glm-5.2` | GLM-5.2 | chat |
 | `glm-5.1` | GLM-5.1 | chat |
-| `glm-5v-turbo` | GLM-5v-Turbo | chat |
 | `minimax-m3` | MiniMax-M3 | chat |
-| `kimi-k2.7` | Kimi-K2.7-Code | chat |
-| `kimi-k2.6` | Kimi-K2.6 | chat |
 | `hy3` | Hy3 | chat |
 | `hy4-preview` | Hy4-Preview | chat |
 | `glm-5.3` | GLM-5.3 | chat |
 | `glm-5.3-flash` | GLM-5.3-Flash | chat |
 | `kimi-k3-1` | Kimi-K3 | chat |
+| `kimi-k2.8-preview` | Kimi-K2.8-Preview | chat |
 | `deepseek-v4-pro` | DeepSeek-V4-Pro | chat |
 | `deepseek-v4.1-flash` | DeepSeek-V4.1-Flash | chat |
 
@@ -1395,37 +1676,39 @@ something other than chat.
 | `deepseek-v4.1-flash` | DeepSeek-V4.1-Flash | chat |
 | `deepseek-v3-2-volc` | DeepSeek-V3.2 | chat |
 
-#### `codex` — OpenAI Codex <sub>[site](https://chatgpt.com/codex) · `llm`, `image`</sub>
+#### `codex` — OpenAI Codex <sub>[site](https://chatgpt.com/codex) · `llm`, `image`, `stt`</sub>
 
 | Model id | Name | Kind |
 | --- | --- | --- |
+| `gpt-6.1-sol` | GPT 6.1 Sol | chat |
+| `gpt-6.1-terra` | GPT 6.1 Terra | chat |
 | `gpt-6-astra` | GPT 6.0 Astra | chat |
+| `gpt-6-astra[1m]` | GPT 6.0 Astra (extended context) | chat |
+| `gpt-6-sol` | GPT 6.0 Sol | chat |
+| `gpt-6-sol[1m]` | GPT 6.0 Sol (extended context) | chat |
+| `gpt-6-luna` | GPT 6.0 Luna | chat |
+| `gpt-6-luna[1m]` | GPT 6.0 Luna (extended context) | chat |
 | `gpt-5.6-sol` | GPT 5.6 Sol | chat |
+| `gpt-5.6-sol[1m]` | GPT 5.6 Sol (extended context) | chat |
 | `gpt-5.6-sol-review` | GPT 5.6 Sol Review | chat |
 | `gpt-5.6-terra` | GPT 5.6 Terra | chat |
+| `gpt-5.6-terra[1m]` | GPT 5.6 Terra (extended context) | chat |
 | `gpt-5.6-terra-review` | GPT 5.6 Terra Review | chat |
 | `gpt-5.6-luna` | GPT 5.6 Luna | chat |
+| `gpt-5.6-luna[1m]` | GPT 5.6 Luna (extended context) | chat |
 | `gpt-5.6-luna-review` | GPT 5.6 Luna Review | chat |
-| `gpt-5.5` | GPT 5.5 | chat |
-| `gpt-5.5-review` | GPT 5.5 Review | chat |
-| `gpt-5.4` | GPT 5.4 | chat |
-| `gpt-5.4-review` | GPT 5.4 Review | chat |
-| `gpt-5.4-mini` | GPT 5.4 Mini | chat |
-| `gpt-5.4-mini-review` | GPT 5.4 Mini Review | chat |
-| `gpt-5.3-codex-spark` | GPT 5.3 Codex Spark | chat |
-| `gpt-5.3-codex-spark-review` | GPT 5.3 Codex Spark Review | chat |
+| `gpt-daybreak-blue-latest` | GPT Daybreak Blue | chat |
+| `gpt-reserve` | GPT Reserve | chat |
 | `codex-auto-review` | Codex Auto Review | chat |
 | `gpt-image-2.5` | GPT Image 2.5 | image generation |
 | `gpt-image-2.5-flare` | GPT Image 2.5 Flare | image generation |
 | `gpt-image-2.5-sunburst` | GPT Image 2.5 Sunburst | image generation |
+| `gpt-image-2.6-flare` | GPT Image 2.6 Flare | image generation |
+| `gpt-image-2.6-sunburst` | GPT Image 2.6 Sunburst | image generation |
 | `gpt-image-2` | GPT Image 2 | image generation |
 | `gpt-image-1.5` | GPT Image 1.5 | image generation |
-| `gpt-5.6-sol-image` | GPT 5.6 Sol Image | image generation |
-| `gpt-5.6-terra-image` | GPT 5.6 Terra Image | image generation |
-| `gpt-5.6-luna-image` | GPT 5.6 Luna Image | image generation |
-| `gpt-5.5-image` | GPT 5.5 Image | image generation |
-| `gpt-5.4-image` | GPT 5.4 Image | image generation |
-| `gpt-5.3-image` | GPT 5.3 Image | image generation |
+| `gpt-6-sol-image` | GPT 6.0 Sol Image | image generation |
+| `transcribe` | Codex Transcription | speech-to-text |
 
 #### `cursor` — Cursor IDE <sub>[site](https://cursor.com)</sub>
 
@@ -1450,35 +1733,59 @@ something other than chat.
 
 | Model id | Name | Kind |
 | --- | --- | --- |
-| `gpt-5.2` | GPT-5.2 | chat |
-| `gpt-5.2-codex` | GPT-5.2 Codex | chat |
+| `gpt-5-mini` | GPT-5 Mini | chat |
 | `gpt-5.3-codex` | GPT-5.3 Codex | chat |
 | `gpt-5.4` | GPT-5.4 | chat |
 | `gpt-5.4-mini` | GPT-5.4 Mini | chat |
+| `gpt-5.5` | GPT-5.5 | chat |
+| `gpt-5.6-luna` | GPT-5.6 Luna | chat |
+| `gpt-5.6-sol` | GPT-5.6 Sol | chat |
+| `gpt-5.6-terra` | GPT-5.6 Terra | chat |
+| `gpt-6-astra` | GPT-6 Astra | chat |
+| `gpt-6-luna` | GPT-6 Luna | chat |
+| `gpt-6-sol` | GPT-6 Sol | chat |
+| `gpt-6.1-sol` | GPT-6.1 Sol | chat |
+| `claude-fable-5` | Claude Fable 5 | chat |
 | `claude-haiku-4.5` | Claude Haiku 4.5 | chat |
-| `claude-opus-4.5` | Claude Opus 4.5 | chat |
-| `claude-sonnet-4.5` | Claude Sonnet 4.5 | chat |
+| `claude-haiku-5.5` | Claude Haiku 5.5 | chat |
+| `claude-opus-4.8` | Claude Opus 4.8 | chat |
+| `claude-opus-4.8-fast` | Claude Opus 4.8 (Fast) | chat |
+| `claude-opus-5` | Claude Opus 5 | chat |
+| `claude-opus-5.5` | Claude Opus 5.5 | chat |
 | `claude-sonnet-4.6` | Claude Sonnet 4.6 | chat |
-| `claude-opus-4.6` | Claude Opus 4.6 | chat |
-| `claude-opus-4.7` | Claude Opus 4.7 | chat |
-| `gemini-2.5-pro` | Gemini 2.5 Pro | chat |
-| `gemini-3-flash-preview` | Gemini 3 Flash | chat |
-| `gemini-3.1-pro-preview` | Gemini 3.1 Pro | chat |
-| `grok-code-fast-1` | Grok Code Fast 1 | chat |
-| `oswe-vscode-prime` | Raptor Mini | chat |
-| `goldeneye-free-auto` | GoldenEye | chat |
+| `claude-sonnet-5` | Claude Sonnet 5 | chat |
+| `claude-sonnet-5.5` | Claude Sonnet 5.5 | chat |
+| `gemini-3.7-flash` | Gemini 3.7 Flash | chat |
+| `gemini-3.8-flash` | Gemini 3.8 Flash | chat |
+| `gemini-4-argon` | Gemini 4 Argon | chat |
+| `kimi-k3` | Kimi K3 | chat |
+| `mai-code-1.1-flash` | MAI-Code-1.1-Flash | chat |
 | `text-embedding-3-small` | Text Embedding 3 Small (GitHub) | embeddings |
-| `text-embedding-3-large` | Text Embedding 3 Large (GitHub) | embeddings |
+| `text-embedding-ada-002` | Text Embedding Ada 002 (GitHub) | embeddings |
 
 #### `gitlab` — GitLab Duo <sub>[site](https://gitlab.com)</sub>
 
 - No static model list. This entry resolves its models at runtime — from the account, the
   provider's own catalogue endpoint, or a local daemon — so nothing can be enumerated here.
 
+#### `glm` — Zai GLM Coding <sub>[site](https://open.bigmodel.cn) · `llm`, `webSearch`</sub>
+
+| Model id | Name | Kind |
+| --- | --- | --- |
+| `glm-5.3` | GLM 5.3 | chat |
+| `glm-5.3-flash` | GLM 5.3 Flash (Vision) | chat |
+| `glm-5.2` | GLM 5.2 | chat |
+| `glm-5.1` | GLM 5.1 | chat |
+| `glm-5-turbo` | GLM 5 Turbo | chat |
+| `glm-5` | GLM 5 | chat |
+| `glm-4.7` | GLM 4.7 | chat |
+| `glm-4.6v` | GLM 4.6V (Vision) | chat |
+
 #### `grok-cli` — Grok CLI (Grok Build) <sub>[site](https://x.ai)</sub>
 
 | Model id | Name | Kind |
 | --- | --- | --- |
+| `grok-4.7` | Grok 4.7 | chat |
 | `grok-4.5` | Grok 4.5 | chat |
 | `grok-4.5-high` | Grok 4.5 (High) | chat |
 | `grok-4.5-medium` | Grok 4.5 (Medium) | chat |
@@ -1532,6 +1839,34 @@ something other than chat.
 | `kimi-k2.5-thinking` | Kimi K2.5 Thinking | chat |
 | `kimi-latest` | Kimi Latest | chat |
 
+#### `minimax-code-global` — MiniMax Code (Global) <sub>[site](https://agent.minimax.io)</sub>
+
+| Model id | Name | Kind |
+| --- | --- | --- |
+| `MiniMax-M3.1-Flash-Preview` | MiniMax M3.1 Flash Preview | chat |
+| `MiniMax-M3` | MiniMax M3 | chat |
+| `MiniMax-M2.7` | MiniMax M2.7 | chat |
+| `MiniMax-M2.7-highspeed` | MiniMax M2.7 Highspeed | chat |
+
+#### `minimax-code` — MiniMax Code <sub>[site](https://agent.minimax.cn)</sub>
+
+| Model id | Name | Kind |
+| --- | --- | --- |
+| `MiniMax-M3.1-Flash-Preview` | MiniMax M3.1 Flash Preview | chat |
+| `MiniMax-M3` | MiniMax M3 | chat |
+| `MiniMax-M2.7` | MiniMax M2.7 | chat |
+| `MiniMax-M2.7-highspeed` | MiniMax M2.7 Highspeed | chat |
+
+#### `muse` — Muse (Meta Model API) <sub>[site](https://muse.ai)</sub>
+
+| Model id | Name | Kind |
+| --- | --- | --- |
+| `muse-spark-1.3` | Muse Spark 1.3 | chat |
+| `muse-spark-1.2` | Muse Spark 1.2 | chat |
+| `muse-spark-1.1` | Muse Spark 1.1 | chat |
+| `muse-spark-1.3-contributor` | Muse Spark 1.3 Contributor | chat |
+| `muse-spark-1.2-contributor` | Muse Spark 1.2 Contributor | chat |
+
 #### `qoder-cn` — Qoder CN <sub>[site](https://qoder.com.cn)</sub>
 
 | Model id | Name | Kind |
@@ -1573,6 +1908,8 @@ something other than chat.
 | `dmodel` | DeepSeek-V4-Pro | chat |
 | `dfmodel` | DeepSeek-V4-Flash | chat |
 | `mmodel` | MiniMax-M3 | chat |
+| `smodel` | Sonus | chat |
+| `cmodel` | Cantus | chat |
 
 #### `trae` — Trae <sub>[site](https://www.trae.ai)</sub>
 
@@ -1672,6 +2009,7 @@ something other than chat.
 
 | Model id | Name | Kind |
 | --- | --- | --- |
+| `grok-4.7` | Grok 4.7 | chat |
 | `grok-4.6` | Grok 4.6 | chat |
 | `grok-4.5` | Grok 4.5 | chat |
 | `grok-4` | Grok 4 | chat |
@@ -1685,8 +2023,9 @@ something other than chat.
 
 | Model id | Name | Kind |
 | --- | --- | --- |
-| `mimo-x-pro-preview` | MiMo-X-Pro-Preview | chat |
-| `mimo-x-flash-preview` | MiMo-X-Flash-Preview | chat |
+| `mimo-v2.6-pro` | MiMo V2.6 Pro | chat |
+| `mimo-v2.6-flash` | MiMo V2.6 Flash | chat |
+| `mimo-v2.6-pro-ultraspeed` | MiMo V2.6 Pro UltraSpeed | chat |
 | `mimo-v2.5-pro` | MiMo V2.5 Pro | chat |
 | `mimo-v2.5` | MiMo V2.5 | chat |
 | `mimo-v2-omni` | MiMo V2 Omni | chat |
@@ -1700,10 +2039,54 @@ something other than chat.
 
 ### webCookie
 
-#### `grok-web` — Grok Web (Subscription) <sub>[site](https://grok.com)</sub>
+#### `chatgpt-web` — ChatGPT Web <sub>[site](https://chatgpt.com) · `image`</sub>
 
 | Model id | Name | Kind |
 | --- | --- | --- |
+| `gpt-5-6` | GPT-5.6 Sol — Instant | chat |
+| `gpt-5-6-thinking` | GPT-5.6 Sol — Thinking | chat |
+| `gpt-5-6-pro` | GPT-5.6 Sol — Pro | chat |
+| `gpt-5.6-luna-free` | GPT-5.6 Luna — Free | chat |
+| `gpt-5.6-luna-free-thinking` | GPT-5.6 Luna — Free Thinking | chat |
+| `gpt-5-5-instant` | GPT-5.5 — Instant | chat |
+| `gpt-5-5-thinking` | GPT-5.5 — Thinking | chat |
+| `gpt-5-5-pro` | GPT-5.5 — Pro | chat |
+| `gpt-image-2` | GPT Image 2 (web) | image generation |
+
+#### `deepseek-web` — DeepSeek Web <sub>[site](https://chat.deepseek.com)</sub>
+
+| Model id | Name | Kind |
+| --- | --- | --- |
+| `deepseek-v4-pro` | DeepSeek V4 Pro | chat |
+| `deepseek-v4-pro-think` | DeepSeek V4 Pro Think | chat |
+| `deepseek-v4-pro-search` | DeepSeek V4 Pro Search | chat |
+| `deepseek-v4-pro-think-search` | DeepSeek V4 Pro Think+Search | chat |
+| `deepseek-v4-flash` | DeepSeek V4 Flash | chat |
+| `deepseek-v4-flash-think` | DeepSeek V4 Flash Think | chat |
+| `deepseek-v4-flash-search` | DeepSeek V4 Flash Search | chat |
+| `deepseek-v4-flash-think-search` | DeepSeek V4 Flash Think+Search | chat |
+| `deepseek-chat` | DeepSeek Chat | chat |
+| `deepseek-reasoner` | DeepSeek Reasoner | chat |
+| `DeepSeek-R1` | DeepSeek R1 | chat |
+| `DeepSeek-R1-Search` | DeepSeek R1 Search | chat |
+| `DeepSeek-V3.2` | DeepSeek V3.2 | chat |
+| `DeepSeek-Search` | DeepSeek Search | chat |
+
+#### `gemini-web` — Gemini Web <sub>[site](https://gemini.google.com) · `image`</sub>
+
+| Model id | Name | Kind |
+| --- | --- | --- |
+| `gemini-3.1-pro` | Gemini 3.1 Pro | chat |
+| `gemini-3.7-flash` | Gemini 3.7 Flash | chat |
+| `gemini-3.1-flash-lite` | Gemini 3.1 Flash-Lite | chat |
+| `gemini-image` | Gemini Image (web) | image generation |
+
+#### `grok-web` — Grok Web (Subscription) <sub>[site](https://grok.com) · `image`, `video`</sub>
+
+| Model id | Name | Kind |
+| --- | --- | --- |
+| `grok-image` | Grok Imagine Image | image generation |
+| `grok-video` | Grok Imagine Video | video |
 | `grok-3` | Grok 3 | chat |
 | `grok-3-mini` | Grok 3 Mini (Thinking) | chat |
 | `grok-3-thinking` | Grok 3 Thinking | chat |
@@ -1717,6 +2100,14 @@ something other than chat.
 | `grok-4.1-thinking` | Grok 4.1 Thinking | chat |
 | `grok-4.2` | Grok 4.2 (4.20 Beta) | chat |
 
+#### `muse-web` — Muse Web <sub>[site](https://muse.ai) · `image`, `video`</sub>
+
+| Model id | Name | Kind |
+| --- | --- | --- |
+| `muse-chat` | Muse Chat | chat |
+| `muse-image` | Muse Image | image generation |
+| `muse-video` | Muse Video | video |
+
 #### `perplexity-web` — Perplexity Web (Pro/Max) <sub>[site](https://www.perplexity.ai)</sub>
 
 | Model id | Name | Kind |
@@ -1729,6 +2120,64 @@ something other than chat.
 | `pplx-opus` | Claude Opus 4.6 (via Perplexity) | chat |
 | `pplx-nemotron` | Nemotron 3 Super (via Perplexity) | chat |
 
+#### `uc-web` — UC Web <sub>[site](https://uncensored.com) · `image`, `video`</sub>
+
+| Model id | Name | Kind |
+| --- | --- | --- |
+| `seedream-v4.5` | Seedream v4.5 (UC) | image generation |
+| `seedream-v5` | Seedream v5 (UC) | image generation |
+| `seedream-v5-flash` | Seedream v5 Flash (UC) | image generation |
+| `nano-banana-pro-ultra` | Nano Banana Pro Ultra (UC) | image generation |
+| `nano-banana-pro` | Nano Banana Pro (UC) | image generation |
+| `nano-banana` | Nano Banana (UC) | image generation |
+| `nano-banana-2` | Nano Banana 2 (UC) | image generation |
+| `gpt-image` | GPT Image 1.5 (UC) | image generation |
+| `gpt-image-2` | GPT Image 2 (UC) | image generation |
+| `gpt-image-2.5-flare` | GPT Image 2.5 Flare (UC) | image generation |
+| `gpt-image-2.5-sunburst` | GPT Image 2.5 Sunburst (UC) | image generation |
+| `wan-2.6-image` | Wan 2.6 Image (UC) | image generation |
+| `wan-2.7-text-to-image` | Wan 2.7 (UC) | image generation |
+| `wan-2.7-text-to-image-pro` | Wan 2.7 Pro (UC) | image generation |
+| `prefect-pony-xl` | Prefect Pony XL (UC) | image generation |
+| `1.0` | Flux.1 (UC) | image generation |
+| `1.1` | Flux.1.1 (UC) | image generation |
+| `2.0` | Flux.2 (UC) | image generation |
+| `flux-2-max` | Flux 2 Max (UC) | image generation |
+| `SDXL` | SDXL Uncensored (UC) | image generation |
+| `realism` | Realism (UC) | image generation |
+| `realism-2` | Realism 2 (UC) | image generation |
+| `z-image-turbo` | Z-Image Turbo (UC) | image generation |
+| `default` | Video Standard (UC) | video |
+| `turbo` | Video Turbo (UC) | video |
+| `wan-2.2-uncensored` | Wan Ultra Uncensored (UC) | video |
+| `wan-2.2-uncensored-v2` | Wan Ultra Uncensored v2 (UC) | video |
+| `wan-2.6` | Wan 2.6 Video (UC) | video |
+| `wan-2.6-ultra` | Wan 2.6 Ultra Uncensored (UC) | video |
+| `wan-2.7` | Wan 2.7 Video (UC) | video |
+| `wan-2.7-pro` | Wan 2.7 Pro Video (UC) | video |
+| `wan-2.7-uncensored` | Wan 2.7 Uncensored (UC) | video |
+| `wan-2.7-uncensored-v2` | Wan 2.7 Uncensored v2 (UC) | video |
+| `wan-3.0` | Wan 3.0 (UC) | video |
+| `wan-3.0-uncensored` | Wan 3.0 Uncensored (UC) | video |
+| `wan-3.0-uncensored-pro` | Wan 3.0 Uncensored Pro (UC) | video |
+| `sora-2` | Sora 2 (UC) | video |
+| `sora-2-pro` | Sora 2 Pro (UC) | video |
+| `grok-imagine-video` | Grok Imagine Video (UC) | video |
+| `bytedance-seedance-2.0` | Seedance 2.0 (UC) | video |
+| `seedance-2.0-fast` | Seedance 2.0 Fast (UC) | video |
+| `seedance-2.0-uncensored` | Seedance 2.0 Uncensored (UC) | video |
+| `seedance-2.0-fast-uncensored` | Seedance 2.0 Fast Uncensored (UC) | video |
+| `seedance-2.0-mini-uncensored` | Seedance 2.0 Mini Uncensored (UC) | video |
+| `seedance-2.0-mini-turbo` | Seedance 2.0 Mini Turbo Uncensored (UC) | video |
+| `seedance-v1.5-pro-uncensored` | Seedance v1.5 Pro Uncensored (UC) | video |
+| `seedance-2.5-uncensored` | Seedance 2.5 Uncensored (UC) | video |
+| `seedance-2.5` | Seedance 2.5 (UC) | video |
+| `vidu-q3-uncensored` | Vidu Q3 Uncensored (UC) | video |
+| `av-gen-v2` | AV-Gen v2 with audio (UC) | video |
+| `cosmos-predict` | Cosmos Predict 2.5 (UC) | video |
+| `minimax-h3` | MiniMax H3 (UC) | video |
+| `happyhorse-1.0` | Happy Horse 1.0 (UC) | video |
+
 ## Entries with no static model list
 
 These are listed separately because "no models" and "zero models" are different facts, and only
@@ -1738,12 +2187,13 @@ one of them is a statement about this registry.
 | --- | --- | --- |
 | `aws-polly` | apikey | `tts` |
 | `azure` | apikey | — |
+| `bai` | apikey | — |
 | `brave-search` | apikey | `webSearch` |
 | `cartesia` | apikey | `tts` |
 | `chutes` | apikey | — |
 | `coqui` | freeTier | `tts` |
 | `edge-tts` | freeTier | `tts` |
-| `elevenlabs` | apikey | `tts` |
+| `elevenlabs` | apikey | `tts`, `stt` |
 | `exa` | apikey | `webSearch`, `webFetch` |
 | `firecrawl` | apikey | `webFetch` |
 | `gitlab` | oauth | — |
@@ -1754,13 +2204,14 @@ one of them is a statement about this registry.
 | `jina-reader` | apikey | `webFetch` |
 | `linkup` | apikey | `webSearch` |
 | `local-device` | freeTier | `tts` |
-| `ollama-local` | apikey | `llm` |
+| `nous` | freeTier | `llm`, `imageToText` |
 | `ollama-search` | apikey | `webSearch` |
 | `playht` | apikey | `tts` |
 | `searchapi` | apikey | `webSearch` |
 | `searxng` | freeTier | `webSearch` |
 | `serper` | apikey | `webSearch` |
 | `tavily` | apikey | `webSearch`, `webFetch` |
+| `tinyfish` | apikey | `webSearch`, `webFetch` |
 | `topaz` | apikey | `image` |
 | `tortoise` | freeTier | `tts` |
 | `vercel-ai-gateway` | apikey | `llm`, `embedding`, `image`, `imageToText`, `webSearch` |

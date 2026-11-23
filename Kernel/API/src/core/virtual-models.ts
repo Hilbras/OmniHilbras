@@ -8,7 +8,12 @@ import { atomicWrite, defaultStateDirectory } from './secure-store.js';
  * The `oh/` prefix is not decoration: it keeps a virtual ID from colliding with a concrete model ID that
  * a provider may already answer to, and it makes a request that depends on local routing obvious in a log.
  */
-export type VirtualModelStrategy = 'priority' | 'round-robin' | 'fastest';
+/**
+ * `smart` spends one real router turn before dispatch; `fusion` fans the prompt across every enabled
+ * panel member and asks one judge model to synthesise. Both are billable turns in addition to the
+ * target call, so the dashboard says so next to the selector.
+ */
+export type VirtualModelStrategy = 'priority' | 'round-robin' | 'fastest' | 'smart' | 'fusion';
 
 export type VirtualModelTarget = {
   connectionId: string;
@@ -24,6 +29,20 @@ export type VirtualModel = {
   enabled: boolean;
   strategy: VirtualModelStrategy;
   targets: VirtualModelTarget[];
+  /** A concrete model id the gateway calls to choose a smart target. Never an `oh/` id. */
+  routerModel?: string;
+  /** 0–1. A choice below this is ignored and declared target order is used. Default 0.8. */
+  confidenceThreshold?: number;
+  /** Reuse a confident choice across one conversation instead of paying for another router turn. */
+  sessionSticky?: boolean;
+  /** A concrete model id that synthesises a fusion panel. Never an `oh/` id. */
+  judgeModel?: string;
+  /** Minimum panel answers before the grace window starts. Default 2. */
+  quorum?: number;
+  /** How long to wait for stragglers after quorum. Default 2000 ms. */
+  graceMs?: number;
+  /** Absolute cap on panel collection. Default 90000 ms. */
+  hardTimeoutMs?: number;
   createdAt: string;
   updatedAt: string;
 };
@@ -33,6 +52,13 @@ export type VirtualModelInput = {
   name?: string;
   enabled?: boolean;
   strategy?: VirtualModelStrategy;
+  routerModel?: string;
+  confidenceThreshold?: number;
+  sessionSticky?: boolean;
+  judgeModel?: string;
+  quorum?: number;
+  graceMs?: number;
+  hardTimeoutMs?: number;
   targets: Array<{
     connectionId: string;
     upstreamModelId: string;
@@ -94,7 +120,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 const virtualIdPattern = /^oh\/[A-Za-z0-9][A-Za-z0-9._:/-]*$/;
-const strategies = new Set<VirtualModelStrategy>(['priority', 'round-robin', 'fastest']);
+const strategies = new Set<VirtualModelStrategy>(['priority', 'round-robin', 'fastest', 'smart', 'fusion']);
 
 export function assertVirtualModelId(id: string) {
   if (typeof id !== 'string' || !virtualIdPattern.test(id)) {
@@ -107,7 +133,27 @@ export function normalizeVirtualModelInput(input: VirtualModelInput, existing?: 
   assertVirtualModelId(input.id);
   const name = input.name?.trim() || input.id.slice('oh/'.length);
   if (!name) throw new Error('A virtual model needs a name.');
-  if (input.strategy !== undefined && !strategies.has(input.strategy)) throw new Error('strategy must be priority, round-robin or fastest.');
+  if (input.strategy !== undefined && !strategies.has(input.strategy)) throw new Error('strategy must be priority, round-robin, fastest, smart or fusion.');
+  const strategy = input.strategy ?? existing?.strategy ?? 'priority';
+  const routerModel = input.routerModel ?? existing?.routerModel;
+  const judgeModel = input.judgeModel ?? existing?.judgeModel;
+  const confidenceThreshold = input.confidenceThreshold ?? existing?.confidenceThreshold;
+  const sessionSticky = input.sessionSticky ?? existing?.sessionSticky;
+  const quorum = input.quorum ?? existing?.quorum;
+  const graceMs = input.graceMs ?? existing?.graceMs;
+  const hardTimeoutMs = input.hardTimeoutMs ?? existing?.hardTimeoutMs;
+  if (strategy === 'smart') {
+    if (typeof routerModel !== 'string' || !routerModel.trim() || routerModel.startsWith('oh/')) throw new Error('A smart virtual model needs a concrete routerModel id.');
+  }
+  if (strategy === 'fusion') {
+    if (typeof judgeModel !== 'string' || !judgeModel.trim() || judgeModel.startsWith('oh/')) throw new Error('A fusion virtual model needs a concrete judgeModel id.');
+  }
+  if (confidenceThreshold !== undefined && (typeof confidenceThreshold !== 'number' || !Number.isFinite(confidenceThreshold) || confidenceThreshold < 0 || confidenceThreshold > 1)) throw new Error('confidenceThreshold must be a number from 0 to 1.');
+  if (sessionSticky !== undefined && typeof sessionSticky !== 'boolean') throw new Error('sessionSticky must be a boolean.');
+  for (const [name, value] of [['quorum', quorum], ['graceMs', graceMs], ['hardTimeoutMs', hardTimeoutMs]] as const) {
+    if (value !== undefined && (!Number.isInteger(value) || value < 0 || value > 600_000)) throw new Error(`${name} must be an integer from 0 to 600000.`);
+  }
+  if (quorum !== undefined && quorum < 1) throw new Error('quorum must be at least 1.');
   const enabled = input.enabled ?? existing?.enabled ?? true;
   const targets = (Array.isArray(input.targets) ? input.targets : []).map((target) => {
     if (!target || typeof target.connectionId !== 'string' || !target.connectionId.trim()) throw new Error('Every target needs a connectionId.');
@@ -133,8 +179,15 @@ export function normalizeVirtualModelInput(input: VirtualModelInput, existing?: 
     id: input.id,
     name,
     enabled,
-    strategy: input.strategy ?? existing?.strategy ?? 'priority',
+    strategy,
     targets,
+    ...(routerModel !== undefined ? { routerModel: routerModel.trim() } : {}),
+    ...(confidenceThreshold !== undefined ? { confidenceThreshold } : {}),
+    ...(sessionSticky !== undefined ? { sessionSticky } : {}),
+    ...(judgeModel !== undefined ? { judgeModel: judgeModel.trim() } : {}),
+    ...(quorum !== undefined ? { quorum } : {}),
+    ...(graceMs !== undefined ? { graceMs } : {}),
+    ...(hardTimeoutMs !== undefined ? { hardTimeoutMs } : {}),
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   };
