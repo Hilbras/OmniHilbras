@@ -71,6 +71,17 @@ export const providerLogoMap = {
   // Numes' own mark, from the favicon it ships. SVG because no rasteriser is available here and the
   // catalogue already carries eighteen providers as SVG.
   numes: '/providers/numes.svg',
+  // Parity-cycle keyed routers. Their marks are committed under `public/providers/` beside the
+  // earlier ones; a card showing an initial here would be a missing mapping, not a missing asset.
+  glm: '/providers/glm.png',
+  'glm-cn': '/providers/glm-cn.png',
+  together: '/providers/together.png',
+  fireworks: '/providers/fireworks.svg',
+  sambanova: '/providers/sambanova.svg',
+  cerebras: '/providers/cerebras.svg',
+  siliconflow: '/providers/siliconflow.png',
+  nebius: '/providers/nebius.svg',
+  perplexity: '/providers/perplexity.svg',
 } as const;
 
 export function getProviderLogo(id: string | null | undefined) {
@@ -1359,6 +1370,7 @@ export const providerCatalog: ProviderRecord[] = [
   {
     id: 'glm',
     name: 'Z.ai GLM Coding',
+    logo: providerLogoMap.glm,
     // A paid Z.ai coding-plan API key, not the ZCode Start Plan subscription above and not the ZCode
     // CLI OAuth that the reference registry uses. The shared adapter appends /chat/completions to the
     // base below, so the key reaches https://api.z.ai/api/coding/paas/v4/chat/completions over the
@@ -1379,6 +1391,33 @@ export const providerCatalog: ProviderRecord[] = [
     modelList: [],
     riskNotice:
       'This is a paid Z.ai coding-plan API key, billed by Z.ai — not the ZCode Start Plan subscription on the `zcode` card and not a CLI OAuth grant. Only OpenAI-compatible chat is routed here; the reference’s Claude-header lane, CLI sign-in and client identity are not copied. Check declares no key validation because a public catalog cannot prove a pasted key.',
+    riskSeverity: 'standard',
+  },
+  {
+    id: 'glm-cn',
+    name: 'GLM (China)',
+    logo: providerLogoMap['glm-cn'],
+    // The mainland BigModel coding-plan key: a separate host, a separate vault entry and a separate
+    // product from `glm` (the paid Z.ai coding key above) and from `zcode` (the ZCode Start Plan
+    // subscription). The shared adapter appends /chat/completions to the base below; no OAuth, CLI
+    // sign-in, client identity or measured card field came with the reference's apikey registry entry.
+    description: 'A BigModel coding-plan API key for the mainland GLM endpoint on open.bigmodel.cn. This is a separate product and a separate key from the Z.ai coding-plan key (`glm`) and from the ZCode Start Plan subscription (`zcode`); the key is kept in the gateway vault and sent only to open.bigmodel.cn. Check cannot prove a pasted key from a public catalog.',
+    category: 'Model provider',
+    group: 'api-key',
+    status: 'available',
+    auth: 'API key',
+    models: '—',
+    latency: '—',
+    requests: '0',
+    lastUsed: 'never',
+    health: 0,
+    color: '#dc2626',
+    initial: 'C',
+    endpoint: 'https://open.bigmodel.cn/api/coding/paas/v4',
+    apiKeysUrl: 'https://open.bigmodel.cn/usercenter/apikeys',
+    modelList: [],
+    riskNotice:
+      'This is a paid BigModel coding-plan API key, billed by BigModel — not the Z.ai key on the `glm` card and not the ZCode Start Plan subscription on the `zcode` card. Only OpenAI-compatible chat is routed here; the reference entry adds no sign-in flow, client identity or embedded secret, and none is copied. Check declares no key validation because a public catalog cannot prove a pasted key belongs to you.',
     riskSeverity: 'standard',
   },
   {
@@ -1549,6 +1588,7 @@ export const providerCatalog: ProviderRecord[] = [
   {
     id: 'together',
     name: 'Together AI',
+    logo: providerLogoMap.together,
     description: 'Together AI model API, served over its OpenAI-compatible endpoint. A saved key is sent to Together, never to the browser.',
     category: 'Model provider',
     group: 'api-key',
@@ -1570,6 +1610,7 @@ export const providerCatalog: ProviderRecord[] = [
   {
     id: 'fireworks',
     name: 'Fireworks AI',
+    logo: providerLogoMap.fireworks,
     description: 'Fireworks inference endpoint, served over its OpenAI-compatible API. A saved key is sent to Fireworks, never to the browser.',
     category: 'Model provider',
     group: 'api-key',
@@ -1594,6 +1635,7 @@ export const providerCatalog: ProviderRecord[] = [
   {
     id: 'sambanova',
     name: 'SambaNova',
+    logo: providerLogoMap.sambanova,
     description: 'SambaNova inference over its OpenAI-compatible endpoint. The key is kept in the gateway vault and sent only to sambanova.ai.',
     category: 'Model provider',
     group: 'api-key',
@@ -1613,6 +1655,7 @@ export const providerCatalog: ProviderRecord[] = [
   {
     id: 'cerebras',
     name: 'Cerebras',
+    logo: providerLogoMap.cerebras,
     description: 'Cerebras inference over its OpenAI-compatible endpoint. The key is kept in the gateway vault and sent only to cerebras.ai.',
     category: 'Model provider',
     group: 'api-key',
@@ -1632,6 +1675,7 @@ export const providerCatalog: ProviderRecord[] = [
   {
     id: 'siliconflow',
     name: 'SiliconFlow',
+    logo: providerLogoMap.siliconflow,
     description: 'SiliconFlow model serving over its OpenAI-compatible endpoint. The key is kept in the gateway vault and sent only to siliconflow.com.',
     category: 'Model provider',
     group: 'api-key',
@@ -1651,6 +1695,7 @@ export const providerCatalog: ProviderRecord[] = [
   {
     id: 'nebius',
     name: 'Nebius AI',
+    logo: providerLogoMap.nebius,
     description: 'Nebius AI model serving over its OpenAI-compatible endpoint. The key is kept in the gateway vault and sent only to nebius.ai.',
     category: 'Model provider',
     group: 'api-key',
@@ -1670,6 +1715,7 @@ export const providerCatalog: ProviderRecord[] = [
   {
     id: 'perplexity',
     name: 'Perplexity API',
+    logo: providerLogoMap.perplexity,
     // A separate product from `perplexity-web`: this one is a key on api.perplexity.ai, the other a
     // pasted NextAuth session on perplexity.ai. Different credential, different endpoint, own id.
     description: 'Perplexity’s keyed inference API over its OpenAI-compatible endpoint. The key is kept in the gateway vault and sent only to api.perplexity.ai; the separate `perplexity-web` card drives a browser session instead.',
