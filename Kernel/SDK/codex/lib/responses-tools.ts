@@ -1,4 +1,4 @@
-import type { ChatMessage, ChatRequest, ToolCallDelta } from './types.js';
+import type { ChatMessage, ChatRequest, ToolCallDelta } from '@omnihilbras/sdk-shared/types';
 
 /**
  * The Responses API shapes a Codex agent turn needs.

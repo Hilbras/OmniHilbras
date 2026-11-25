@@ -10,7 +10,7 @@ import type {
   ProviderCredential,
   ProviderHealth,
   ProviderRequestContext,
-} from '../lib/types.js';
+} from '@omnihilbras/sdk-shared/types';
 
 /**
  * Gemini Web.

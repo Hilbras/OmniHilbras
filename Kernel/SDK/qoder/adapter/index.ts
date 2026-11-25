@@ -1,6 +1,6 @@
 import { ProviderError } from '@omnihilbras/sdk-shared/errors';
 import { parseSseStream } from '@omnihilbras/sdk-shared/streaming';
-import { FetchHttpTransport, type HttpTransport } from '../lib/transport.js';
+import { FetchHttpTransport, type HttpTransport } from '@omnihilbras/sdk-shared/transport';
 import { sanitizeProviderHeaders } from '@omnihilbras/sdk-shared/url';
 
 import type {
@@ -19,7 +19,7 @@ import type {
   ProviderResourceQuota,
   TokenUsage,
   ToolCall,
-} from '../lib/types.js';
+} from '@omnihilbras/sdk-shared/types';
 
 import {
   QODER_MODEL_MAP,

@@ -1,7 +1,7 @@
 import { ProviderError } from '@omnihilbras/sdk-shared/errors';
-import { OpenAICompatibleAdapter, type OpenAICompatibleAdapterOptions } from '../lib/openai-compatible.js';
-import { FetchHttpTransport, type HttpTransport } from '../lib/transport.js';
-import type { ProviderQuota, ProviderRequestContext, ProviderResourceQuota } from '../lib/types.js';
+import { OpenAICompatibleAdapter, type OpenAICompatibleAdapterOptions } from '@omnihilbras/sdk-shared/openai-compatible';
+import { FetchHttpTransport, type HttpTransport } from '@omnihilbras/sdk-shared/transport';
+import type { ProviderQuota, ProviderRequestContext, ProviderResourceQuota } from '@omnihilbras/sdk-shared/types';
 
 export const apmixProviderId = 'apmix';
 
@@ -128,4 +128,4 @@ export class ApmixAdapter extends OpenAICompatibleAdapter {
   }
 }
 
-export * from '../lib/openai-compatible.js';
+export * from '@omnihilbras/sdk-shared/openai-compatible';

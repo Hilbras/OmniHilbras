@@ -1,5 +1,5 @@
 import { OpenAICompatibleAdapter, type OpenAICompatibleAdapterOptions } from '@omnihilbras/sdk-openai';
-import type { CredentialValidation, ProviderCredential, ProviderRequestContext } from '../lib/types.js';
+import type { CredentialValidation, ProviderCredential, ProviderRequestContext } from '@omnihilbras/sdk-shared/types';
 
 /** Ollama's own adapter. Its base URL and id live here, not in a dashboard card. */
 export const ollamaProviderId = 'ollama';

@@ -1,4 +1,4 @@
-import type { ChatRequest } from './types.js';
+import type { ChatRequest } from '@omnihilbras/sdk-shared/types';
 import { zenSessionId, zenUserAgent } from './zen-free-tier.js';
 
 /**

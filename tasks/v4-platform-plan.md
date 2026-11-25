@@ -1,6 +1,6 @@
 # V4 platform plan
 
-**Goal:** [v4-goal.md](./v4-goal.md) · **Baseline:** `3.100.2` (2026-11-25) · **Status:** Phase A starting
+**Goal:** [v4-goal.md](./v4-goal.md) · **Baseline:** `3.100.2` (2026-11-25) · **Status:** Phase A complete in `4.0.0-alpha.2`; Phase B next
 
 ## Why 4.0
 
@@ -30,7 +30,7 @@ Already delivered and not to be re-invented: `/v1/events` SSE, SSE logs, `Sqlite
 
 Each phase ships as a prerelease with the normal ceremony (`verify` → version → tag → push → GitHub release → npm → audit).
 
-### Phase A — Shared provider core (`4.0.0-alpha.1`, `alpha.2`)
+### Phase A — Shared provider core (`4.0.0-alpha.1`, `alpha.2`) — done
 
 **Why first:** it is the highest maintenance leverage and the least user-visible risk. Every later provider/lifecycle change gets cheaper.
 

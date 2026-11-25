@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { CLINE_OAUTH, ClineAdapter, buildClineAuthorizeUrl, clineExpiryToIso, clineHeaders, clineStateCallbackUrl, clineStateMatchesCallback, decodeClineCode, toClineAccessToken, unwrapClineEnvelope } from '../cline/dist/adapter/index.js';
-import { providerErrorDetail } from '../cline/dist/lib/transport.js';
+import { providerErrorDetail } from '../_shared/dist/transport.js';
 import { ProviderError } from '../_shared/dist/errors.js';
 
 test('WorkOS JWTs are prefixed and other tokens are left alone', () => {

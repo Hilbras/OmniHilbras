@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { FetchHttpTransport } from '../codebuddy/dist/lib/transport.js';
+import { FetchHttpTransport } from '../_shared/dist/transport.js';
 import { ProviderError } from '../_shared/dist/errors.js';
 // The registry lives in the gateway and throws the gateway's own ProviderError class — a different
 // copy from the vendored one above, so `instanceof` cannot reach across. `isProviderError` is the

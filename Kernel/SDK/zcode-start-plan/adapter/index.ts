@@ -1,9 +1,9 @@
 import { ProviderError } from '@omnihilbras/sdk-shared/errors';
 import { parseSseJson, parseSseStream } from '@omnihilbras/sdk-shared/streaming';
-import { FetchHttpTransport, type HttpTransport } from '../lib/transport.js';
+import { FetchHttpTransport, type HttpTransport } from '@omnihilbras/sdk-shared/transport';
 import { assertSafeProviderHeaderValue, resolveProviderUrl } from '@omnihilbras/sdk-shared/url';
 import { START_PLAN_TEMPLATE } from '../lib/startPlanTemplate.js';
-import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, CredentialValidation, FinishReason, MessageContent, Model, ProviderAdapter, ProviderCapabilities, ProviderCredential, ProviderHealth, ProviderId, ProviderQuota, ProviderRequestContext, TokenUsage, ToolCall, ToolDefinition } from '../lib/types.js';
+import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, CredentialValidation, FinishReason, MessageContent, Model, ProviderAdapter, ProviderCapabilities, ProviderCredential, ProviderHealth, ProviderId, ProviderQuota, ProviderRequestContext, TokenUsage, ToolCall, ToolDefinition } from '@omnihilbras/sdk-shared/types';
 
 /**
  * ZCode (Start Plan) — a signed-in ZCode account, reached through its Anthropic-compatible endpoint.

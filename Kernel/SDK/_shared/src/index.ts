@@ -11,3 +11,5 @@ export {
   resolveProviderUrl,
   sanitizeProviderHeaders,
 } from './url.js';
+export * from './transport.js';
+export * from './openai-compatible.js';

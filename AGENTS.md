@@ -140,9 +140,10 @@ that is not on `main`.
   lives once in `Kernel/SDK/_shared/`. The Kernel restructure first dissolved the shared `src/core/`
   into per-provider `lib/` copies, and that produced 245 tracked vendored files with 56 copies of
   `types.ts` and `errors.ts`; V4 reintroduced one shared package for the modules that have no reason
-  to vary. A provider may keep a local `lib/types.ts` and its provider-specific helpers, but a copy of
-  `errors`, `url`, `streaming`, `bounded-map` or `model-normalize` under any provider is drift and
-  `tests/vendored-lib-drift.test.js` fails on it. The gateway service must stay provider-neutral.
+  to vary. A provider may keep only provider-specific helpers under `lib/`; a copy of `types`,
+  `transport`, `openai-compatible`, `responses-lane`, `errors`, `url`, `streaming`, `bounded-map` or
+  `model-normalize` under any provider is drift and `tests/vendored-lib-drift.test.js` fails on it.
+  The gateway service must stay provider-neutral.
   **This line named `src/adapters/` for releases after that directory was renamed, and
   `Kernel/SDK/src/` for releases after that tree was dissolved**, so a contributor following it wrote
   into a path that does not exist — which is what a path written in prose does when nothing reads it.

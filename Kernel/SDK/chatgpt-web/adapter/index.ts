@@ -1,5 +1,5 @@
 import { ProviderError } from '@omnihilbras/sdk-shared/errors';
-import type { ChatChunk, ChatRequest, ChatResponse, CredentialValidation, MessageContent, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderRequestContext, TokenUsage } from '../lib/types.js';
+import type { ChatChunk, ChatRequest, ChatResponse, CredentialValidation, MessageContent, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderRequestContext, TokenUsage } from '@omnihilbras/sdk-shared/types';
 
 /**
  * ChatGPT Web.

@@ -1,8 +1,8 @@
 import { ProviderError } from '@omnihilbras/sdk-shared/errors';
-import { OpenAICompatibleAdapter, type OpenAICompatibleAdapterOptions } from '../lib/openai-compatible.js';
+import { OpenAICompatibleAdapter, type OpenAICompatibleAdapterOptions } from '@omnihilbras/sdk-shared/openai-compatible';
 import { normalizeCatalogModel } from '@omnihilbras/sdk-shared/model-normalize';
 import { parseSseJson, parseSseStream } from '@omnihilbras/sdk-shared/streaming';
-import { FetchHttpTransport, type HttpTransport } from '../lib/transport.js';
+import { FetchHttpTransport, type HttpTransport } from '@omnihilbras/sdk-shared/transport';
 import type {
   ChatChunk,
   ChatRequest,
@@ -15,7 +15,7 @@ import type {
   ProviderRequestContext,
   TokenUsage,
   ToolCallDelta,
-} from '../lib/types.js';
+} from '@omnihilbras/sdk-shared/types';
 
 export const nousProviderId = 'nous';
 export const NOUS_BASE_URL = 'https://inference-api.nousresearch.com/v1';
@@ -760,4 +760,4 @@ function nousStreamError(error: unknown) {
   return new ProviderError('PROVIDER_REQUEST_FAILED', detail ? `The provider stream returned an error: ${detail}` : 'The provider stream returned an error.', { providerId: nousProviderId });
 }
 
-export * from '../lib/openai-compatible.js';
+export * from '@omnihilbras/sdk-shared/openai-compatible';

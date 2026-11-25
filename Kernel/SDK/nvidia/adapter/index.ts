@@ -6,7 +6,7 @@ import type {
   ProviderCredential,
   ProviderHealth,
   ProviderRequestContext,
-} from '../lib/types.js';
+} from '@omnihilbras/sdk-shared/types';
 
 /** NVIDIA's own adapter. Its base URL and id live here, not in a dashboard card. */
 export const nvidiaProviderId = "nvidia";

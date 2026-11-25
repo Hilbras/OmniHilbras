@@ -1,4 +1,4 @@
-import type { ModelPricing } from './types.js';
+import type { ModelPricing } from '@omnihilbras/sdk-shared/types';
 
 /**
  * Price normalisation.

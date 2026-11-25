@@ -1,8 +1,8 @@
 import { ProviderError } from '@omnihilbras/sdk-shared/errors';
 import { parseSseJson, parseSseStream } from '@omnihilbras/sdk-shared/streaming';
-import { FetchHttpTransport, type HttpTransport } from './transport.js';
+import { FetchHttpTransport, type HttpTransport } from '@omnihilbras/sdk-shared/transport';
 import { assertSafeProviderHeaderValue, normalizeProviderBaseUrl, resolveProviderUrl, sanitizeProviderHeaders } from '@omnihilbras/sdk-shared/url';
-import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, FinishReason, MessageContent, Model, ProviderAdapter, ProviderCapabilities, ProviderCredential, ProviderHealth, ProviderRequestContext, TokenUsage, ToolCall, ToolDefinition } from './types.js';
+import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, FinishReason, MessageContent, Model, ProviderAdapter, ProviderCapabilities, ProviderCredential, ProviderHealth, ProviderRequestContext, TokenUsage, ToolCall, ToolDefinition } from '@omnihilbras/sdk-shared/types';
 
 export type AnthropicAdapterOptions = {
   baseUrl?: string;

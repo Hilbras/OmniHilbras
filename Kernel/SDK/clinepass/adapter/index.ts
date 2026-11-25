@@ -1,5 +1,5 @@
 import { CLINE_OAUTH, ClineAdapter, clineHeaders, type ClineAdapterOptions } from '../lib/cline.js';
-import type { ChatRequest, ChatResponse, ChatChunk, Model, ProviderRequestContext } from '../lib/types.js';
+import type { ChatRequest, ChatResponse, ChatChunk, Model, ProviderRequestContext } from '@omnihilbras/sdk-shared/types';
 
 /**
  * ClinePass is Cline's paid model tier. It is a **separate provider and a separate connection** from

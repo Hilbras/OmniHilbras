@@ -1,6 +1,6 @@
 import { ProviderError } from '@omnihilbras/sdk-shared/errors';
 import { parseSseJson, parseSseStream } from '@omnihilbras/sdk-shared/streaming';
-import { FetchHttpTransport, type HttpTransport } from '../lib/transport.js';
+import { FetchHttpTransport, type HttpTransport } from '@omnihilbras/sdk-shared/transport';
 import { normalizeProviderBaseUrl, resolveProviderUrl, sanitizeProviderHeaders } from '@omnihilbras/sdk-shared/url';
 
 import type {
@@ -17,7 +17,7 @@ import type {
   ProviderRequestContext,
   TokenUsage,
   ToolDefinition,
-} from '../lib/types.js';
+} from '@omnihilbras/sdk-shared/types';
 
 export const KILOCODE = {
   server: 'https://api.kilo.ai',

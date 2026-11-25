@@ -5,7 +5,7 @@ import {
   type OpenAICompatibleAdapterOptions,
 } from '@omnihilbras/sdk-openai';
 import { ProviderError } from '@omnihilbras/sdk-shared/errors';
-import type { ProviderCapabilities, ProviderRequestContext } from '../lib/types.js';
+import type { ProviderCapabilities, ProviderRequestContext } from '@omnihilbras/sdk-shared/types';
 
 /**
  * xAI's own adapter: chat on the OpenAI-compatible wire, plus its asynchronous video-job surface.

@@ -5,8 +5,8 @@ import test from 'node:test';
 import { ProviderRegistry } from '../dist/src/core/index.js';
 import { ProviderResolver } from '../dist/src/core/provider-resolver.js';
 import { providerResponsesPath } from '../dist/src/core/provider-responses-lane.js';
-import { FetchHttpTransport } from '@omnihilbras/sdk-openai/dist/lib/transport.js';
-import { forgetResponsesLanes } from '@omnihilbras/sdk-openai/dist/lib/responses-lane.js';
+import { FetchHttpTransport } from '../../SDK/_shared/dist/transport.js';
+import { forgetResponsesLanes } from '../../SDK/_shared/dist/responses-lane.js';
 
 /**
  * The Responses lane, wired for the one provider that has one.

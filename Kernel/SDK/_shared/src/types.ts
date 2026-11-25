@@ -236,6 +236,13 @@ export type ChatChunk = {
   delta: {
     role?: ChatRole;
     content?: string;
+    /**
+     * Reasoning for a turn the model thought through before answering.
+     *
+     * The gateway maps this to the OpenAI `reasoning_content` field. A turn that spent its budget
+     * thinking has no `content` at all — without this field the answer looked empty.
+     */
+    reasoning?: string;
     toolCalls?: readonly ToolCallDelta[];
   };
   finishReason?: FinishReason;
@@ -322,7 +329,7 @@ export type ProviderCapability =
 export type ProviderCapabilities = Partial<Record<ProviderCapability, boolean>>;
 
 export type ProviderCredential =
-  | { type: 'api-key'; value: string }
+  | { type: 'api-key'; value: string; deviceId?: string; shumeiDeviceId?: string; did?: string }
   /**
    * A token obtained through an OAuth authorization-code flow. `value` is the
    * current access token; `refreshToken` and `expiresAt` let an adapter renew it

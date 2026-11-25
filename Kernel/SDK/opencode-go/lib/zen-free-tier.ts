@@ -1,5 +1,5 @@
 import { ProviderError } from '@omnihilbras/sdk-shared/errors';
-import type { ChatRequest } from './types.js';
+import type { ChatRequest } from '@omnihilbras/sdk-shared/types';
 
 /**
  * OpenCode Zen's free-tier request contract.

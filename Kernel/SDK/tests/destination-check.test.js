@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { FetchHttpTransport } from '../codebuddy/dist/lib/transport.js';
+import { FetchHttpTransport } from '../_shared/dist/transport.js';
 import { ProviderError } from '../_shared/dist/errors.js';
 
 const okFetch = () => {

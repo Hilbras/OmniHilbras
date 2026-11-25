@@ -1,12 +1,12 @@
 import { ProviderError } from '@omnihilbras/sdk-shared/errors';
 import { parseSseJson, parseSseStream } from '@omnihilbras/sdk-shared/streaming';
-import { FetchHttpTransport, type HttpTransport } from '../lib/transport.js';
+import { FetchHttpTransport, type HttpTransport } from '@omnihilbras/sdk-shared/transport';
 import { assertSafeProviderHeaderValue, normalizeProviderBaseUrl, resolveProviderUrl, sanitizeProviderHeaders } from '@omnihilbras/sdk-shared/url';
 import { boundedMap } from '@omnihilbras/sdk-shared/bounded-map';
 
 /** Renewed credentials kept per adapter, enough for every token a live gateway has recently renewed. */
 const maxRenewalMemoEntries = 64;
-import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, FinishReason, Model, ProviderAdapter, ProviderCapabilities, ProviderCredential, ProviderHealth, ProviderRequestContext, TokenUsage, ToolCall, ToolDefinition } from '../lib/types.js';
+import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, FinishReason, Model, ProviderAdapter, ProviderCapabilities, ProviderCredential, ProviderHealth, ProviderRequestContext, TokenUsage, ToolCall, ToolDefinition } from '@omnihilbras/sdk-shared/types';
 
 /**
  * Claude Code — an Anthropic subscription reached by OAuth, not an Anthropic API key.

@@ -1,6 +1,6 @@
 # Spec: OmniHilbras Gateway and Provider SDK
 
-**Status:** Current — release 4.0.0-alpha.1
+**Status:** Current — release 4.0.0-alpha.2
 
 This document is the contract behind the gateway and its provider packages. It is intentionally more
 specific than the [README](../README.md): a route, an error code or a provider boundary written here is
@@ -3648,7 +3648,7 @@ measurement, and `Kernel/API/test/spec-success-criteria.mjs` fails if any stops 
       `build` script; every `Kernel/SDK/<provider>/package.json` declares no React dependency.
 - [x] The SDK exposes stable normalized types and a provider registry. — `ProviderRegistry` is exported,
       and the adapter contract suite runs against it.
-- [x] Core adapters are implemented: OpenAI, Anthropic, Gemini, and OpenAI-compatible, with a real OpenRouter adapter for authenticated connection management. — **160 files** in `Kernel/SDK/` — 56 provider folders, each with its own `adapter/index.ts` and local `lib/types.ts`, plus one shared `_shared` package for `errors`, `url`, `streaming`, `bounded-map`, `model-normalize` and the canonical types. The shared code is a dependency, not a copy: a provider is still removable without touching the rest, and a fix lands once. `openai-compatible` is no longer a provider: it was inlined into the four providers that extended it. The helpers (`deepseek-pow`, `zen-free-tier`, `responses-lane`, `responses-tools`, `qoder/constants`, `qoder/encoding`) and `qwen-web` are not protocol adapters, which is why the capture guard counts 55: it measures providers, this counts files.
+- [x] Core adapters are implemented: OpenAI, Anthropic, Gemini, and OpenAI-compatible, with a real OpenRouter adapter for authenticated connection management. — **70 files** in `Kernel/SDK/` — 56 provider folders, each with its own `adapter/index.ts` and only provider-specific `lib/` helpers, plus one shared `_shared` package for the canonical types, transport, OpenAI base, `errors`, `url`, `streaming`, `bounded-map` and `model-normalize`. The shared code is a dependency, not a copy: a provider is still removable without touching the rest, and a fix lands once. `openai-compatible` is no longer a provider: it was inlined into the four providers that extended it. The helpers (`deepseek-pow`, `zen-free-tier`, `responses-lane`, `responses-tools`, `qoder/constants`, `qoder/encoding`) and `qwen-web` are not protocol adapters, which is why the capture guard counts 55: it measures providers, this counts files.
 - [x] A provider with a different protocol can be added through a capability-specific adapter without
       modifying the gateway core. — **10 registrations in `service.ts`, 0 provider-id conditionals in
       `routing.ts` or `service.ts`.** Proved by 1.43.0, which added nine providers as catalog entries and

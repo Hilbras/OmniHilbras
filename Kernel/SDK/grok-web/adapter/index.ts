@@ -11,7 +11,7 @@ import type {
   ProviderCredential,
   ProviderHealth,
   ProviderRequestContext,
-} from '../lib/types.js';
+} from '@omnihilbras/sdk-shared/types';
 
 /**
  * Grok Web, through the `sso` cookie a signed-in grok.com browser holds.

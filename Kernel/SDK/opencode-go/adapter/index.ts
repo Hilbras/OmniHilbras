@@ -1,11 +1,11 @@
 import { ProviderError } from '@omnihilbras/sdk-shared/errors';
-import { FetchHttpTransport } from '../lib/transport.js';
-import type { HttpTransport } from '../lib/transport.js';
-import { OpenAICompatibleAdapter } from '../lib/openai-compatible.js';
+import { FetchHttpTransport } from '@omnihilbras/sdk-shared/transport';
+import type { HttpTransport } from '@omnihilbras/sdk-shared/transport';
+import { OpenAICompatibleAdapter } from '@omnihilbras/sdk-shared/openai-compatible';
 import { parseSseJson, parseSseStream } from '@omnihilbras/sdk-shared/streaming';
 import { isZenFreeTierRefusal, zenFreeTierHeaders, zenSessionId, zenContractSatisfied, zenConversationSeed, zenFreeTierRefusal, zenGatedToolChoice } from '../lib/zen-free-tier.js';
 import { opencodeGoHeaders } from '../lib/identity.js';
-import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, CredentialValidation, FinishReason, Model, ProviderQuota, ProviderResourceQuota, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderRequestContext, TokenUsage, ToolDefinition } from '../lib/types.js';
+import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, CredentialValidation, FinishReason, Model, ProviderQuota, ProviderResourceQuota, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderRequestContext, TokenUsage, ToolDefinition } from '@omnihilbras/sdk-shared/types';
 
 /**
  * OpenCode Zen serves one catalog through three different wire formats. Which
@@ -846,4 +846,4 @@ export class OpenCodeGoAdapter implements ProviderAdapter {
     };
   }
 }
-export * from '../lib/openai-compatible.js';
+export * from '@omnihilbras/sdk-shared/openai-compatible';

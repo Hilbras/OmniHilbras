@@ -1,4 +1,4 @@
-import { OpenAICompatibleAdapter, type OpenAICompatibleAdapterOptions } from '../lib/openai-compatible.js';
+import { OpenAICompatibleAdapter, type OpenAICompatibleAdapterOptions } from '@omnihilbras/sdk-shared/openai-compatible';
 
 export type OpenAIAdapterOptions = OpenAICompatibleAdapterOptions & {
   baseUrl?: string;
@@ -37,7 +37,7 @@ export class OpenAIAdapter extends OpenAICompatibleAdapter {
     }, options);
   }
 }
-export * from '../lib/openai-compatible.js';
+export * from '@omnihilbras/sdk-shared/openai-compatible';
 // Additive re-exports for sibling SDK packages that speak a non-chat wire (xAI's video jobs).
 // These were already the implementation behind the adapter; naming them here keeps a consumer from
 // depending on a `dist/lib/...` deep path that a build layout change could break.

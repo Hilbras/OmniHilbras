@@ -1,7 +1,7 @@
 import { ProviderError } from '@omnihilbras/sdk-shared/errors';
-import { FetchHttpTransport } from '../lib/transport.js';
-import type { HttpTransport } from '../lib/transport.js';
-import type { ChatChunk, ChatRequest, ChatResponse, CredentialValidation, MessageContent, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderQuota, ProviderRequestContext, ProviderResourceQuota, ToolDefinition } from '../lib/types.js';
+import { FetchHttpTransport } from '@omnihilbras/sdk-shared/transport';
+import type { HttpTransport } from '@omnihilbras/sdk-shared/transport';
+import type { ChatChunk, ChatRequest, ChatResponse, CredentialValidation, MessageContent, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderQuota, ProviderRequestContext, ProviderResourceQuota, ToolDefinition } from '@omnihilbras/sdk-shared/types';
 
 /**
  * Kiro.

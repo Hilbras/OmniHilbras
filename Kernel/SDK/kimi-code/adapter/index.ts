@@ -1,12 +1,12 @@
 import { ProviderError } from '@omnihilbras/sdk-shared/errors';
 import { parseSseJson, parseSseStream } from '@omnihilbras/sdk-shared/streaming';
-import { FetchHttpTransport, type HttpTransport } from '../lib/transport.js';
+import { FetchHttpTransport, type HttpTransport } from '@omnihilbras/sdk-shared/transport';
 import { assertSafeProviderHeaderValue, normalizeProviderBaseUrl, resolveProviderUrl, sanitizeProviderHeaders } from '@omnihilbras/sdk-shared/url';
 import { boundedMap } from '@omnihilbras/sdk-shared/bounded-map';
 
 /** Renewed credentials kept per adapter, enough for every token a live gateway has recently renewed. */
 const maxRenewalMemoEntries = 64;
-import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, EmbeddingRequest, EmbeddingResponse, FinishReason, Model, ProviderAdapter, ProviderCapabilities, ProviderCredential, ProviderHealth, ProviderQuota, ProviderRequestContext, ProviderResourceQuota, TokenUsage, ToolDefinition } from '../lib/types.js';
+import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, EmbeddingRequest, EmbeddingResponse, FinishReason, Model, ProviderAdapter, ProviderCapabilities, ProviderCredential, ProviderHealth, ProviderQuota, ProviderRequestContext, ProviderResourceQuota, TokenUsage, ToolDefinition } from '@omnihilbras/sdk-shared/types';
 
 /**
  * Kimi Code — the `api.kimi.com` coding subscription, reached by OAuth device code.

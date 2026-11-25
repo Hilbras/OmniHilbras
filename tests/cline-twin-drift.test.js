@@ -22,7 +22,7 @@ function implementation(path) {
     .replace(/\/\/[^\n]*/g, '')
     .replace(/from '\.\.\/lib\//g, "from './")
     // The ClinePass copy re-exports its vendored wire types for its own package; the Cline copy does not.
-    .replace(/export \* from '\.\/openai-compatible\.js';\s*$/, '')
+    .replace(/export \* from '.*openai-compatible';\s*$/, '')
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean)

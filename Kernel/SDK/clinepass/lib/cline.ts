@@ -1,9 +1,9 @@
 import { ProviderError } from '@omnihilbras/sdk-shared/errors';
-import { providerErrorDetail } from './transport.js';
-import { FetchHttpTransport } from './transport.js';
-import { OpenAICompatibleAdapter, type OpenAIResponse } from './openai-compatible.js';
-import type { HttpTransport } from './transport.js';
-import type { ChatChunk, ChatRequest, ChatResponse, CredentialValidation, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderRequestContext } from './types.js';
+import { providerErrorDetail } from '@omnihilbras/sdk-shared/transport';
+import { FetchHttpTransport } from '@omnihilbras/sdk-shared/transport';
+import { OpenAICompatibleAdapter, type OpenAIResponse } from '@omnihilbras/sdk-shared/openai-compatible';
+import type { HttpTransport } from '@omnihilbras/sdk-shared/transport';
+import type { ChatChunk, ChatRequest, ChatResponse, CredentialValidation, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderRequestContext } from '@omnihilbras/sdk-shared/types';
 
 /**
  * Cline serves an OpenAI-compatible API behind an OAuth authorization-code
@@ -88,7 +88,7 @@ const inFlightRefreshesRegistry = globalThis as unknown as Record<symbol, Map<st
 const inFlightRefreshes = (inFlightRefreshesRegistry[inFlightRefreshesKey] ??= new Map());
 
 /** Reported to Cline as this client's version. */
-const omnihilbrasVersion = '4.0.0-alpha.1';
+const omnihilbrasVersion = '4.0.0-alpha.2';
 
 /** Cline only accepts WorkOS JWTs with an explicit prefix. */
 export function toClineAccessToken(token: string) {

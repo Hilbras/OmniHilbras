@@ -212,7 +212,7 @@ Kernel/API/src/
 
 Kernel/SDK/
   _shared/         The canonical adapter machinery: errors, url, streaming, bounded-map,
-                   model-normalize, types, and (from alpha.2) transport and the OpenAI base.
+                   model-normalize, types, transport, responses-lane and the OpenAI base.
   openai/          One provider package, and the shape every sibling has: adapter/index.ts holds the
                    wire format; lib/types.ts and provider-specific helpers stay local; package.json
                    and log/ are owned per provider. Deleting one folder leaves the others able to build.

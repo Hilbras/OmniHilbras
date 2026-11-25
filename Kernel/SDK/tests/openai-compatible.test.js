@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { OpenAICompatibleAdapter } from '../cline/dist/lib/openai-compatible.js';
+import { OpenAICompatibleAdapter } from '../_shared/dist/openai-compatible.js';
 import { ProviderError } from '../_shared/dist/errors.js';
 
 function createTransport(overrides = {}) {

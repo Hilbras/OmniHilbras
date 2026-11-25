@@ -309,9 +309,10 @@ test('the Console free-limit refusal reaches the client in its own words', async
   // "message":"Free usage limit reached. Free models work in OpenCode (https://opencode.ai);
   // subscribe to OpenCode Go to keep going: https://opencode.ai/go"}}. The generic
   // "The provider rate limit was reached." removes the one sentence that tells the reader what to do.
-  const { FetchHttpTransport } = await import('../opencode-console/dist/lib/transport.js');
+  const { FetchHttpTransport } = await import('../_shared/dist/transport.js');
   const body = JSON.stringify({ type: 'error', error: { type: 'FreeUsageLimitError', message: 'Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go' } });
-  const http = new FetchHttpTransport({ fetch: async () => new Response(body, { status: 429, headers: { 'content-type': 'application/json' } }) });
+  const { opencodePublicRefusalPattern } = await import('../opencode-console/dist/adapter/index.js');
+  const http = new FetchHttpTransport({ publicRefusalPattern: opencodePublicRefusalPattern, fetch: async () => new Response(body, { status: 429, headers: { 'content-type': 'application/json' } }) });
   await assert.rejects(
     () => http.request({ method: 'POST', providerId: opencodeConsoleProviderId, url: 'https://opencode.ai/inference/openai/v1/chat/completions', body: '{}' }),
     (error) => {
@@ -323,9 +324,10 @@ test('the Console free-limit refusal reaches the client in its own words', async
 });
 
 test('an insufficient-balance refusal names the billing URL', async () => {
-  const { FetchHttpTransport } = await import('../opencode-console/dist/lib/transport.js');
+  const { FetchHttpTransport } = await import('../_shared/dist/transport.js');
   const body = JSON.stringify({ error: { type: 'invalid_request_error', message: 'Insufficient balance. Top up at https://opencode.ai/console/wrk_01M2TE204SPTYM3114WCY1P8HA/billing?credits=1.' } });
-  const http = new FetchHttpTransport({ fetch: async () => new Response(body, { status: 402, headers: { 'content-type': 'application/json' } }) });
+  const { opencodePublicRefusalPattern } = await import('../opencode-console/dist/adapter/index.js');
+  const http = new FetchHttpTransport({ publicRefusalPattern: opencodePublicRefusalPattern, fetch: async () => new Response(body, { status: 402, headers: { 'content-type': 'application/json' } }) });
   await assert.rejects(
     () => http.request({ method: 'POST', providerId: opencodeConsoleProviderId, url: 'https://opencode.ai/inference/openai/v1/chat/completions', body: '{}' }),
     (error) => {

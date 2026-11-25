@@ -33,6 +33,18 @@
     "./types": {
       "types": "./dist/types.d.ts",
       "default": "./dist/types.js"
+    },
+    "./transport": {
+      "types": "./dist/transport.d.ts",
+      "default": "./dist/transport.js"
+    },
+    "./openai-compatible": {
+      "types": "./dist/openai-compatible.d.ts",
+      "default": "./dist/openai-compatible.js"
+    },
+    "./responses-lane": {
+      "types": "./dist/responses-lane.d.ts",
+      "default": "./dist/responses-lane.js"
     }
   },
   "scripts": {

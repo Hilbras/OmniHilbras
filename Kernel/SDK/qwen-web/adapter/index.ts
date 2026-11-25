@@ -1,6 +1,6 @@
 import { ProviderError } from '@omnihilbras/sdk-shared/errors';
-import type { Model } from '../lib/types.js';
-import type { HttpTransport } from '../lib/transport.js';
+import type { Model } from '@omnihilbras/sdk-shared/types';
+import type { HttpTransport } from '@omnihilbras/sdk-shared/transport';
 
 /**
  * Qwen Web, through the credential a signed-in chat.qwen.ai session holds.

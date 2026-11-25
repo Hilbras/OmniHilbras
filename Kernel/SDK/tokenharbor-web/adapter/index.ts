@@ -1,5 +1,5 @@
 import { ProviderError } from '@omnihilbras/sdk-shared/errors';
-import type { ChatMessage, ChatRequest, ChatResponse, CredentialValidation, FinishReason, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderId, ProviderRequestContext } from '../lib/types.js';
+import type { ChatMessage, ChatRequest, ChatResponse, CredentialValidation, FinishReason, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderId, ProviderRequestContext } from '@omnihilbras/sdk-shared/types';
 
 /**
  * Token Harbor Web — the chat application at tokenharbor.ai, driven by the Supabase session

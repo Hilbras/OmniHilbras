@@ -11,7 +11,7 @@ import type {
   ProviderCredential,
   ProviderHealth,
   ProviderRequestContext,
-} from '../lib/types.js';
+} from '@omnihilbras/sdk-shared/types';
 
 /**
  * Perplexity Web, through the session cookie a signed-in browser holds.

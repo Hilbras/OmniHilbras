@@ -1,7 +1,7 @@
 import { ProviderError } from '@omnihilbras/sdk-shared/errors';
 import { boundedMap } from '@omnihilbras/sdk-shared/bounded-map';
 import { parseSseJson, parseSseStream } from '@omnihilbras/sdk-shared/streaming';
-import { FetchHttpTransport, type HttpTransport } from '../lib/transport.js';
+import { FetchHttpTransport, type HttpTransport } from '@omnihilbras/sdk-shared/transport';
 import { normalizeProviderBaseUrl, resolveProviderUrl, sanitizeProviderHeaders } from '@omnihilbras/sdk-shared/url';
 
 import type {
@@ -21,7 +21,7 @@ import type {
   TokenUsage,
   ToolCall,
   ToolDefinition,
-} from '../lib/types.js';
+} from '@omnihilbras/sdk-shared/types';
 
 /** Renewed credentials kept per adapter, enough for every token a live gateway has recently renewed. */
 const maxRenewalMemoEntries = 64;

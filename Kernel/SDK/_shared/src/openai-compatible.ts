@@ -1,9 +1,10 @@
 import { ProviderError } from '@omnihilbras/sdk-shared/errors';
 import { normalizeCatalogModel } from '@omnihilbras/sdk-shared/model-normalize';
+import { readResponsesFrame, responsesLaneFor, responsesLaneRefusal, rememberResponsesLane, toResponsesBody, toResponsesChatResponse, type ResponsesPayload, type ResponsesStreamEvent } from './responses-lane.js';
 import { parseSseJson, parseSseStream } from '@omnihilbras/sdk-shared/streaming';
 import { FetchHttpTransport, type HttpTransport } from './transport.js';
 import { assertSafeProviderHeaderName, assertSafeProviderHeaderValue, normalizeProviderBaseUrl, resolveProviderUrl, sanitizeProviderHeaders } from '@omnihilbras/sdk-shared/url';
-import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, EmbeddingRequest, EmbeddingResponse, FinishReason, MessageContent, Model, ProviderAdapter, ProviderCapabilities, ProviderCredential, ProviderHealth, ProviderRequestContext, TokenUsage, ToolCall, ToolDefinition } from './types.js';
+import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, EmbeddingRequest, EmbeddingResponse, FinishReason, ImageRequest, ImageResponse, AudioSpeechRequest, AudioSpeechResponse, AudioTranscriptionRequest, AudioTranscriptionResponse, MessageContent, Model, ProviderAdapter, ProviderCapabilities, ProviderCredential, ProviderHealth, ProviderRequestContext, TokenUsage, ToolCall, ToolDefinition } from './types.js';
 
 export type OpenAICompatibleAuth = {
   header?: string;
@@ -18,6 +19,20 @@ export type OpenAICompatibleAdapterConfig = {
   auth?: OpenAICompatibleAuth;
   modelsPath?: string;
   chatPath?: string;
+  /**
+   * The OpenAI **Responses** lane for this endpoint, or absent when the endpoint has none.
+   *
+   * **Setting it is the opt-in, and the path is the value** — there is no default path, because a default
+   * would mean an endpoint could acquire a lane by a typo, pointed at a path nobody measured on it. A
+   * provider that does not set it has no Responses lane and behaves exactly as it did, including when a
+   * model refuses the chat path — which is the difference between "this endpoint has a second lane" and
+   * "this gateway retries things".
+   *
+   * The lane is chosen **per model**, from the provider's own refusal, and remembered for the process; the
+   * measurement, the wording it matches and why it is learned rather than matched by model name are in
+   * `lib/responses-lane.ts`.
+   */
+  responsesPath?: string;
   /**
    * Where the embeddings endpoint lives, relative to `baseUrl`.
    *
@@ -46,6 +61,13 @@ export type OpenAICompatibleAdapterConfig = {
 export type OpenAICompatibleAdapterOptions = {
   transport?: HttpTransport;
   timeoutMs?: number;
+  /**
+   * Headers that depend on the request, not on the provider's configuration.
+   *
+   * A static `config.headers` map cannot carry a conversation id, and a constant value would present
+   * every conversation as one. OpenCode Go is the provider that needs this today.
+   */
+  requestHeaders?: (request: ChatRequest) => Record<string, string>;
 };
 
 type OpenAIChoice = {
@@ -109,7 +131,32 @@ type OpenAIEmbeddingResponse = {
 };
 
 type OpenAIModelList = {
-  data?: Array<{ id?: string; owned_by?: string }>;
+  data?: Array<OpenAIModelEntry>;
+  models?: Array<OpenAIModelEntry>;
+  results?: Array<OpenAIModelEntry>;
+  items?: Array<OpenAIModelEntry>;
+};
+type OpenAIModelEntry = {
+  id?: string;
+  owned_by?: string;
+  name?: string;
+  display_name?: string;
+  context_length?: number;
+  context_window?: number;
+  max_context_length?: number;
+  max_context_window?: number;
+  input_modalities?: string[];
+  output_modalities?: string[];
+  architecture?: { modality?: string; input_modalities?: string[]; output_modalities?: string[] };
+  pricing?: {
+    inputPer1M?: number;
+    outputPer1M?: number;
+    cacheReadPer1M?: number;
+    cacheWritePer1M?: number;
+    prompt?: number | string;
+    completion?: number | string;
+    input_cache_read?: number | string;
+  };
 };
 
 export class OpenAICompatibleAdapter implements ProviderAdapter {
@@ -121,9 +168,11 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
   private readonly auth: Required<Pick<OpenAICompatibleAuth, 'required'>> & OpenAICompatibleAuth;
   private readonly modelsPath: string;
   private readonly chatPath: string;
+  private readonly responsesPath?: string;
   private readonly embeddingsPath: string;
   private readonly unwrap?: OpenAICompatibleAdapterConfig['unwrapResponse'];
   private readonly headers: Record<string, string>;
+  private readonly dynamicHeaders?: (request: ChatRequest) => Record<string, string>;
   private readonly maxTokensField: 'max_tokens' | 'max_completion_tokens';
   protected readonly transport: HttpTransport;
 
@@ -142,6 +191,7 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
     };
     this.modelsPath = config.modelsPath ?? '/models';
     this.chatPath = config.chatPath ?? '/chat/completions';
+    if (config.responsesPath !== undefined) this.responsesPath = config.responsesPath;
     this.embeddingsPath = config.embeddingsPath ?? '/embeddings';
     this.unwrap = config.unwrapResponse;
     this.headers = sanitizeProviderHeaders(config.headers, config.id);
@@ -168,33 +218,90 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
       embeddings: false,
       ...config.capabilities,
     };
+    this.dynamicHeaders = options.requestHeaders;
     this.transport = options.transport ?? new FetchHttpTransport({ timeoutMs: options.timeoutMs });
   }
 
   async listModels(context: ProviderRequestContext = {}): Promise<Model[]> {
-    const response = await this.transport.request<OpenAIModelList>({
+    const response = await this.transport.request<OpenAIModelList | Array<OpenAIModelEntry>>({
       method: 'GET',
       providerId: this.id,
       url: this.url(this.modelsPath),
       headers: this.requestHeaders(context.credential, 'application/json'),
       ...(context.signal ? { signal: context.signal } : {}),
     });
-    const data = response.data?.data;
-    if (!Array.isArray(data)) throw invalidResponse(this.id, 'Provider model list is missing data.');
-
-    return data.flatMap((model) => model.id && typeof model.id === 'string' ? [normalizeCatalogModel(model, this.id)] : []);
+    const data = response.data;
+    const entries = Array.isArray(data) ? data : data?.data ?? data?.models ?? data?.results ?? data?.items;
+    if (!Array.isArray(entries)) throw invalidResponse(this.id, `Provider model list is missing data (top-level keys: ${data && typeof data === 'object' ? Object.keys(data).join(', ') : 'none'}).`);
+    return entries.flatMap((model) => (typeof model.id === 'string' && model.id ? [normalizeCatalogModel(model, this.id)] : []));
   }
 
   async chat(request: ChatRequest, context: ProviderRequestContext = {}): Promise<ChatResponse> {
-    const response = await this.transport.request<OpenAIResponse>({
-      method: 'POST',
-      providerId: this.id,
-      url: this.url(this.chatPath),
-      headers: this.requestHeaders(context.credential, 'application/json'),
-      body: JSON.stringify(this.toRequestBody(request, false)),
-      ...(context.signal ? { signal: context.signal } : {}),
-    });
-    return this.toChatResponse(this.unwrap ? this.unwrap(response.data) : response.data, request.model);
+    // A model this process already proved is on the Responses lane goes straight there: the refusal was
+    // the evidence, and paying for it a second time on every turn is the whole cost this memo exists to
+    // avoid.
+    if (this.responsesPath && responsesLaneFor(this.id, request.model)) {
+      return this.chatResponses(request, context);
+    }
+    try {
+      const response = await this.transport.request<OpenAIResponse>({
+        method: 'POST',
+        providerId: this.id,
+        url: this.url(this.chatPath),
+        headers: this.requestHeaders(context.credential, 'application/json', request),
+        body: JSON.stringify(this.toRequestBody(request, false)),
+        ...(context.signal ? { signal: context.signal } : {}),
+      });
+      return this.toChatResponse(this.unwrap ? this.unwrap(response.data) : response.data, request.model);
+    } catch (error) {
+      if (!this.rememberLaneOnRefusal(error, request.model)) throw error;
+      return this.chatResponses(request, context, error);
+    }
+  }
+
+  /**
+   * Whether this refusal is the provider telling us where the model actually lives.
+   *
+   * The memo is written **before** the retry rather than after it. The refusal is the evidence, not the
+   * retry's success: a model the relay will not serve on the chat path is on the Responses lane whatever
+   * happens next, and a second turn should not rediscover that. Every other error returns false and is
+   * rethrown untouched by the caller — the decision is the provider's own sentence, so a 401, a 403, a 408, a
+   * 429, an outage whose text names neither endpoint, and a 400 about the request body all keep exactly the
+   * behaviour they had. This is a lane switch, not a retry policy.
+   */
+  private rememberLaneOnRefusal(error: unknown, model: string): boolean {
+    if (!this.responsesPath) return false;
+    if (!responsesLaneRefusal(error)) return false;
+    rememberResponsesLane(this.id, model);
+    return true;
+  }
+
+  /**
+   * One turn on the Responses lane.
+   *
+   * `cause` is the chat lane's refusal, when this request started there. If this attempt fails too, the
+   * error a caller sees is **this** one — it is the failure that ended the turn, and its status is what a
+   * retry policy reads — with the earlier refusal attached as its cause, so the chain still carries what
+   * the provider said the first time. Replacing a specific refusal with a vaguer one is how two different
+   * defects start to read alike.
+   *
+   * `unwrapResponse` is deliberately not applied: it exists to reshape a `choices`-shaped body a provider
+   * wrapped, and a Responses payload has no `choices` for it to find.
+   */
+  private async chatResponses(request: ChatRequest, context: ProviderRequestContext, cause?: unknown): Promise<ChatResponse> {
+    try {
+      const response = await this.transport.request<ResponsesPayload>({
+        method: 'POST',
+        providerId: this.id,
+        url: this.url(this.responsesPath as string),
+        headers: this.requestHeaders(context.credential, 'application/json', request),
+        body: JSON.stringify(toResponsesBody(request, false)),
+        ...(context.signal ? { signal: context.signal } : {}),
+      });
+      return toResponsesChatResponse(response.data, request.model, this.id);
+    } catch (error) {
+      throw withCause(error, cause);
+    }
   }
 
   /**
@@ -266,12 +373,186 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
     };
   }
 
+  async image(request: ImageRequest, context: ProviderRequestContext = {}): Promise<ImageResponse> {
+    if (!this.capabilities.images) {
+      throw new ProviderError('NOT_SUPPORTED', `${this.name} does not support images.`, {
+        providerId: this.id,
+        publicMessage: `${this.name} does not support images.`,
+      });
+    }
+    const body: Record<string, unknown> = { model: request.model, prompt: request.prompt };
+    if (request.n !== undefined) body.n = request.n;
+    if (request.size !== undefined) body.size = request.size;
+    if (request.quality !== undefined) body.quality = request.quality;
+    if (request.responseFormat !== undefined) body.response_format = request.responseFormat;
+    if (request.user !== undefined) body.user = request.user;
+
+    const response = await this.transport.request<{ created?: number; data?: Array<{ url?: string; b64_json?: string; revised_prompt?: string }> }>({
+      method: 'POST',
+      providerId: this.id,
+      url: this.url('/images/generations'),
+      headers: this.requestHeaders(context.credential, 'application/json'),
+      body: JSON.stringify(body),
+      ...(context.signal ? { signal: context.signal } : {}),
+    });
+    const rows = response.data?.data;
+    if (!Array.isArray(rows)) throw invalidResponse(this.id, 'Provider image response is missing data.');
+
+    const data = rows.map((row) => ({
+      ...(row.url !== undefined ? { url: row.url } : {}),
+      ...(row.b64_json !== undefined ? { b64Json: row.b64_json } : {}),
+      ...(row.revised_prompt !== undefined ? { revisedPrompt: row.revised_prompt } : {}),
+    }));
+
+    return {
+      id: `image-${request.model}`,
+      providerId: this.id,
+      model: request.model,
+      createdAt: new Date((typeof response.data?.created === 'number' ? response.data.created : Date.now() / 1000) * 1000).toISOString(),
+      data,
+    };
+  }
+
+  async audio(request: AudioSpeechRequest, context: ProviderRequestContext = {}): Promise<AudioSpeechResponse> {
+    if (!this.capabilities.audio) {
+      throw new ProviderError('NOT_SUPPORTED', `${this.name} does not support audio.`, {
+        providerId: this.id,
+        publicMessage: `${this.name} does not support audio.`,
+      });
+    }
+    const body: Record<string, unknown> = { model: request.model, input: request.input };
+    if (request.voice !== undefined) body.voice = request.voice;
+    if (request.responseFormat !== undefined) body.response_format = request.responseFormat;
+    if (request.speed !== undefined) body.speed = request.speed;
+    if (request.user !== undefined) body.user = request.user;
+
+    const response = await this.transport.request<Uint8Array>({
+      method: 'POST',
+      providerId: this.id,
+      url: this.url('/audio/speech'),
+      headers: this.requestHeaders(context.credential, 'application/json'),
+      body: JSON.stringify(body),
+      responseAs: 'bytes',
+      ...(context.signal ? { signal: context.signal } : {}),
+    });
+    const audio = response.data;
+    const contentType = response.headers.get('content-type') ?? 'audio/mpeg';
+    return {
+      id: `audio-${request.model}`,
+      providerId: this.id,
+      model: request.model,
+      createdAt: new Date().toISOString(),
+      audio,
+      contentType,
+    };
+  }
+
+  async transcribe(request: AudioTranscriptionRequest, context: ProviderRequestContext = {}): Promise<AudioTranscriptionResponse> {
+    if (!this.capabilities.audio) {
+      throw new ProviderError('NOT_SUPPORTED', `${this.name} does not support audio.`, {
+        providerId: this.id,
+        publicMessage: `${this.name} does not support audio.`,
+      });
+    }
+    const audioBytes = Buffer.from(request.audio, 'base64');
+    const boundary = `----omnihilbras${Date.now().toString(16)}`;
+    const enc = new TextEncoder();
+    const parts: Uint8Array[] = [];
+    const pushStr = (str: string) => parts.push(enc.encode(str));
+    pushStr(`--${boundary}\r\n`);
+    pushStr(`Content-Disposition: form-data; name="file"; filename="audio.wav"\r\n`);
+    pushStr(`Content-Type: audio/wav\r\n\r\n`);
+    parts.push(new Uint8Array(audioBytes));
+    pushStr(`\r\n--${boundary}\r\n`);
+    pushStr(`Content-Disposition: form-data; name="model"\r\n\r\n`);
+    pushStr(`${request.model}\r\n`);
+    if (request.language) {
+      pushStr(`--${boundary}\r\n`);
+      pushStr(`Content-Disposition: form-data; name="language"\r\n\r\n`);
+      pushStr(`${request.language}\r\n`);
+    }
+    if (request.prompt) {
+      pushStr(`--${boundary}\r\n`);
+      pushStr(`Content-Disposition: form-data; name="prompt"\r\n\r\n`);
+      pushStr(`${request.prompt}\r\n`);
+    }
+    if (request.responseFormat) {
+      pushStr(`--${boundary}\r\n`);
+      pushStr(`Content-Disposition: form-data; name="response_format"\r\n\r\n`);
+      pushStr(`${request.responseFormat}\r\n`);
+    }
+    if (request.temperature !== undefined) {
+      pushStr(`--${boundary}\r\n`);
+      pushStr(`Content-Disposition: form-data; name="temperature"\r\n\r\n`);
+      pushStr(`${request.temperature}\r\n`);
+    }
+    pushStr(`--${boundary}--\r\n`);
+
+    let total = 0;
+    for (const p of parts) total += p.byteLength;
+    const body = new Uint8Array(total);
+    let off = 0;
+    for (const p of parts) { body.set(p, off); off += p.byteLength; }
+
+    const response = await this.transport.request<{ text?: string; language?: string; duration?: number }>({
+      method: 'POST',
+      providerId: this.id,
+      url: this.url('/audio/transcriptions'),
+      headers: {
+        ...this.requestHeaders(context.credential, ''),
+        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+      },
+      body,
+      ...(context.signal ? { signal: context.signal } : {}),
+    });
+    const payload = response.data ?? {};
+    if (typeof payload.text !== 'string') throw invalidResponse(this.id, 'Provider transcription response is missing text.');
+    return {
+      id: `transcription-${request.model}`,
+      providerId: this.id,
+      model: request.model,
+      createdAt: new Date().toISOString(),
+      text: payload.text,
+      ...(payload.language !== undefined ? { language: payload.language } : {}),
+      ...(typeof payload.duration === 'number' ? { duration: payload.duration } : {}),
+    };
+  }
+
   async *streamChat(request: ChatRequest, context: ProviderRequestContext = {}): AsyncIterable<ChatChunk> {
+    if (this.responsesPath && responsesLaneFor(this.id, request.model)) {
+      yield* this.streamResponses(request, context);
+      return;
+    }
+
+    let yielded = false;
+    try {
+      for await (const chunk of this.chatLaneChunks(request, context)) {
+        // Set before the yield, not after: once a chunk is in the caller's hands the answer has started,
+        // and a second attempt from here would repeat what they already have or interleave two answers.
+        yielded = true;
+        yield chunk;
+      }
+    } catch (error) {
+      // A refusal arrives **before** the first event — `transport.stream` reads the status and throws
+      // without yielding — so an empty `yielded` is what makes this the same turn retried rather than a
+      // half-answer duplicated.
+      if (yielded || !this.rememberLaneOnRefusal(error, request.model)) throw error;
+      yield* this.streamResponses(request, context, error);
+    }
+  }
+
+  /**
+   * The chat lane's stream: the request every provider has always received.
+   *
+   * Split out of `streamChat` so the lane decision wraps it without a second copy of the frame loop — two
+   * copies of a stream reader is how one of them stops handling a finish reason.
+   */
+  private async *chatLaneChunks(request: ChatRequest, context: ProviderRequestContext): AsyncIterable<ChatChunk> {
     const events = this.transport.stream({
       method: 'POST',
       providerId: this.id,
       url: this.url(this.chatPath),
-      headers: this.requestHeaders(context.credential, 'text/event-stream'),
+      headers: this.requestHeaders(context.credential, 'text/event-stream', request),
       body: JSON.stringify(this.toRequestBody(request, true)),
       ...(context.signal ? { signal: context.signal } : {}),
     });
@@ -312,6 +593,78 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
     }
   }
 
+  /**
+   * The stream on the Responses lane, with the chat lane's refusal kept as the cause of a second failure.
+   *
+   * A wrapper rather than a `try` inside the reader, because a generator cannot attach a cause to an error
+   * it has already thrown — and the cause is the whole point: the caller sees the failure that ended the
+   * turn, and the reason the chat path was abandoned is still readable behind it.
+   */
+  private async *streamResponses(request: ChatRequest, context: ProviderRequestContext, cause?: unknown): AsyncIterable<ChatChunk> {
+    try {
+      yield* this.responsesLaneChunks(request, context);
+    } catch (error) {
+      throw withCause(error, cause);
+    }
+  }
+
+  /**
+   * The Responses event stream, as our chunks.
+   *
+   * The terminator is `response.completed` (or `response.incomplete` for a truncated turn), which is the
+   * Responses protocol's own end-of-turn frame; the chat lane's `[DONE]` sentinel does not appear here. A
+   * stream that ends without one is reported rather than returned as an answer, exactly as the chat lane
+   * treats a stream that stopped mid-answer.
+   */
+  private async *responsesLaneChunks(request: ChatRequest, context: ProviderRequestContext): AsyncIterable<ChatChunk> {
+    const events = this.transport.stream({
+      method: 'POST',
+      providerId: this.id,
+      url: this.url(this.responsesPath as string),
+      headers: this.requestHeaders(context.credential, 'text/event-stream', request),
+      body: JSON.stringify(toResponsesBody(request, true)),
+      ...(context.signal ? { signal: context.signal } : {}),
+    });
+
+    let sawPayload = false;
+    let sawMeaningfulPayload = false;
+    let sawTerminal = false;
+    for await (const event of parseSseStream(events)) {
+      const payload = parseSseJson<ResponsesStreamEvent>(event, this.id);
+      if (!payload) continue;
+      sawPayload = true;
+      const frame = readResponsesFrame(payload);
+      // The provider's own sentence, not a verdict: `response.failed` carries the reason, and dropping it
+      // makes a refused turn read as a truncated stream.
+      if (frame.failure) {
+        throw new ProviderError('PROVIDER_REQUEST_FAILED', `The provider stream returned an error: ${frame.failure}`, { providerId: this.id });
+      }
+      if (frame.text || frame.toolCall || frame.finishReason || frame.usage) sawMeaningfulPayload = true;
+      if (frame.terminal) sawTerminal = true;
+      yield {
+        id: payload.response?.id ?? `stream-${request.model}`,
+        providerId: this.id,
+        model: payload.response?.model ?? request.model,
+        delta: {
+          ...(frame.text ? { content: frame.text } : {}),
+          ...(frame.toolCall ? { toolCalls: [frame.toolCall] } : {}),
+        },
+        ...(frame.finishReason ? { finishReason: frame.finishReason } : {}),
+        ...(frame.usage ? { usage: frame.usage } : {}),
+      };
+      /**
+       * The terminal frame ends the turn. Continuing to consume after it lets a keep-alive, a late
+       * event, or a provider bug append another chunk after `completed`, which the gateway would
+       * relay as a second terminal item.
+       */
+      if (frame.terminal) break;
+    }
+
+    if (!sawPayload || !sawMeaningfulPayload || !sawTerminal) {
+      throw new ProviderError('INVALID_RESPONSE', 'The provider stream ended before completion.', { providerId: this.id });
+    }
+  }
+
   async healthCheck(context: ProviderRequestContext = {}): Promise<ProviderHealth> {
     const startedAt = performance.now();
     try {
@@ -338,10 +691,11 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
     return resolveProviderUrl(this.baseUrl, path, this.id);
   }
 
-  protected requestHeaders(credential: ProviderCredential | undefined, accept: string) {
+  protected requestHeaders(credential: ProviderCredential | undefined, accept: string, request?: ChatRequest) {
     const headers: Record<string, string> = {
       accept,
       ...this.headers,
+      ...(request && this.dynamicHeaders ? this.dynamicHeaders(request) : {}),
       'content-type': 'application/json',
     };
     if (credential?.type === 'api-key' && this.auth.header) {
@@ -472,6 +826,20 @@ function assertNoProviderOptions(request: ChatRequest, providerId: string) {
   if (request.providerOptions && Object.keys(request.providerOptions).length > 0) {
     throw new ProviderError('INVALID_REQUEST', `Provider options are not supported by ${providerId} yet.`, { providerId });
   }
+}
+
+/**
+ * The failure that ended the turn, carrying the one before it.
+ *
+ * The **last** error is the one a caller sees, because it is the one whose status and message describe
+ * where the request stopped; the earlier one is attached as its cause rather than substituted for it. A
+ * cause is only written when the error has none: a transport that already set one (a DNS failure behind an
+ * unreachable host) knows more about that failure than this does, and overwriting it would trade a specific
+ * cause for a less specific one.
+ */
+function withCause<T>(error: T, cause: unknown): T {
+  if (cause !== undefined && error instanceof Error && error.cause === undefined) error.cause = cause;
+  return error;
 }
 
 function providerStreamError(providerId: string, error: unknown) {

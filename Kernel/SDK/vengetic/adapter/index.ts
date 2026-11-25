@@ -6,7 +6,7 @@ import type {
   ProviderQuota,
   ProviderRequestContext,
   ProviderResourceQuota,
-} from '../lib/types.js';
+} from '@omnihilbras/sdk-shared/types';
 
 /** Vengetic's own adapter. Its base URL and id live here, not in a dashboard card. */
 export const vengeticProviderId = "vengetic";

@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { OpenAICompatibleAdapter } from '../openai/dist/lib/openai-compatible.js';
+import { OpenAICompatibleAdapter } from '../_shared/dist/openai-compatible.js';
 import { AgentrouterAdapter } from '../agentrouter/dist/adapter/index.js';
-import { forgetResponsesLanes } from '../openai/dist/lib/responses-lane.js';
-import { FetchHttpTransport } from '../openai/dist/lib/transport.js';
+import { forgetResponsesLanes } from '../_shared/dist/responses-lane.js';
+import { FetchHttpTransport } from '../_shared/dist/transport.js';
 
 /**
  * The Responses lane, and the refusal that selects it.

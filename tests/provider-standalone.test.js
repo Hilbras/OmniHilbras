@@ -89,17 +89,18 @@ test('no provider imports another provider, by path or by package name', () => {
   assert.deepEqual(offenders, [], `a provider depends on another, so neither is standalone:\n  ${offenders.join('\n  ')}`);
 });
 
-test('every provider keeps its own types and depends on the one shared core', () => {
-  // V4 moved `errors`, `url`, `streaming`, `bounded-map` and `model-normalize` into
-  // `@omnihilbras/sdk-shared`. `types` stays local because its variants still differ; alpha.2
-  // reconciles them. What must not come back is a local shared module.
+test('every provider depends on the one shared core and keeps no shared copy', () => {
+  // V4 moved the canonical types, transport, OpenAI base and the helper modules into
+  // `@omnihilbras/sdk-shared`. A local copy is the dependency this layout forbids.
   const missing = [];
   for (const folder of providerFolders()) {
-    if (!existsSync(join(SDK, folder, 'lib', 'types.ts'))) missing.push(`${folder}/lib/types.ts`);
     const manifest = JSON.parse(readFileSync(join(SDK, folder, 'package.json'), 'utf8'));
     if (manifest.dependencies?.['@omnihilbras/sdk-shared'] !== 'workspace:*') missing.push(`${folder}/package.json -> @omnihilbras/sdk-shared`);
+    for (const name of ['types', 'errors', 'url', 'transport', 'streaming', 'bounded-map', 'model-normalize', 'openai-compatible']) {
+      if (existsSync(join(SDK, folder, 'lib', `${name}.ts`))) missing.push(`${folder}/lib/${name}.ts (shared copy)`);
+    }
   }
-  assert.deepEqual(missing, [], `providers with no types or no shared-core dependency:\n  ${missing.join('\n  ')}`);
+  assert.deepEqual(missing, [], `providers with no shared-core dependency or a reinstated copy:\n  ${missing.join('\n  ')}`);
 });
 
 test('every provider has its own package.json, tsconfig and installed dependencies', () => {

@@ -1,9 +1,9 @@
 import { ProviderError } from '@omnihilbras/sdk-shared/errors';
 import { normalizeCatalogModel } from '@omnihilbras/sdk-shared/model-normalize';
-import { FetchHttpTransport, type HttpResponse, type HttpTransport } from '../lib/transport.js';
+import { FetchHttpTransport, type HttpResponse, type HttpTransport } from '@omnihilbras/sdk-shared/transport';
 import { assertSafeProviderHeaderValue, assertSafeProviderRequestUrl, normalizeProviderBaseUrl, resolveProviderUrl } from '@omnihilbras/sdk-shared/url';
-import { OpenAICompatibleAdapter, type OpenAICompatibleAdapterConfig } from '../lib/openai-compatible.js';
-import type { CredentialValidation, Model, ModelImportOptions, ProviderCredential, ProviderHealth, ProviderRequestContext } from '../lib/types.js';
+import { OpenAICompatibleAdapter, type OpenAICompatibleAdapterConfig } from '@omnihilbras/sdk-shared/openai-compatible';
+import type { CredentialValidation, Model, ModelImportOptions, ProviderCredential, ProviderHealth, ProviderRequestContext } from '@omnihilbras/sdk-shared/types';
 
 export type OpenRouterAdapterConfig = Omit<OpenAICompatibleAdapterConfig, 'id' | 'name' | 'auth' | 'baseUrl'> & {
   baseUrl?: string;
@@ -199,4 +199,4 @@ function isZeroPrice(value: unknown) {
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
-export * from '../lib/openai-compatible.js';
+export * from '@omnihilbras/sdk-shared/openai-compatible';

@@ -83,6 +83,15 @@ function barrelExports() {
         queue.push(target);
       }
     }
+    // V4 moved the shared modules into a workspace package, so the resolver must follow package
+    // specifiers as well as relative paths or it stops at every adapter's first shared import.
+    for (const match of source.matchAll(/from\s+['"]@omnihilbras\/sdk-shared\/([\w.-]+)['"]/g)) {
+      const target = join(SDK_SRC, '_shared', 'src', `${match[1]}.ts`);
+      if (existsSync(target) && !seen.has(target)) {
+        seen.add(target);
+        queue.push(target);
+      }
+    }
   }
   return [...seen];
 }
@@ -167,7 +176,7 @@ test('every remaining Buffer use is inside a function, never at module scope', (
     // Re-measured after the rebuild. `clinepass/lib/cline.ts` is a new entry because clinepass now carries
   // its own copy of Cline's adapter (the isolation that replaced shared inheritance) — the same Buffer use,
   // in a second file. Named rather than wildcarded, so the next addition is noticed.
-  ['Kernel/SDK/cline/adapter/index.ts', 'Kernel/SDK/clinepass/lib/cline.ts', 'Kernel/SDK/deepseek-web/adapter/index.ts', 'Kernel/SDK/kiro/adapter/index.ts', 'Kernel/SDK/openai/lib/openai-compatible.ts'],
+  ['Kernel/SDK/_shared/src/openai-compatible.ts', 'Kernel/SDK/cline/adapter/index.ts', 'Kernel/SDK/clinepass/lib/cline.ts', 'Kernel/SDK/deepseek-web/adapter/index.ts', 'Kernel/SDK/kiro/adapter/index.ts'],
     'the set of Buffer users changed — re-measure the bundle before accepting this list',
   );
 });

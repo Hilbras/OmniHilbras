@@ -25,7 +25,7 @@ const sdkDirs = readdirSync(SDK, { withFileTypes: true })
   .filter((entry) => entry.isDirectory() && !entry.name.startsWith('_'))
   .map((entry) => join(SDK, entry.name));
 
-const moved = ['errors', 'url', 'streaming', 'bounded-map', 'model-normalize', 'index'];
+const moved = ['errors', 'url', 'streaming', 'bounded-map', 'model-normalize', 'index', 'types', 'transport', 'openai-compatible', 'responses-lane'];
 
 test('no SDK package vendors a module the shared core owns', () => {
   const offenders = [];
@@ -82,10 +82,20 @@ test('no source imports a removed local shared module', () => {
   assert.deepEqual(offenders, [], `these imports still point at a deleted vendored module:\n${offenders.join('\n')}`);
 });
 
-test('the variant-prone modules are still local, and are named as the next slice', () => {
-  // This is documentation with a failing-if-wrong body: when alpha.2 lands, these assertions move.
-  for (const name of ['types', 'transport']) {
-    const copies = sdkDirs.filter((dir) => existsSync(join(dir, 'lib', `${name}.ts`)));
-    assert.ok(copies.length > 0, `${name} is expected to remain local until the variant reconciliation`);
+test('the only remaining lib files are provider-specific', () => {
+  // The shared core owns every module with no reason to vary. What is left is the machinery of one
+  // provider or a pair that share a wire, and each name here is a deliberate exception.
+  const allowed = new Set([
+    'anthropic.ts', 'cline.ts', 'constants.ts', 'deepseek-pow.ts', 'encoding.ts', 'identity.ts',
+    'pricing.ts', 'responses-tools.ts', 'startPlanTemplate.ts', 'zen-adapter.ts', 'zen-free-tier.ts',
+  ]);
+  const unexpected = [];
+  for (const dir of sdkDirs) {
+    const lib = join(dir, 'lib');
+    if (!existsSync(lib)) continue;
+    for (const file of readdirSync(lib)) {
+      if (file.endsWith('.ts') && !file.endsWith('.d.ts') && !allowed.has(file)) unexpected.push(relative(ROOT, join(lib, file)));
+    }
   }
+  assert.deepEqual(unexpected, [], `these lib files are neither shared-core modules nor named provider-specific exceptions:\n${unexpected.join('\n')}`);
 });

@@ -1,13 +1,13 @@
 import { ProviderError } from '@omnihilbras/sdk-shared/errors';
-import { FetchHttpTransport } from '../lib/transport.js';
-import type { HttpTransport } from '../lib/transport.js';
+import { FetchHttpTransport } from '@omnihilbras/sdk-shared/transport';
+import type { HttpTransport } from '@omnihilbras/sdk-shared/transport';
 import { normalizeCatalogModel } from '@omnihilbras/sdk-shared/model-normalize';
 import { AnthropicAdapter } from '../lib/anthropic.js';
-import { OpenAICompatibleAdapter } from '../lib/openai-compatible.js';
+import { OpenAICompatibleAdapter } from '@omnihilbras/sdk-shared/openai-compatible';
 import { zenConversationSeed, zenContractSatisfied, isZenFreeTierRefusalError, zenFreeTierRefusal, zenSessionId, zenGatedToolChoice, zenUserAgent } from '../lib/zen-free-tier.js';
 import { declaredTools } from '../lib/zen-adapter.js';
 import { parseSseStream } from '@omnihilbras/sdk-shared/streaming';
-import type { ChatChunk, ChatRequest, ChatResponse, CredentialValidation, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderRequestContext, ToolCall } from '../lib/types.js';
+import type { ChatChunk, ChatRequest, ChatResponse, CredentialValidation, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderRequestContext, ToolCall } from '@omnihilbras/sdk-shared/types';
 
 /**
  * OpenCode Console is the credential that reaches OpenCode's free Zen models. An API
@@ -54,6 +54,11 @@ export const OPENCODE_CONSOLE = {
 } as const;
 
 export const opencodeConsoleProviderId = 'opencode-console';
+/**
+ * The Console's refusals that say exactly what to do. Shared with the transport as an option rather
+ * than baked into the shared module, because the wording is the provider's.
+ */
+export const opencodePublicRefusalPattern = /free usage limit|insufficient balance|top up at/i;
 
 /**
  * Where free models are actually served.
@@ -166,7 +171,7 @@ function bearer(credential: ProviderCredential | undefined): string {
  */
 export async function refreshOpencodeConsoleCredential(
   credential: ProviderCredential,
-  transport: HttpTransport = new FetchHttpTransport(),
+  transport: HttpTransport = new FetchHttpTransport({ publicRefusalPattern: opencodePublicRefusalPattern }),
 ): Promise<ProviderCredential> {
   if (credential.type !== 'oauth' || !credential.refreshToken) {
     throw new ProviderError('AUTHENTICATION_FAILED', 'This OpenCode Console session cannot be renewed. Sign in again.', {
@@ -263,7 +268,7 @@ export class OpencodeConsoleAdapter implements ProviderAdapter {
   private orgIds = new Map<string, string>();
 
   constructor(options: OpencodeConsoleAdapterOptions = {}) {
-    this.transport = options.transport ?? new FetchHttpTransport();
+    this.transport = options.transport ?? new FetchHttpTransport({ publicRefusalPattern: opencodePublicRefusalPattern });
     this.onTokensRefreshed = options.onTokensRefreshed;
     this.now = options.now ?? (() => Date.now());
     this.localService = options.localService;

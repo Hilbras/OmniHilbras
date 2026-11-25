@@ -1,4 +1,4 @@
-import type { ToolDefinition } from './types.js';
+import type { ToolDefinition } from '@omnihilbras/sdk-shared/types';
 
 /**
  * The gated free-tier tool contract, shared with the other OpenCode adapters.

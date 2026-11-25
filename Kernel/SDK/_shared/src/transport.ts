@@ -66,6 +66,14 @@ export type FetchHttpTransportOptions = {
    * request is sent as before, so existing callers are unchanged.
    */
   checkDestination?: (hostname: string, signal?: AbortSignal) => Promise<void>;
+  /**
+   * A refusal whose provider text is the whole diagnosis, surfaced as the public message.
+   *
+   * OpenCode's free-tier and balance refusals say exactly what to do; replacing them with the generic
+   * rate-limit sentence removes the one actionable part. The adapter supplies the pattern because the
+   * wording is the provider's, not the transport's.
+   */
+  publicRefusalPattern?: RegExp;
 };
 
 type RequestLifecycle = {
@@ -88,6 +96,7 @@ export class FetchHttpTransport implements HttpTransport {
   private readonly maxStreamBytes: number;
   private readonly maxStreamDurationMs: number;
   private readonly checkDestination: ((hostname: string, signal?: AbortSignal) => Promise<void>) | undefined;
+  private readonly publicRefusalPattern: RegExp | undefined;
 
   constructor(options: FetchHttpTransportOptions = {}) {
     const fetchImpl = options.fetch ?? globalThis.fetch;
@@ -102,6 +111,7 @@ export class FetchHttpTransport implements HttpTransport {
     this.maxStreamBytes = options.maxStreamBytes ?? defaultMaxStreamBytes;
     this.maxStreamDurationMs = options.maxStreamDurationMs ?? defaultMaxStreamDurationMs;
     this.checkDestination = options.checkDestination;
+    this.publicRefusalPattern = options.publicRefusalPattern;
   }
 
   async request<T>(request: HttpRequest): Promise<HttpResponse<T>> {
@@ -139,7 +149,7 @@ export class FetchHttpTransport implements HttpTransport {
         // Opted out only by an OAuth token exchange, where a 4xx body *is* the answer. A 5xx carries no answer:
         // it is an outage in front of the endpoint, and is classified like any other.
         const refusal = response.status >= 400 && response.status < 500;
-        if (!request.tolerateRefusalBody || !refusal) throw providerErrorFromResponse(response, body, request.providerId);
+        if (!request.tolerateRefusalBody || !refusal) throw providerErrorFromResponse(response, body, request.providerId, this.publicRefusalPattern);
         return { status: response.status, headers: response.headers, data: body as T };
       }
       const data =
@@ -220,7 +230,7 @@ export class FetchHttpTransport implements HttpTransport {
         } catch {
           body = undefined;
         }
-        throw providerErrorFromResponse(response, body, request.providerId);
+        throw providerErrorFromResponse(response, body, request.providerId, this.publicRefusalPattern);
       }
 
       if (!response.body) {
@@ -455,7 +465,7 @@ function retryAfterDetail(code: ProviderErrorCode, response: Response): { retryA
   return retryAfter === undefined ? {} : { retryAfterMs: retryAfter };
 }
 
-function providerErrorFromResponse(response: Response, body: unknown, providerId?: string): ProviderError {
+function providerErrorFromResponse(response: Response, body: unknown, providerId?: string, publicRefusalPattern?: RegExp): ProviderError {
   /**
    * A 403 is a refusal, not proof that the credential is bad.
    *
@@ -490,11 +500,15 @@ function providerErrorFromResponse(response: Response, body: unknown, providerId
   // empty body is the least actionable response there is, and silence reads as a
   // gateway problem rather than a refusal that reached the provider.
   const detail = providerErrorDetail(body) ?? `HTTP ${response.status} with an empty response body`;
+  const actionable = publicRefusalPattern && typeof detail === 'string' && publicRefusalPattern.test(detail)
+    ? detail.slice(0, 400)
+    : undefined;
 
   return new ProviderError(code, message, {
     providerId,
     statusCode: response.status,
     retryable: code === 'RATE_LIMITED' || code === 'PROVIDER_TIMEOUT' || code === 'PROVIDER_UNAVAILABLE',
+    ...(actionable ? { publicMessage: actionable } : {}),
     ...(detail ? { details: { providerMessage: detail, ...retryAfterDetail(code, response) } } : {}),
   });
 }

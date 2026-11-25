@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { FetchHttpTransport, retryAfterMs } from '../codebuddy/dist/lib/transport.js';
+import { FetchHttpTransport, retryAfterMs } from '../_shared/dist/transport.js';
 import { ProviderError } from '../_shared/dist/errors.js';
 
 const NOW = Date.parse('2026-10-10T12:00:00Z');

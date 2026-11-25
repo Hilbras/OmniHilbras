@@ -1,10 +1,10 @@
 import { ProviderError } from '@omnihilbras/sdk-shared/errors';
 import { parseSseJson, parseSseStream } from '@omnihilbras/sdk-shared/streaming';
-import { FetchHttpTransport, type HttpTransport } from '../lib/transport.js';
+import { FetchHttpTransport, type HttpTransport } from '@omnihilbras/sdk-shared/transport';
 import { assertSafeProviderHeaderValue } from '@omnihilbras/sdk-shared/url';
 import { boundedMap } from '@omnihilbras/sdk-shared/bounded-map';
 import { codexToolDelta, toCodexInput, toCodexTools } from '../lib/responses-tools.js';
-import type { ChatChunk, ChatRequest, ChatResponse, FinishReason, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderQuota, ProviderRequestContext, ProviderResourceQuota, TokenUsage } from '../lib/types.js';
+import type { ChatChunk, ChatRequest, ChatResponse, FinishReason, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderQuota, ProviderRequestContext, ProviderResourceQuota, TokenUsage } from '@omnihilbras/sdk-shared/types';
 
 /**
  * The Codex CLI version this adapter presents.
