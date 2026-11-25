@@ -26,13 +26,3 @@ export const badgeTone = {
 
 /** The pill every badge in the dashboard draws itself with. */
 export const badgeBase = 'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-mono text-[9px]';
-
-/**
- * One badge, complete: shape plus tone.
- *
- * `extra` is for the one or two places that need a per-use width or alignment; anything that needs a *different
- * colour* is a new tone, so the palette stays in one file.
- */
-export function badgeClass(tone: keyof typeof badgeTone, extra = ''): string {
-  return `${badgeBase} ${badgeTone[tone]}${extra ? ` ${extra}` : ''}`;
-}

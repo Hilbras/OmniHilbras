@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { Code2, Download, FileKey2, Info, KeyRound, ShieldCheck, Upload } from 'lucide-react';
-import { DashboardShell } from '../components/DashboardShell';
 import { desktopBridge, type OmniBridge } from '../lib/electronBridge';
 import { exportGatewayBackup, importGatewayBackup, verifyGatewayBackup, type GatewayBackupPreview } from '../lib/gatewayClient';
 import { useGatewayStatus } from '../lib/useGatewayStatus';
@@ -239,8 +238,4 @@ export function AboutContent() {
       </section>
     </div>
   );
-}
-
-export function AboutPage() {
-  return <DashboardShell activePage="about" pageTitle="About" pageDescription="Version, platform, backup and recovery"><AboutContent /></DashboardShell>;
 }

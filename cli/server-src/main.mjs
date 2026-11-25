@@ -111,7 +111,6 @@ and stops both on Ctrl-C.
   -b, --background       start detached and exit; stop later with \`omnihilbras stop\`
       --skip-update      do not check the registry for a newer release
       --force            kill a port holder even when it is not Node/Vite/pnpm
-  -y, --yes              do not ask before replacing a previous run
   -h, --help             this text
   -v, --version          print the version
 
@@ -121,7 +120,7 @@ run \\\`omnihilbras help\\\`.`);
 }
 
 function parseArgs(argv) {
-  const options = { dashboardPort: DEFAULT_DASHBOARD_PORT, gatewayPort: DEFAULT_GATEWAY_PORT, open: true, log: false, force: false, yes: false, background: false, skipUpdate: false };
+  const options = { dashboardPort: DEFAULT_DASHBOARD_PORT, gatewayPort: DEFAULT_GATEWAY_PORT, open: true, log: false, force: false, background: false, skipUpdate: false };
   const valueOf = (index, name) => {
     const next = argv[index + 1];
     if (next === undefined || (next.startsWith('-') && !/^-?\d/.test(next))) fail(`\`${name}\` needs a value.`);
@@ -136,7 +135,6 @@ function parseArgs(argv) {
     else if (arg === '-b' || arg === '--background' || arg === '--detach') options.background = true;
     else if (arg === '--skip-update') options.skipUpdate = true;
     else if (arg === '--force') options.force = true;
-    else if (arg === '-y' || arg === '--yes') options.yes = true;
     else if (arg === '-h' || arg === '--help') usage(0);
     else if (arg === '-v' || arg === '--version') { console.log(PKG.version); process.exit(0); }
     else fail(`Unknown option \`${arg}\`. Run \`omnihilbras --help\` for what this takes.`);

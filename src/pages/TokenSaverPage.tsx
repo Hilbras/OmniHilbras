@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
 import { BarChart3, Coins, Cpu, Database } from 'lucide-react';
-import { DashboardShell } from '../components/DashboardShell';
 import { getGatewayTokenSaverStats, analyzeGatewayTokenSaver, type GatewayTokenSaverStats, type TokenSaverAnalysis } from '../lib/gatewayClient';
 import { useGatewayReload } from '../lib/useGatewayStatus';
 import { Skeleton, TableSkeleton } from '../ui/Skeleton';
@@ -168,8 +167,4 @@ export function TokenSaverContent() {
       <p className="muted flex items-center gap-1.5 text-[10px]"><Coins className="h-3 w-3" aria-hidden="true" />Cost avoided is not claimed here: saved tokens are estimated, and pricing varies by provider.</p>
     </div>
   );
-}
-
-export function TokenSaverPage() {
-  return <DashboardShell activePage="token-saver" pageTitle="Token Saver" pageDescription="Measured savings from context compression"><TokenSaverContent /></DashboardShell>;
 }

@@ -2,7 +2,7 @@ import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, 
 import { chmod, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { assertSafeProviderRequestUrl, type ModelImportPolicy, type ProviderCapabilities, type ProviderCredential, type ProviderId } from './index.js';;
-import { atomicWrite, defaultStateDirectory, ensureSecureDirectory, isNodeError, readOptionalFile, readOptionalText } from './secure-store.js';
+import { atomicWrite, defaultStateDirectory, ensureSecureDirectory, fileStamp, isNodeError, readOptionalFile, readOptionalText, withFileLock } from './secure-store.js';
 import { DEFAULT_TIMEOUT_MS } from './timeout-policy.js';
 import type { ConnectionSecretStore } from './runtime.js';
 /** The SDK's provider-keyed, read-only store. Aliased so the two are never confused at a call site. */
@@ -816,6 +816,7 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
   private readonly metadataPath: string;
   private readonly secretsPath: string;
   private readonly keyPath: string;
+  private readonly lockPath: string;
   private readonly fallback?: ProviderSecretStore;
   private readonly configuredMasterKey?: Buffer;
   private credentials = new Map<ProviderId, ProviderCredential>();
@@ -827,8 +828,16 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
   private mutationQueue: Promise<void> = Promise.resolve();
   /** A usage counter changed but has not reached disk yet. */
   private usageDirty = false;
+  /**
+   * Counts not yet folded into a persisted record. They live here rather than in the in-memory
+   * records because a flush may reload the vault first: another process could have saved while these
+   * were accumulating, and refreshing must not discard them. See `flushUsage`.
+   */
+  private readonly usageDeltas = new Map<string, { count: number; lastUsed: string }>();
   private usageFlushTimer?: ReturnType<typeof setTimeout>;
   private loadPromise?: Promise<void>;
+  /** Identity of the bytes this process last read or wrote, to notice another process's save. */
+  private diskStamp?: string;
   /** Resolved once, so a save cannot disagree with the load about the bound. */
   private readonly maxConnections = resolveMaxConnections();
   /** The same, for the metadata file: a load and a save must agree on how big it may be. */
@@ -839,6 +848,7 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
     this.metadataPath = join(this.directory, 'connections.json');
     this.secretsPath = join(this.directory, 'secrets.enc.json');
     this.keyPath = join(this.directory, 'secrets.key');
+    this.lockPath = join(this.directory, 'vault.lock');
     this.fallback = options.fallback;
     if (options.masterKey) this.configuredMasterKey = normalizeMasterKey(options.masterKey);
   }
@@ -851,7 +861,7 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
    */
   async get(connectionId: string, providerId?: ProviderId) {
     await this.mutationQueue;
-    await this.ensureLoaded();
+    await this.refreshFromDiskIfChanged();
     return this.credentials.get(connectionId) ?? (providerId ? this.fallback?.get(providerId) : undefined);
   }
 
@@ -888,7 +898,7 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
 
   async list() {
     await this.mutationQueue;
-    await this.ensureLoaded();
+    await this.refreshFromDiskIfChanged();
     return [...this.connections.values()]
       .map((connection) => this.withPreview(connection))
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
@@ -896,7 +906,7 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
 
   async getRecord(connectionId: string) {
     await this.mutationQueue;
-    await this.ensureLoaded();
+    await this.refreshFromDiskIfChanged();
     const connection = this.connections.get(connectionId);
     return connection ? this.withPreview(connection) : undefined;
   }
@@ -1068,12 +1078,14 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
 
   /** The strategy for a provider's connections. Unset means priority. */
   async strategyFor(providerId: string): Promise<ProviderStrategy> {
-    await this.ensureLoaded();
+    await this.mutationQueue;
+    await this.refreshFromDiskIfChanged();
     return this.strategies.get(providerId) ?? 'priority';
   }
 
   async aliases(): Promise<Record<string, ModelAlias>> {
-    await this.ensureLoaded();
+    await this.mutationQueue;
+    await this.refreshFromDiskIfChanged();
     return Object.fromEntries(this.aliasMap);
   }
 
@@ -1099,7 +1111,8 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
 
   /** Every saved provider strategy, so routing can start with them in effect. */
   async allStrategies(): Promise<Array<[string, ProviderStrategy]>> {
-    await this.ensureLoaded();
+    await this.mutationQueue;
+    await this.refreshFromDiskIfChanged();
     return [...this.strategies.entries()];
   }
 
@@ -1125,7 +1138,8 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
    * is not state, it is a line in a file that would otherwise grow for the life of the installation.
    */
   async listCooldowns(): Promise<Record<string, ModelCooldown>> {
-    await this.ensureLoaded();
+    await this.mutationQueue;
+    await this.refreshFromDiskIfChanged();
     const now = Date.now();
     const live: Record<string, ModelCooldown> = {};
     for (const [key, cooldown] of this.modelCooldowns) if (cooldown.until > now) live[key] = cooldown;
@@ -1181,7 +1195,7 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
    */
   async exportState(): Promise<ConnectionsBackupState> {
     await this.mutationQueue;
-    await this.ensureLoaded();
+    await this.refreshFromDiskIfChanged();
     return {
       connections: [...this.connections.values()].map((record) => backupConnection(record, this.credentials.get(record.id))),
       strategies: Object.fromEntries(this.strategies),
@@ -1242,15 +1256,11 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
   }
 
   async recordUsage(connectionId: string) {
-    await this.withMutation(async () => {
-      await this.ensureLoaded();
-      const record = this.connections.get(connectionId);
-      if (!record) return;
-      record.requestCount = (record.requestCount ?? 0) + 1;
-      record.lastUsed = new Date().toISOString();
-      this.usageDirty = true;
-      this.scheduleUsageFlush();
-    });
+    const lastUsed = new Date().toISOString();
+    const previous = this.usageDeltas.get(connectionId);
+    this.usageDeltas.set(connectionId, { count: (previous?.count ?? 0) + 1, lastUsed });
+    this.usageDirty = true;
+    this.scheduleUsageFlush();
   }
 
   /**
@@ -1277,13 +1287,27 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
     if (!this.usageDirty) return;
     await this.withMutation(async () => {
       if (!this.usageDirty) return;
-      this.usageDirty = false;
+      const touched = [...this.usageDeltas.keys()];
+      const before = new Map(touched.map((id) => [id, this.connections.get(id)]));
+      for (const [id, delta] of this.usageDeltas) {
+        const record = this.connections.get(id);
+        if (!record) continue;
+        record.requestCount = (record.requestCount ?? 0) + delta.count;
+        record.lastUsed = delta.lastUsed;
+      }
       try {
         await this.persistMetadata();
       } catch (error) {
+        for (const id of touched) {
+          const previous = before.get(id);
+          if (previous) this.connections.set(id, previous);
+          else this.connections.delete(id);
+        }
         this.usageDirty = true;
         throw error;
       }
+      this.usageDeltas.clear();
+      this.usageDirty = false;
     });
   }
 
@@ -1294,11 +1318,39 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
     this.mutationQueue = current;
     await previous;
     try {
-      return await operation();
+      return await withFileLock(this.lockPath, async () => {
+        await this.ensureLoaded();
+        await this.refreshFromDiskIfChanged(true);
+        return await operation();
+      });
     } finally {
       release();
       if (this.mutationQueue === current) this.mutationQueue = Promise.resolve();
     }
+  }
+
+  private async diskState() {
+    return `${await fileStamp(this.metadataPath)}|${await fileStamp(this.secretsPath)}`;
+  }
+
+  /**
+   * Reload when another process saved since this one last read or wrote.
+   *
+   * Without this the lock would only serialize two *stale* copies: the second writer would still
+   * persist every connection it had loaded before the first writer's change. A read takes the lock
+   * only when the files actually changed, so the common case is two `stat`s and no contention.
+   */
+  private async refreshFromDiskIfChanged(locked = false) {
+    await this.ensureLoaded();
+    if ((await this.diskState()) === this.diskStamp) return;
+    if (locked) {
+      await this.load();
+      return;
+    }
+    await withFileLock(this.lockPath, async () => {
+      if ((await this.diskState()) === this.diskStamp) return;
+      await this.load();
+    });
   }
 
   private findIdForProvider(providerId: ProviderId) {
@@ -1344,6 +1396,7 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
     for (const connection of this.connections.values()) {
       if (!this.credentials.has(connection.id)) connection.hasCredential = false;
     }
+    this.diskStamp = await this.diskState();
   }
 
   private async persistMetadata() {
@@ -1362,6 +1415,7 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
       );
     }
     await atomicWrite(this.metadataPath, payload);
+    this.diskStamp = await this.diskState();
   }
 
   private async persistSecrets() {
@@ -1380,6 +1434,7 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
       ciphertext: ciphertext.toString('base64'),
     };
     await atomicWrite(this.secretsPath, JSON.stringify(envelope) + '\n');
+    this.diskStamp = await this.diskState();
   }
 
   private async decryptSecrets(value: string) {

@@ -73,6 +73,3 @@ export function prefetchRoute(path: string): void {
   if (!loader) return;
   loader().catch(() => undefined);
 }
-
-/** The paths `prefetchRoute` knows, so a guard can hold the two maps equal. */
-export const prefetchableRoutes = Object.keys(prefetchable);

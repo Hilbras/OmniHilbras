@@ -55,6 +55,19 @@ access open.
 The one administrative boundary that is enforced is process ownership: a desktop or CLI credential is
 read only after the caller proves it owns the gateway process it is about to address.
 
+**The vault is single-writer across processes.** The desktop app and the CLI can each hold a gateway on
+the same state directory, and each keeps its own in-memory copy of the connections. A write
+therefore takes `vault.lock` (created with `wx`, holding the holder's pid and a random token), and
+reloads the metadata and encrypted secrets first when either file changed since this process last read
+or wrote them. Without the reload, the lock would only serialize two stale copies: the second writer
+would persist every connection it had loaded before the first writer's save, and that connection would
+be gone. Reads take the lock only after a `stat` shows a change, so the ordinary path is two `stat`
+calls and no contention. A lock whose holding process is gone, or whose age exceeds two minutes, is
+broken; the token is checked before unlinking so a release cannot remove a successor's lock. The key
+file was already safe by `wx`: two first runs race, one creates it, the other reads what was created.
+Usage counters are accumulated as deltas and folded in after the reload, so a concurrent save cannot
+discard a count that arrived while the flush was waiting.
+
 ## Virtual models
 
 A virtual model is one public `oh/` id with one or more account/upstream-model targets. `GatewayService.planRoute`

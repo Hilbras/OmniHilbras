@@ -7,3 +7,10 @@ allowBuilds:
   electron: true
   electron-winstaller: true
   esbuild: true
+# electron-builder pins minimatch 9/10 through app-builder-lib and @electron/universal.
+# The advisory is fixed in 11.0.1 and those consumers already use the named export
+# (`{ Minimatch }` / `{ minimatch }`), so the upgrade is API-compatible. It is a
+# dev-only tree — `pnpm audit --prod` is the gate for what ships — but leaving a known
+# advisory in the packaging toolchain trains people to ignore audit output.
+overrides:
+  "minimatch@>=7.0.0 <11.0.1": 11.0.8

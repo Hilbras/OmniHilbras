@@ -11,7 +11,6 @@ import {
   TimerOff,
   Undo2,
 } from 'lucide-react';
-import { DashboardShell } from '../components/DashboardShell';
 import { getGatewayUsage, getProviderQuota, isNotSupported, type GatewayProviderQuota, type GatewayUsage, type GatewayUsageRecord } from '../lib/gatewayClient';
 import { useGatewayReload } from '../lib/useGatewayStatus';
 import { badgeTone } from '../ui/primitives';
@@ -690,13 +689,5 @@ export function UsageContent({ providerId, connectionId }: { providerId?: string
         </>
       )}
     </div>
-  );
-}
-
-export default function UsagePage() {
-  return (
-    <DashboardShell>
-      <UsageContent />
-    </DashboardShell>
   );
 }

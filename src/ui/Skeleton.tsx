@@ -9,15 +9,6 @@ export function Skeleton({ className = '' }: { className?: string }) {
   return <div aria-hidden="true" className={`animate-pulse rounded-md bg-surface ${className}`} />;
 }
 
-export function StatSkeleton() {
-  return (
-    <div className="card p-4" aria-busy="true">
-      <Skeleton className="h-2.5 w-24" />
-      <Skeleton className="mt-3 h-6 w-20" />
-      <Skeleton className="mt-2 h-2 w-16" />
-    </div>
-  );
-}
 
 export function TableSkeleton({ rows = 4 }: { rows?: number }) {
   return (

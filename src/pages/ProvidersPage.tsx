@@ -14,7 +14,6 @@ import {
   X,
 } from 'lucide-react';
 import { AddProviderModal, isWebSessionProvider, providerOptions, type NewProvider } from '../components/AddProviderModal';
-import { DashboardShell } from '../components/DashboardShell';
 import { ProviderCard, providerGroupBadges, providerGroupLabels, providerGroupOrder, type ProviderCardMode, type ProviderGroup, type ProviderRecord, type ProviderStatus } from '../components/ProviderCard';
 import {
   getGatewayHealth,
@@ -657,8 +656,4 @@ export function ProvidersContent() {
       <AddProviderModal open={addOpen} initialProviderId={initialProviderId} initialModelPolicy={initialModelPolicy} onClose={() => { setAddOpen(false); setInitialProviderId(undefined); setInitialModelPolicy(undefined); }} onSave={handleSave} onSaveMany={handleSaveMany} />
     </>
   );
-}
-
-export default function ProvidersPage() {
-  return <DashboardShell activePage="providers" pageTitle="Providers" pageDescription="Connect and manage the routes behind your gateway"><ProvidersContent /></DashboardShell>;
 }

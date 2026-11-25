@@ -88,7 +88,7 @@ test('the Servers route does not nest a second dashboard shell', () => {
   const app = read('src/dashboardApp.tsx');
   const home = read('src/pages/AppHomePage.tsx');
   assert.match(app, /<Route path="\/" element=\{<AppHomeContent \/>\}/, 'the root route still mounts a full page inside the shell');
-  const content = home.slice(home.indexOf('export function AppHomeContent'), home.indexOf('export function AppHomePage'));
+  const content = home.slice(home.indexOf('export function AppHomeContent'));
   assert.doesNotMatch(content, /DashboardShell/, 'AppHomeContent wraps its own DashboardShell');
 });
 

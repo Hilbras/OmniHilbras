@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { CheckCircle2, CircleAlert, MonitorCog, Moon, Palette, RefreshCw, Save, ShieldCheck, Sun, Terminal, Timer, Wrench } from 'lucide-react';
-import { DashboardShell } from '../components/DashboardShell';
 import {
   getGatewaySettings,
   listGatewayApiKeys,
@@ -334,8 +333,4 @@ export function SettingsContent() {
 
 function ClockIcon() {
   return <Timer className="h-4 w-4 text-gold-text" aria-hidden="true" />;
-}
-
-export function SettingsPage() {
-  return <DashboardShell activePage="settings" pageTitle="Settings" pageDescription="Appearance, desktop behaviour, updates and gateway configuration"><SettingsContent /></DashboardShell>;
 }

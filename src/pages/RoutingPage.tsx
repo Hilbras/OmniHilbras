@@ -11,7 +11,6 @@ import {
   Timer,
   TimerOff,
 } from 'lucide-react';
-import { DashboardShell } from '../components/DashboardShell';
 import { getGatewayRoutingState, type GatewayRoutingState } from '../lib/gatewayClient';
 import { routingVerdict, eligibleCount } from '../lib/routingVerdict';
 import { useGatewayReload } from '../lib/useGatewayStatus';
@@ -285,8 +284,4 @@ export function RoutingContent() {
       )}
     </div>
   );
-}
-
-export default function RoutingPage() {
-  return <DashboardShell activePage="routing" pageTitle="Routing" pageDescription="What routing can use, and why"><RoutingContent /></DashboardShell>;
 }

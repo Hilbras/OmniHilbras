@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CircleAlert, CircleCheck, Copy, FileWarning, Play, RotateCcw, Server, Square, Terminal } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
-import { DashboardShell } from '../components/DashboardShell';
 import { getGatewaySystemStats, listGatewayConnections, openGatewayLogStream, type GatewayLogEvent, type GatewaySystemStats } from '../lib/gatewayClient';
 import { desktopBridge, type DesktopServerLog, type DesktopServerSnapshot } from '../lib/electronBridge';
 import { copyText } from '../lib/copyText';
@@ -367,9 +366,4 @@ export function AppHomeContent() {
       </div>
     </>
   );
-}
-
-/** The standalone page wrapper, for a route that does not already own the shell. */
-export function AppHomePage() {
-  return <DashboardShell activePage="home" pageTitle="Servers" pageDescription="Gateway lifecycle and live logs"><AppHomeContent /></DashboardShell>;
 }
