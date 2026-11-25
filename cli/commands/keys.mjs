@@ -15,17 +15,20 @@ export const keys = {
   async run({ client, out, flags }) {
     if (flags.mint) {
       const created = await client.request('/v1/keys', { method: 'POST', body: { name: flags.mint } });
-      const record = created?.key ?? created;
+      // The route returns `{ apiKey: metadata, key: one-time secret }`. Treating `key` as the record
+      // printed `undefined` for every metadata field and hid the secret behind the wrong property.
+      const record = created?.apiKey ?? created;
+      const secret = created?.key ?? created?.secret;
       // `--json` still carries it: a script that asked for JSON asked for the whole answer, and
       // withholding a field from it would make the flag mean "something else, sometimes".
-      out.data(record);
+      out.data({ ...record, ...(secret ? { key: secret } : {}) });
       if (!out.json) {
         out.title(`Created ${record.name ?? flags.mint}`);
         out.line(`  ${out.muted('id')}     ${record.id}`);
         out.line(`  ${out.muted('prefix')} ${record.prefix}`);
         out.line();
         out.line(out.warn('The secret is shown once and cannot be read back:'));
-        out.line(`  ${record.secret}`);
+        out.line(`  ${secret ?? '(the gateway did not return a secret)'}`);
       }
       return 0;
     }

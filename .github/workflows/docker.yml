@@ -40,6 +40,27 @@ jobs:
         id: image
         run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      # A pushed image is not evidence that the image starts. Build and drive it before authenticating
+      # or publishing; the same failure is then caught on the commit rather than by a user.
+      - name: Build the image for a runtime smoke
+        run: docker build -t omnihilbras:smoke .
+      - name: Start the image and probe the served surface
+        run: |
+          set -euo pipefail
+          docker run -d --name omnihilbras-smoke -p 20138:20138 \
+            -e OMNIHILBRAS_REQUESTS_PER_MINUTE=0 omnihilbras:smoke
+          trap 'docker rm -f omnihilbras-smoke >/dev/null 2>&1 || true' EXIT
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:20138/health >/dev/null; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:20138/health >/dev/null
+          curl -fsS http://127.0.0.1:20138/v1/locale/en >/dev/null
+          curl -fsS http://127.0.0.1:20138/v1/translators >/dev/null
+          curl -fsS http://127.0.0.1:20138/v1/models >/dev/null
+          # A container Host must not be refused by the loopback DNS-rebinding guard.
+          curl -fsS -H 'Host: omnihilbras.container.test' http://127.0.0.1:20138/health >/dev/null
+          docker stop --time 10 omnihilbras-smoke >/dev/null
       - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io

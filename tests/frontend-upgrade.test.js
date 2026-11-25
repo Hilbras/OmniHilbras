@@ -33,6 +33,8 @@ const PAGES = [
   'SkillsPage',
   // Cycle 6's read-only format inventory: a separate chunk like every other page.
   'TranslatorPage',
+  // The CLI-tools snippet page is a route and a lazy chunk like every other page.
+  'CliToolsPage',
 ];
 
 test('no dashboard page is imported into the entry chunk', async () => {

@@ -22,6 +22,7 @@ import {
   TokenSaverContent,
   TranslatorContent,
   UsageContent,
+  CliToolsContent,
 } from './lib/pageChunks';
 
 /** Public path the dashboard is served under. Android bundles it at the app root. */
@@ -56,6 +57,7 @@ const activePageTitles = {
   tunnels: 'Tunnels',
   skills: 'Skills',
   translators: 'Translators',
+  'cli-tools': 'CLI tools',
 } as const;
 
 const pageDescriptions = {
@@ -79,6 +81,7 @@ const pageDescriptions = {
   tunnels: 'Saved tunnels from GET /v1/tunnels',
   skills: 'Saved skills from GET /v1/skills',
   translators: 'Format pairs registered in GET /v1/translators',
+  'cli-tools': 'A client snippet assembled from GET /v1/settings and GET /v1/keys',
 } as const;
 
 function PageTransition({ children }: { children: ReactNode }) {
@@ -150,7 +153,9 @@ function DashboardRoutes() {
                         ? 'skills'
                         : location.pathname.startsWith('/translators')
                           ? 'translators'
-                          : 'overview';
+                          : location.pathname.startsWith('/cli-tools')
+                            ? 'cli-tools'
+                            : 'overview';
   const provider = isProviderDetail ? getProviderById(location.pathname.split('/').filter(Boolean).at(-1)) : undefined;
   const pageTitle = provider?.name ?? activePageTitles[activePage];
   const pageDescription = provider ? 'Provider connection details' : pageDescriptions[activePage];
@@ -188,6 +193,7 @@ function DashboardRoutes() {
           <Route path={dashboardRoutes.tunnels} element={<TunnelsContent />} />
           <Route path={dashboardRoutes.skills} element={<SkillsContent />} />
           <Route path={dashboardRoutes.translators} element={<TranslatorContent />} />
+          <Route path={dashboardRoutes.cliTools} element={<CliToolsContent />} />
           <Route path="*" element={<Navigate to="/providers" replace />} />
           </Routes>
         </Suspense>

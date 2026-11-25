@@ -1,6 +1,11 @@
 import { RateLimitPolicy } from './rate-limit-policy.js';
 import { defaultResilienceSettings, type ConnectionRecord, type ResilienceSettings } from './connections.js';
-import { SlidingWindowRateLimiter, resolveRoute, splitProviderPrefix, type RouteCandidate, type RouteDecision } from './routing.js';
+import { providerPrefixes } from './index.js';
+import {
+  SlidingWindowRateLimiter, bareModelFor, enabledCapacityPoolModels, lookupModelId, modelSatisfiesCapabilities,
+  resolveRoute, splitProviderPrefix,
+  type CapacityAdapterConfig, type CapacityCapability, type RouteCandidate, type RouteDecision,
+} from './routing.js';
 import type { HealthManager } from './health.js';
 
 /**
@@ -53,6 +58,13 @@ export type RoutingEngineOptions = {
   /** Sticky connection preferred for a model, when still a candidate. */
   stickyFor?: (modelId: string) => string | undefined;
   /**
+   * Explicit capability pools. Absent means no substitution: a capability no planned model declares
+   * can only be satisfied by models the operator named here.
+   */
+  capacityAdapter?: CapacityAdapterConfig;
+  /** The catalog's per-model capability facts, asked of the connection records that were passed in. */
+  capabilitiesFor?: (connection: ConnectionRecord, modelId: string) => ReadonlySet<CapacityCapability>;
+  /**
    * The provider to serve when nothing is configured.
    *
    * A parameter rather than a constant, because the Core should not carry a provider's name as a
@@ -67,6 +79,8 @@ export class RoutingEngine {
   private readonly limits: RateLimitPolicy;
   /** One turn counter per provider and priority, so balanced connections at one priority take turns across requests. */
   private readonly balanceTurns = new Map<string, number>();
+  /** One turn counter per capability, used only by pools that ask for round-robin. */
+  private readonly capacityTurns = new Map<CapacityCapability, number>();
 
   constructor(private readonly options: RoutingEngineOptions) {
     this.limits = new RateLimitPolicy({ limiter: options.rateLimiter });
@@ -144,10 +158,83 @@ export class RoutingEngine {
     return turn;
   }
 
+  /**
+   * Candidates from the configured capability pools, ahead of the originals.
+   *
+   * The substitution happens only when **none** of the planned models can serve the whole
+   * requirement, which is the narrow rule that keeps an explicitly capable requested model in place.
+   * A pool model is namespaced (`provider/model`) so the account that serves it is stated rather than
+   * guessed; `resolveRoute` still applies health, cooldown and rate-limit checks to it. The returned
+   * candidate carries the pool model as its wire id while the request's own id and skip reasons stay
+   * untouched — the usage label names what the caller asked for, not what an adapter answered with.
+   */
+  private capacityCandidates(input: {
+    connections: readonly ConnectionRecord[];
+    model: string;
+    required: readonly CapacityCapability[];
+    original: readonly RouteCandidate[];
+    health: ReturnType<RoutingHealth['registry']>;
+    failureThreshold: number;
+    rateLimitWaitMs: Map<string, number>;
+  }): RouteCandidate[] {
+    const config = this.options.capacityAdapter;
+    const capabilitiesFor = this.options.capabilitiesFor;
+    if (!config || !capabilitiesFor || input.required.length === 0) return [];
+
+    const byId = new Map(input.connections.map((connection) => [connection.id, connection]));
+    const alreadyCapable = input.original.some((candidate) => {
+      const connection = byId.get(candidate.connectionId);
+      if (!connection) return false;
+      return modelSatisfiesCapabilities(connection, candidate.model ?? input.model, input.required);
+    });
+    if (alreadyCapable) return [];
+
+    const added: RouteCandidate[] = [];
+    const seen = new Set<string>();
+    for (const capability of input.required) {
+      const pool = config[capability];
+      if (!pool || pool.enabled === false) continue;
+      const models = enabledCapacityPoolModels(config, capability);
+      if (models.length === 0) continue;
+      const turn = this.capacityTurns.get(capability) ?? 0;
+      this.capacityTurns.set(capability, turn + 1);
+      const offset = pool.roundRobin === true && models.length > 1 ? turn % models.length : 0;
+      const ordered = [...models.slice(offset), ...models.slice(0, offset)];
+      for (const qualified of ordered) {
+        if (seen.has(qualified)) continue;
+        seen.add(qualified);
+        const slash = qualified.indexOf('/');
+        const prefix = slash > 0 ? qualified.slice(0, slash) : undefined;
+        const model = bareModelFor(qualified, prefix ?? '');
+        const owners = prefix
+          ? input.connections.filter((connection) => connection.providerId === prefix || providerPrefixes(connection.providerId).includes(prefix))
+          : input.connections.filter((connection) => connection.modelIds.some((id) => lookupModelId(id) === lookupModelId(model)));
+        if (owners.length === 0) continue;
+        const single = resolveRoute({
+          connections: [...owners],
+          model,
+          health: input.health,
+          failureThreshold: input.failureThreshold,
+          rateLimitWaitMs: input.rateLimitWaitMs,
+        });
+        for (const candidate of single.candidates) {
+          const connection = byId.get(candidate.connectionId);
+          if (!connection || !modelSatisfiesCapabilities(connection, model, input.required)) continue;
+          // `model` is the pool's own id, so the executor sends the adapter's model upstream. The
+          // catalog's `u` is still applied by `upstreamModelFor` on the dispatch path.
+          added.push({ ...candidate, model });
+        }
+      }
+    }
+    return added;
+  }
+
   async plan(input: {
     connections: readonly ConnectionRecord[];
     model: string;
     explicitProviderId?: string;
+    /** Hard capabilities the request needs, satisfied only by declared catalog modalities or explicit pools. */
+    requiredCapabilities?: readonly CapacityCapability[];
     /**
      * A saved account to try **first**; its siblings remain behind it.
      *
@@ -188,6 +275,17 @@ export class RoutingEngine {
     const split = alias ? { model: alias.model, providerId: alias.providerId } : splitProviderPrefix(input.model, connections);
     const explicitProviderId = input.explicitProviderId ?? split.providerId;
     const rotation = this.nextBalanceTurn(connections);
+    const rateLimitWaitMs = new Map(
+      connections.map((connection) => {
+        const candidate: RouteCandidate = {
+          providerId: connection.providerId,
+          connectionId: connection.id,
+          priority: connection.priority,
+          resilience: connection.resilience,
+        };
+        return [connection.id, this.currentWait(candidate)] as const;
+      }),
+    );
     const decision = resolveRoute({
       // Copied because `resolveRoute` types its input as mutable while nothing here mutates it.
       // The copy is here rather than at every call site so the looseness is paid for once.
@@ -206,18 +304,41 @@ export class RoutingEngine {
       // `this.limits.observed()` here is what bricked a limited connection for the life of the
       // process: the map only ever held the verdict of the last dispatch, and a refused connection
       // produced no further dispatch to correct it.
-      rateLimitWaitMs: new Map(
-        connections.map((connection) => {
-          const candidate: RouteCandidate = {
-            providerId: connection.providerId,
-            connectionId: connection.id,
-            priority: connection.priority,
-            resilience: connection.resilience,
-          };
-          return [connection.id, this.currentWait(candidate)] as const;
-        }),
-      ),
+      rateLimitWaitMs,
     });
+    // Capability pools widen the candidate set; they do not excuse the original incapable candidate.
+    // A pinned provider or account is a deliberate choice, so pools are not consulted for it, but
+    // an incapable pinned route is still refused rather than sent somewhere else.
+    let candidates = decision.candidates;
+    let skipped = decision.skipped;
+    if (input.requiredCapabilities?.length) {
+      if (input.explicitProviderId === undefined && input.explicitConnectionId === undefined) {
+        const added = this.capacityCandidates({
+          connections,
+          model: split.model,
+          required: input.requiredCapabilities,
+          original: decision.candidates,
+          health,
+          failureThreshold: this.options.health.getFailureThreshold(),
+          rateLimitWaitMs,
+        });
+        if (added.length > 0) candidates = [...added, ...candidates];
+      }
+      const byId = new Map(connections.map((connection) => [connection.id, connection]));
+      const capable = candidates.filter((candidate) => {
+        const connection = byId.get(candidate.connectionId);
+        return connection !== undefined
+          && modelSatisfiesCapabilities(connection, candidate.model ?? split.model, input.requiredCapabilities!);
+      });
+      if (capable.length !== candidates.length) {
+        const refused = candidates
+          .filter((candidate) => !capable.includes(candidate))
+          .map((candidate) => ({ providerId: candidate.providerId, reason: 'no-capability' as const }));
+        skipped = [...skipped, ...refused];
+        candidates = capable;
+      }
+      return { candidates, skipped };
+    }
     if (decision.candidates.length > 0) return decision;
     if (input.connections.length > 0) return decision;
 

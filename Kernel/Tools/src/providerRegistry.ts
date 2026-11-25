@@ -60,6 +60,10 @@ export const PROVIDER_REGISTRY: Readonly<Record<string, ProviderRegistryRow>> = 
   // The mainland BigModel product: a different host and a different key from glm, with no OAuth or
   // client-identity lane. The shared adapter appends /chat/completions to this base.
   "glm-cn": { id: "glm-cn", name: "GLM (China)", baseUrl: "https://open.bigmodel.cn/api/coding/paas/v4", auth: "api-key", formats: ["openai"] },
+  // Cycle 7: a plain API-key router whose published chat endpoint is /api/free-ai/openai/chat. The
+  // adapter sets that path explicitly; this base is what the resolver passes as its endpoint. No
+  // model listing was measured, so none is claimed here.
+  "mimo-free": { id: "mimo-free", name: "MiMo Code Free", baseUrl: "https://api.xiaomimimo.com", auth: "api-key", formats: ["openai"] },
   "groq": { id: "groq", name: "Groq", baseUrl: "https://api.groq.com/openai/v1", modelsUrl: "https://api.groq.com/openai/v1/models", auth: "api-key", formats: ["openai"] },
   "grok": { id: "grok", name: "Grok", baseUrl: "https://api.x.ai/v1", modelsUrl: "https://api.x.ai/v1/models", auth: "api-key", formats: ["openai"] },
   // A separate xAI account slot, not an alias of Grok: two saved keys must not share one catalog or usage.

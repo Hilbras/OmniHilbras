@@ -36,11 +36,12 @@ test('a partial quote prices only the half it covers', () => {
 
 test('cache tokens bill at their own rates and are not folded into input', () => {
   const cost = requestCostUsd({
-    inputTokens: 1_000,
+    // Canonical total input includes the 10,000 cached tokens; only the remaining 1,000 is uncached.
+    inputTokens: 11_000,
     cacheReadTokens: 10_000,
     pricing: { inputPer1M: 3, cacheReadPer1M: 0.3 },
   });
-  // 0.003 input + 0.003 cache read = 0.006. Folding 11,000 tokens into the $3 rate would give 0.033.
+  // 0.003 uncached input + 0.003 cache read = 0.006. Charging all 11,000 at $3 and the cache again was double.
   assert.equal(cost, 0.006);
 });
 
@@ -74,6 +75,12 @@ test('nothing priceable says so, rather than reporting zero', () => {
   const empty = priceUsage([]);
   assert.equal(empty.unpricedEntirely, true, 'an empty page is not a page of free requests');
   assert.equal(empty.unpricedRequests, 0);
+});
+
+test('a measured dimension with no rate makes the total a floor and says so', () => {
+  const priced = priceUsage([{ inputTokens: 1_000, outputTokens: 500, pricing: { inputPer1M: 3 } }]);
+  assert.equal(priced.partiallyPricedRequests, 1);
+  assert.match(pricingCaveat(priced) ?? '', /floor because a measured token dimension had no quoted rate/);
 });
 
 test('the caveat names how much of the page it covers', () => {

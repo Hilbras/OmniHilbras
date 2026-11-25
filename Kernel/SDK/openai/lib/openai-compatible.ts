@@ -643,6 +643,12 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
         ...(frame.finishReason ? { finishReason: frame.finishReason } : {}),
         ...(frame.usage ? { usage: frame.usage } : {}),
       };
+      /**
+       * The terminal frame ends the turn. Continuing to consume after it lets a keep-alive, a late
+       * event, or a provider bug append another chunk after `completed`, which the gateway would
+       * relay as a second terminal item.
+       */
+      if (frame.terminal) break;
     }
 
     if (!sawPayload || !sawMeaningfulPayload || !sawTerminal) {

@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { canonicalLoopbackHost, isLoopbackHostname, loopbackBaseUrl } from './core/index.js';
 import { assertLoopbackHost, createGatewayService, isContainerDeployment, loadGatewayConfig, type GatewayConfig } from './core/config.js';
-import { isCrossSiteRequest, isJsonRequest, isOauthCallbackNavigation, getRequestOrigin, resolveCorsOrigins, resolveInferenceBodyBytes, sendError, sendJson, setCors } from './core/http.js';
+import { isCrossSiteRequest, isJsonRequest, isOauthCallbackNavigation, getRequestOrigin, requestIdOf, resolveCorsOrigins, resolveInferenceBodyBytes, sendError, sendJson, setCors } from './core/http.js';
 import { createDashboardToken, dashboardTokenHeader, publishDashboardToken, tokenMatches } from './core/dashboard-token.js';
 import { isTrustedDashboard, type AuthContext } from './core/runtime.js';
 import { RateLimiter, resolveRequestsPerMinute } from './core/rate-limit.js';
@@ -13,6 +13,7 @@ import { handleConnectionsRoute } from './routes/connections.js';
 import { handleBackupRoute } from './routes/backup.js';
 import { handleTokenSaverRoute } from './routes/token-saver.js';
 import { extractApiKey, handleInferenceRoute, isPublicLlmRoute, isVideoRoute } from './routes/inference.js';
+import { isBillableRoute } from './core/route-policy.js';
 import { handleVideoRoute } from './routes/video.js';
 import { handleOauthRoute } from './routes/oauth.js';
 import { handleStatusRoute } from './routes/status.js';
@@ -36,6 +37,7 @@ import { handleMcpRoute } from './routes/mcp.js';
 import { handleMcpPluginsRoute } from './routes/mcpPlugins.js';
 import { handleFetchRoute } from './routes/fetch.js';
 import { handleTranslatorsRoute } from './routes/translators.js';
+import { handleSystemOneRoute } from './routes/systemone.js';
 import type { RouteContext } from './routes/route-context.js';
 import type { ApiKeyStore } from './core/api-keys.js';
 import type { ConnectionStore } from './core/connections.js';
@@ -65,6 +67,11 @@ export type GatewayServerOptions = {
    * tests and embedders still rely on.
    */
   dashboardToken?: string;
+  /**
+   * Whether a non-loopback Host header is expected. Only a container deployment, which has already
+   * opted into a non-loopback bind, sets this; local mode keeps the DNS-rebinding refusal.
+   */
+  allowNonLoopbackHost?: boolean;
   /**
    * What to do when the dashboard asks this gateway to stop (`POST /v1/system/shutdown`).
    *
@@ -137,6 +144,9 @@ const routes = [
   // Billable video jobs. Registered before inference so the route table has one owner for the
   // `/v1/videos/*` paths; the fast path below skips inference for them too.
   handleVideoRoute,
+  // Native decision-model JSON. Registered before the generic inference surface because its body is
+  // not a chat body and must not be translated into one.
+  handleSystemOneRoute,
   // Last, because it carries the authentication gate for the LLM surface and must not shadow
   // anything above.
   handleInferenceRoute,
@@ -203,13 +213,13 @@ export function createGatewayServer(service: GatewayService, options: GatewaySer
     const requestId = randomUUID().replace(/-/g, '');
     response.setHeader('x-request-id', requestId);
     (request as IncomingMessage & { requestId?: string }).requestId = requestId;
-    if (!isLoopbackHostHeader(request.headers.host)) {
-      sendJson(response, 421, { error: { code: 'MISDIRECTED_REQUEST', message: 'This gateway only answers on a loopback host name.' } });
+    if (!options.allowNonLoopbackHost && !isLoopbackHostHeader(request.headers.host)) {
+      sendJson(response, 421, { error: { code: 'MISDIRECTED_REQUEST', message: 'This gateway only answers on a loopback host name.', requestId } });
       return;
     }
     const requestOrigin = getRequestOrigin(request);
     if (requestOrigin && !corsOrigins.includes(requestOrigin)) {
-      sendJson(response, 403, { error: { code: 'CORS_ORIGIN_DENIED', message: 'This browser origin is not allowed.' } });
+      sendJson(response, 403, { error: { code: 'CORS_ORIGIN_DENIED', message: 'This browser origin is not allowed.', requestId } });
       return;
     }
     // Chromium may classify loopback host aliases (localhost -> 127.0.0.1)
@@ -218,7 +228,7 @@ export function createGatewayServer(service: GatewayService, options: GatewaySer
     // OAuth callback navigations carry no Origin. Each exemption is an exact callback path that
     // renders an outcome page; all other management paths remain gated.
     if (!isOauthCallbackNavigation(request) && isCrossSiteRequest(request) && (!requestOrigin || !corsOrigins.includes(requestOrigin))) {
-      sendJson(response, 403, { error: { code: 'CROSS_SITE_REQUEST_DENIED', message: 'Cross-site requests are not allowed.' } });
+      sendJson(response, 403, { error: { code: 'CROSS_SITE_REQUEST_DENIED', message: 'Cross-site requests are not allowed.', requestId } });
       return;
     }
 
@@ -245,7 +255,7 @@ export function createGatewayServer(service: GatewayService, options: GatewaySer
     // Generating calls only. `GET /v1/models` is part of the same surface but it is discovery, not
     // spend: throttling it breaks the startup of the agents this gateway exists to serve while bounding
     // nothing that costs money.
-    if (limiter.enabled && request.method !== 'GET' && isPublicLlmRoute(request.method ?? 'GET', new URL(request.url ?? '/', 'http://localhost').pathname)) {
+    if (limiter.enabled && isBillableRoute(request.method, new URL(request.url ?? '/', 'http://localhost').pathname)) {
       const now = Date.now();
       if (now - prunedAt > 60_000) {
         limiter.prune();
@@ -259,6 +269,7 @@ export function createGatewayServer(service: GatewayService, options: GatewaySer
           error: {
             code: 'RATE_LIMITED',
             message: `Too many requests: the gateway allows ${decision.limit} per minute per caller. Try again in ${seconds}s. Set OMNIHILBRAS_REQUESTS_PER_MINUTE to change it, or 0 to turn the limit off.`,
+            requestId,
           },
         }, responseOrigin);
         return;
@@ -266,7 +277,7 @@ export function createGatewayServer(service: GatewayService, options: GatewaySer
     }
 
     if ((request.method === 'POST' || request.method === 'PUT' || request.method === 'PATCH') && !isJsonRequest(request)) {
-      sendJson(response, 415, { error: { code: 'UNSUPPORTED_MEDIA_TYPE', message: 'JSON requests must use application/json.' } }, responseOrigin);
+      sendJson(response, 415, { error: { code: 'UNSUPPORTED_MEDIA_TYPE', message: 'JSON requests must use application/json.', requestId } }, responseOrigin);
       return;
     }
     void handleRequest(request, response, service, options, responseOrigin, auth).catch((error) => {
@@ -314,6 +325,7 @@ export async function startGatewayServer(options: {
     maxBodyBytes: resolveInferenceBodyBytes(options.env),
     publicBaseUrl,
     dashboardToken,
+    allowNonLoopbackHost: isContainerDeployment(options.env),
     ...(options.dashboardUrl ? { dashboardUrl: options.dashboardUrl } : {}),
     ...(options.onShutdownRequest ? { onShutdownRequest: options.onShutdownRequest } : {}),
   });
@@ -337,7 +349,7 @@ export async function startGatewayServer(options: {
   });
 
   // The port is ours: now the token file may say which token the running gateway accepts.
-  await publishDashboardToken(dashboardToken, options.env);
+  await publishDashboardToken(dashboardToken, options.env, config.port);
 
   return { config, server, service };
 }
@@ -420,7 +432,7 @@ export async function startGatewayServer(options: {
  * were already reachable, because `authorize()` returns before it can refuse anything. What changed is that
  * a gateway *with* keys enforced now answers the navigation the same way a gateway without them does.
  */
-const MANAGEMENT_PREFIXES = ['/metrics', '/v1/connections', '/v1/keys', '/v1/oauth', '/v1/settings', '/v1/web-cookie', '/v1/routing', '/v1/usage', '/v1/providers', '/v1/logs', '/v1/events', '/v1/health', '/v1/system', '/v1/backup', '/v1/token-saver', '/v1/virtual-models', '/v1/skills', '/v1/workspaces', '/v1/tunnels', '/v1/mitm', '/v1/proxy-pools', '/v1/provider-nodes', '/v1/observability', '/v1/pxpipe', '/v1/locale', '/v1/audio/speech', '/v1/audio/transcriptions', '/v1/search', '/v1/runtime', '/v1/fetch', '/v1/translators'] as const;
+const MANAGEMENT_PREFIXES = ['/metrics', '/v1/connections', '/v1/keys', '/v1/oauth', '/v1/settings', '/v1/web-cookie', '/v1/routing', '/v1/usage', '/v1/providers', '/v1/logs', '/v1/events', '/v1/health', '/v1/system', '/v1/backup', '/v1/token-saver', '/v1/virtual-models', '/v1/skills', '/v1/workspaces', '/v1/tunnels', '/v1/mitm', '/v1/proxy-pools', '/v1/provider-nodes', '/v1/observability', '/v1/pxpipe', '/v1/locale', '/v1/audio/speech', '/v1/audio/transcriptions', '/v1/search', '/v1/runtime', '/v1/fetch', '/v1/translators', '/v1/systemone'] as const;
 
 function isManagementPath(pathname: string) {
   return MANAGEMENT_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
@@ -478,7 +490,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       if (await route(ctx)) return;
     }
 
-    sendJson(response, 404, { error: { code: 'NOT_FOUND', message: 'Route not found.' } }, origin);
+    sendJson(response, 404, { error: { code: 'NOT_FOUND', message: 'Route not found.', requestId: requestIdOf(request) } }, origin);
   } finally {
     request.off('aborted', abort);
     response.off('close', onResponseClose);

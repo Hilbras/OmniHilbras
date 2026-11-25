@@ -40,7 +40,7 @@ the CLI and the dashboard in the same way. Check `omnihilbras status --json` to 
 
 | Verb | What it answers |
 | --- | --- |
-| `setup` | First run: what is missing on this machine, install it (printing each command before running it), install the `omnihilbras` command, and start the servers when this is a checkout (the published client has none to start) |
+| `setup` | First run: what is missing on this machine, install it (printing each command before running it), install the `omnihilbras` command, and start the bundled servers |
 | `doctor` | The same checks as a report that **changes nothing** — safe in a script or on someone else's machine |
 | `status` | Is the gateway up, what version, which providers are unhealthy (`--strict` exits `1`) |
 | `providers` | Every saved account: enabled, priority, credential kind, models, ejection, last error |

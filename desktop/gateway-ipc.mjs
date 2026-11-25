@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { constants, lstat, open } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -8,6 +8,15 @@ import { join } from 'node:path';
  * The dashboard token is an admin credential. A browser renderer that held it could be made to leak
  * it by any script in the page, so the token stays in the main process and the renderer asks for a
  * path. That also removes CORS from the app: no browser origin reaches the gateway.
+ *
+ * Two rules hold at this boundary:
+ *
+ * 1. **Ownership precedes credentials.** The client is constructed with an `isOwned` callback (the
+ *    supervisor's `ownsRunningChild` in the app). It is asked before the token file is read and again
+ *    immediately before every fetch, so a gateway that stopped, failed, is starting or is restarting
+ *    never sees a token and never sees the request.
+ * 2. **Only this app's frames may drive it.** `isTrustedIpcSender` refuses any event whose sender is
+ *    not the window's own `webContents` and whose document is not the `app://` origin.
  */
 
 export const dashboardTokenHeader = 'x-omnihilbras-dashboard-token';
@@ -15,18 +24,140 @@ export const dashboardTokenHeader = 'x-omnihilbras-dashboard-token';
 // rather than a policy — but it must be an allowlisted origin or the gateway refuses the call.
 const DASHBOARD_ORIGIN = 'http://localhost:5173';
 const ALLOWED_METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
+/** The only document origin this process serves. Kept here so sender validation cannot drift. */
+export const APP_ORIGIN = 'app://omnihilbras';
+/** The gateway's own reader caps the token at 256 bytes; this reads no more than that. */
+export const MAX_DASHBOARD_TOKEN_BYTES = 256;
 
-export function dashboardTokenPath(env = process.env) {
+export function dashboardTokenPath(env = process.env, port = 20138) {
   const configHome = env.XDG_CONFIG_HOME?.trim();
-  return join(configHome || join(homedir(), '.config'), 'omnihilbras', 'dashboard-token');
+  const name = port === 20138 ? 'dashboard-token' : `dashboard-token-${port}`;
+  return join(configHome || join(homedir(), '.config'), 'omnihilbras', name);
 }
 
-async function readToken() {
+/**
+ * Read the dashboard token without trusting the path.
+ *
+ * This deliberately re-implements the gateway's `secure-store` reader rather than importing it: the
+ * desktop shell is plain ESM and the store lives behind the gateway's build. The semantics are the
+ * same and are worth stating, because a token reader is where a symlink or an unbounded read turns
+ * into a credential leak:
+ *
+ * - **regular file only** — a directory, FIFO or device is refused, never read;
+ * - **no symlinks** — refused by `O_NOFOLLOW` (ELOOP) and by an `lstat` check for platforms without it;
+ * - **bounded bytes** — no more than `maxBytes` is ever read, whatever the file claims;
+ * - **safe permissions** — on POSIX the file must be owner-only, the mode `atomicWrite` gives it. A
+ *   looser mode means another local user could already have read it, so it is not a secret this
+ *   process can vouch for.
+ *
+ * A missing, unreadable or malformed file is `undefined`, not an exception: that is a normal state
+ * (the gateway may not have run yet) and every caller already treats a missing token as "no token".
+ */
+export async function readDashboardTokenFile(path = dashboardTokenPath(), { maxBytes = MAX_DASHBOARD_TOKEN_BYTES, platform = process.platform } = {}) {
+  // `O_NOFOLLOW` is absent on Windows; there the pre-open `lstat` is the only symlink check available.
+  const noFollow = constants.O_NOFOLLOW ?? 0;
+  let handle;
   try {
-    return (await readFile(dashboardTokenPath(), 'utf8')).trim() || undefined;
+    const before = await lstat(path);
+    if (before.isSymbolicLink() || !before.isFile() || before.size > maxBytes) return undefined;
+    handle = await open(path, constants.O_RDONLY | noFollow);
+    // Re-check the opened inode: `lstat` and `open` are two syscalls, and the authoritative facts are
+    // the ones describing the bytes actually attached to this handle.
+    const info = await handle.stat();
+    if (!info.isFile() || info.size > maxBytes) return undefined;
+    if (platform !== 'win32' && (info.mode & 0o077) !== 0) return undefined;
+    const buffer = Buffer.alloc(Math.min(info.size, maxBytes));
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    return buffer.subarray(0, bytesRead).toString('utf8').trim() || undefined;
   } catch {
     return undefined;
+  } finally {
+    await handle?.close().catch(() => undefined);
   }
+}
+
+/**
+ * Whether an IPC event came from this app's own window.
+ *
+ * The check is identity: `event.sender` must be the window's own `webContents`. A URL comparison alone
+ * is not enough — a webContents that navigated to `app://` (a sign-in child could try) would pass it —
+ * so the document origin is only used to *refuse* a window that is somehow no longer at the app
+ * origin. Identity survives a reload, which is the case a URL-only rule was meant to cover; a new
+ * window gets a new `webContents` and must not inherit this one's trust.
+ */
+export function isTrustedIpcSender(event, trustedWebContents) {
+  const sender = event?.sender;
+  if (!sender || !trustedWebContents) return false;
+  // Electron identifies a WebContents by its numeric id. Identity by id survives a wrapper or reload;
+  // a different id is a different frame even when its URL string looks the same.
+  const sameContents = sender === trustedWebContents
+    || (Number.isSafeInteger(sender.id) && Number.isSafeInteger(trustedWebContents.id) && sender.id === trustedWebContents.id);
+  if (!sameContents) return false;
+  const url = typeof sender.getURL === 'function' ? sender.getURL() : '';
+  // An empty URL is the window before its first document commits. The identity is already ours.
+  if (typeof url === 'string' && url.length > 0 && url !== APP_ORIGIN && !url.startsWith(`${APP_ORIGIN}/`)) return false;
+  return true;
+}
+
+/**
+ * Send one payload to an IPC sender, or nothing at all.
+ *
+ * A refused sender is not told why: the channel name and the fact of a refusal are themselves
+ * information a foreign frame has no use for. Returns whether the payload was delivered.
+ */
+export function sendToTrustedIpc(event, trustedWebContents, channel, payload) {
+  if (!isTrustedIpcSender(event, trustedWebContents)) return false;
+  event.sender.send(channel, payload);
+  return true;
+}
+
+/**
+ * The controllers for credential-bearing streams (chat today).
+ *
+ * Kept as a tiny registry rather than a bare `Map` so "the child we were reading from is gone" has
+ * one operation — `abortAll` — and so ownership loss cannot abort some streams and miss others.
+ */
+export function createStreamControllerRegistry() {
+  const controllers = new Map();
+  return {
+    set(id, controller) {
+      controllers.set(id, controller);
+      return this;
+    },
+    get(id) {
+      return controllers.get(id);
+    },
+    delete(id) {
+      return controllers.delete(id);
+    },
+    /** Abort every tracked stream and empty the registry. Returns how many were aborted. */
+    abortAll() {
+      const active = [...controllers.values()];
+      controllers.clear();
+      for (const controller of active) controller.abort();
+      return active.length;
+    },
+    get size() {
+      return controllers.size;
+    },
+  };
+}
+
+/**
+ * Abort credential streams the moment the supervisor stops owning a live child.
+ *
+ * The state event is the trigger, and `ownsRunningChild()` is the question — a `stopping`,
+ * `restarting` or `failed` label all mean the same thing here: the process a stream was reading from
+ * is not one this app owns. Returns an unsubscribe function.
+ */
+export function bindStreamAbortToOwnership(supervisor, registry) {
+  const onState = () => {
+    if (!supervisor.ownsRunningChild()) registry.abortAll();
+  };
+  supervisor.on('state', onState);
+  // A binding installed after the loss must still abort what it inherited.
+  onState();
+  return () => supervisor.off('state', onState);
 }
 
 /** Rejects anything that is not a gateway path. No absolute URLs, no traversal, no other hosts. */
@@ -39,12 +170,30 @@ export function assertGatewayPath(path) {
   return `${url.pathname}${url.search}`;
 }
 
-export function createGatewayClient({ host = '127.0.0.1', port }) {
+export function createGatewayClient({ host = '127.0.0.1', port, isOwned, env = process.env, readToken } = {}) {
   const portOf = typeof port === 'function' ? port : () => port;
   const base = () => `http://${host}:${portOf()}`;
+  // `readToken` is injectable so a test can prove it was *not* called; the default is the hardened
+  // file reader, which is the only reader the app uses.
+  const tokenReader = readToken ?? (() => readDashboardTokenFile(dashboardTokenPath(env, Number(portOf()))));
+
+  /**
+   * Ownership is a precondition, not a hint.
+   *
+   * Called before the token is read and again immediately before every fetch. The second check is
+   * the one that matters: reading the file is asynchronous, and a gateway can stop while a read is
+   * in flight. Without an `isOwned` callback the client behaves as before, which is what a plain
+   * Node consumer (and these tests' positive controls) need.
+   */
+  const assertOwned = () => {
+    if (isOwned === undefined) return;
+    if (typeof isOwned !== 'function') throw new Error('createGatewayClient expects isOwned to be a function.');
+    if (!isOwned()) throw new Error('The local gateway is not running under this app.');
+  };
 
   const headersFor = async (extra = {}) => {
-    const token = await readToken();
+    assertOwned();
+    const token = await tokenReader();
     return {
       accept: 'application/json',
       ...extra,
@@ -71,9 +220,11 @@ export function createGatewayClient({ host = '127.0.0.1', port }) {
        */
       const write = upper === 'POST' || upper === 'PUT' || upper === 'PATCH';
       const payload = write ? (body ?? '{}') : body;
+      const headers = await headersFor(write ? { 'content-type': 'application/json' } : {});
+      assertOwned();
       const response = await fetch(`${base()}${assertGatewayPath(path)}`, {
         method: upper,
-        headers: await headersFor(write ? { 'content-type': 'application/json' } : {}),
+        headers,
         ...(payload === undefined ? {} : { body: payload }),
         signal: AbortSignal.timeout(30_000),
       });
@@ -84,9 +235,11 @@ export function createGatewayClient({ host = '127.0.0.1', port }) {
      * A chat stream. Chunks arrive as text; the renderer keeps the SSE parser it already had.
      */
     async streamChat({ path = '/v1/chat/completions', body, signal } = {}) {
+      const headers = await headersFor({ 'content-type': 'application/json', accept: 'text/event-stream' });
+      assertOwned();
       const response = await fetch(`${base()}${assertGatewayPath(path)}`, {
         method: 'POST',
-        headers: await headersFor({ 'content-type': 'application/json', accept: 'text/event-stream' }),
+        headers,
         body,
         ...(signal ? { signal } : {}),
       });
@@ -100,8 +253,10 @@ export function createGatewayClient({ host = '127.0.0.1', port }) {
 
     /** Subscribe to `/v1/logs/stream`; returns a function that closes the subscription. */
     async subscribeLogs(onEvent, { signal } = {}) {
+      const headers = await headersFor({ accept: 'text/event-stream' });
+      assertOwned();
       const response = await fetch(`${base()}/v1/logs/stream`, {
-        headers: await headersFor({ accept: 'text/event-stream' }),
+        headers,
         signal,
       });
       if (!response.ok || !response.body) throw new Error(`The gateway log stream answered ${response.status}.`);

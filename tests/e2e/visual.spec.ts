@@ -106,6 +106,7 @@ for (const theme of ['dark', 'light'] as const) {
       await expect(page.locator('main')).toBeVisible();
       await expect(page).toHaveScreenshot(`dashboard-${name}-${theme}.png`, {
         animations: 'disabled',
+        timeout: 20_000,
         // **Absolute pixels, not a ratio.** A 1% ratio on a 1280×720 shot is 9,216 pixels, and changing the gold token
         // to magenta slipped under it — the guard passed while the dashboard was the wrong colour. 40 pixels is
         // enough for subpixel font rendering and far too few to hide a control, a badge or a token change.

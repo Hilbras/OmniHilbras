@@ -26,6 +26,17 @@ export function createOutput({ json = false, stream = process.stdout } = {}) {
       if (json) stream.write(`${JSON.stringify(value, null, 2)}\n`);
       return value;
     },
+    /**
+     * One JSON object on one line — the only honest shape for a stream.
+     *
+     * `data()` pretty-prints, which is right for a complete answer and wrong for `logs --json`: a follower
+     * never finishes, and a multi-line record per event is not the newline-delimited JSON a `jq`/`while read`
+     * consumer expects. Nothing is printed when `--json` was not asked for.
+     */
+    ndjson(value) {
+      if (json) stream.write(`${JSON.stringify(value)}\n`);
+      return value;
+    },
     line(text = '') {
       if (!json) stream.write(`${text}\n`);
     },

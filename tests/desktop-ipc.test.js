@@ -1,9 +1,24 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { EventEmitter } from 'node:events';
 import { readFileSync } from 'node:fs';
+import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { createServer as createHttpServer } from 'node:http';
+import { createServer as createTcpServer } from 'node:net';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { assertGatewayPath } from '../desktop/gateway-ipc.mjs';
+import {
+  assertGatewayPath,
+  bindStreamAbortToOwnership,
+  createGatewayClient,
+  createStreamControllerRegistry,
+  dashboardTokenPath,
+  isTrustedIpcSender,
+  readDashboardTokenFile,
+  sendToTrustedIpc,
+} from '../desktop/gateway-ipc.mjs';
+import { createGatewaySupervisor } from '../desktop/supervisor.mjs';
 
 /**
  * The IPC boundary. A renderer controls the path and method it asks for, so these are the checks that
@@ -168,4 +183,236 @@ test('the desktop app serves its own pair: gateway 20198, web 20197', () => {
   assert.match(main, /port: preferredPort/, 'the supervisor is not given the resolved port');
   assert.match(main, /OMNIHILBRAS_CORS_ORIGINS: \['http:\/\/localhost:5173', 'http:\/\/127\.0\.0\.1:5173', \.\.\.corsOrigins\(\)\]/, 'the trusted origins are not built from the active pair');
   assert.match(main, /saveUserConfig\(\{ gatewayPort: gateway\.port, webPort: resolvedWebPort \}\)/, 'the resolved pair is not persisted');
+});
+
+/**
+ * Phase 1 desktop hardening: ownership precedes credentials, and only the app frame may drive IPC.
+ *
+ * These use a real HTTP server rather than a mocked `fetch`, because the claim is "no request reached the
+ * gateway" — a mock proves only that our code called the mock. The token reader is injected where the
+ * claim is "the file was never read", which is the other half of the same rule.
+ */
+
+const FIXTURE = join(ROOT, 'tests/support/fake-gateway.mjs');
+
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const server = createTcpServer();
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address();
+      server.close(() => resolve(port));
+    });
+  });
+}
+
+async function recordingGateway(t) {
+  const hits = [];
+  const server = createHttpServer((request, response) => {
+    hits.push({ url: request.url, token: request.headers['x-omnihilbras-dashboard-token'] });
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end('{"ok":true}');
+  });
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  return { hits, port: server.address().port };
+}
+
+for (const label of ['stopped', 'starting', 'failed', 'restarting']) {
+  test(`no token is read and no request is sent while the gateway is ${label}`, async (t) => {
+    const { hits, port } = await recordingGateway(t);
+    let reads = 0;
+    const client = createGatewayClient({
+      port: () => port,
+      isOwned: () => false,
+      readToken: async () => {
+        reads += 1;
+        return 'secret-token';
+      },
+    });
+    await assert.rejects(() => client.request({ path: '/v1/connections' }), /not running/i);
+    await assert.rejects(() => client.streamChat({ body: '{}' }), /not running/i);
+    await assert.rejects(() => client.subscribeLogs(() => undefined), /not running/i);
+    assert.equal(reads, 0, 'the token was read for a gateway this app does not own');
+    assert.equal(hits.length, 0, 'a request reached the gateway');
+  });
+}
+
+test('an owned gateway reads the token and sends it', async (t) => {
+  const { hits, port } = await recordingGateway(t);
+  const client = createGatewayClient({ port: () => port, isOwned: () => true, readToken: async () => 'secret-token' });
+  const result = await client.request({ path: '/v1/connections' });
+  assert.equal(result.ok, true);
+  assert.equal(hits.length, 1, 'the request never reached the gateway');
+  assert.equal(hits[0].token, 'secret-token', 'the token was not presented');
+});
+
+test('ownership is checked again after the token read, before the fetch', async (t) => {
+  const { hits, port } = await recordingGateway(t);
+  let owned = true;
+  let reads = 0;
+  const client = createGatewayClient({
+    port: () => port,
+    isOwned: () => owned,
+    // The read is the last thing before the second check: losing ownership mid-call must stop the fetch.
+    readToken: async () => {
+      reads += 1;
+      owned = false;
+      return 'secret-token';
+    },
+  });
+  await assert.rejects(() => client.request({ path: '/v1/connections' }), /not running/i);
+  assert.equal(reads, 1, 'the token was read');
+  assert.equal(hits.length, 0, 'the request was sent after ownership was lost mid-call');
+});
+
+test('only the app frame is a trusted IPC sender', () => {
+  const appContents = { id: 1, getURL: () => 'app://omnihilbras/dashboard/' };
+  assert.equal(isTrustedIpcSender({ sender: appContents }, appContents), true, 'the window is not trusted');
+  assert.equal(
+    isTrustedIpcSender({ sender: { id: 2, getURL: () => 'app://omnihilbras/dashboard/' } }, appContents),
+    false,
+    'a second webContents inherited the window\'s trust',
+  );
+  assert.equal(
+    isTrustedIpcSender({ sender: appContents }, { id: 1, getURL: () => 'https://evil.example/' }),
+    true,
+    'identity alone did not trust the window',
+  );
+  assert.equal(
+    isTrustedIpcSender({ sender: { id: 3, getURL: () => 'https://evil.example/' } }, appContents),
+    false,
+    'a foreign document was trusted',
+  );
+  assert.equal(
+    isTrustedIpcSender({ sender: { id: 4, getURL: () => 'app://omnihilbras.evil.example/' } }, appContents),
+    false,
+    'a prefix lookalike was treated as the app origin',
+  );
+  assert.equal(isTrustedIpcSender({ sender: { id: 5 } }, appContents), false, 'a sender with no URL and no identity was trusted');
+  assert.equal(isTrustedIpcSender({}, appContents), false, 'an event with no sender was trusted');
+  assert.equal(isTrustedIpcSender({ sender: appContents }), false, 'a sender was trusted without a reference window');
+});
+
+test('a foreign listener receives nothing', () => {
+  const appContents = { id: 1, getURL: () => 'app://omnihilbras/' };
+  const delivered = [];
+  const foreign = { id: 9, getURL: () => 'https://evil.example/', send: (channel, payload) => delivered.push({ channel, payload }) };
+  const trusted = { id: 1, getURL: () => 'app://omnihilbras/', send: (channel, payload) => delivered.push({ channel, payload }) };
+
+  assert.equal(sendToTrustedIpc({ sender: foreign }, appContents, 'gateway:stream:chunk:1', 'secret'), false);
+  assert.equal(delivered.length, 0, 'a foreign sender received a chunk');
+  assert.equal(sendToTrustedIpc({ sender: trusted }, appContents, 'gateway:stream:chunk:1', 'secret'), true);
+  assert.deepEqual(delivered, [{ channel: 'gateway:stream:chunk:1', payload: 'secret' }]);
+});
+
+test('losing ownership aborts every tracked credential stream', () => {
+  const supervisor = new EventEmitter();
+  supervisor.owned = true;
+  supervisor.ownsRunningChild = () => supervisor.owned;
+  const registry = createStreamControllerRegistry();
+  const unbind = bindStreamAbortToOwnership(supervisor, registry);
+  try {
+    const controller = new AbortController();
+    registry.set('chat-1', controller);
+    assert.equal(controller.signal.aborted, false);
+
+    supervisor.owned = false;
+    supervisor.emit('state', { state: 'restarting' });
+    assert.equal(controller.signal.aborted, true, 'the stream survived ownership loss');
+    assert.equal(registry.size, 0, 'the registry still holds an aborted stream');
+  } finally {
+    unbind();
+  }
+});
+
+test('a gateway child that exits aborts its streams', async (t) => {
+  const port = await freePort();
+  const supervisor = createGatewaySupervisor({
+    projectRoot: ROOT,
+    entry: FIXTURE,
+    host: '127.0.0.1',
+    port,
+    readinessTimeoutMs: 8_000,
+    readinessPollMs: 50,
+    autoRestart: true,
+    maxRestarts: 2,
+    restartBackoffMs: [2_000],
+    env: { FAKE_CRASH_AFTER_MS: '300' },
+  });
+  const registry = createStreamControllerRegistry();
+  const unbind = bindStreamAbortToOwnership(supervisor, registry);
+  t.after(async () => {
+    unbind();
+    await supervisor.stop();
+  });
+
+  await supervisor.start();
+  const controller = new AbortController();
+  registry.set('chat-1', controller);
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline && !controller.signal.aborted) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  assert.equal(controller.signal.aborted, true, 'the stream survived its gateway child');
+});
+
+async function tokenSandbox(t) {
+  const directory = await mkdtemp(join(tmpdir(), 'omnihilbras-token-'));
+  await chmod(directory, 0o700);
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  return directory;
+}
+
+test('the token reader accepts an owner-only regular file', async (t) => {
+  const directory = await tokenSandbox(t);
+  const path = join(directory, 'dashboard-token');
+  await writeFile(path, 'abc123\n', { mode: 0o600 });
+  assert.equal(await readDashboardTokenFile(path), 'abc123');
+});
+
+test('the token reader refuses symlinks without following them', async (t) => {
+  const directory = await tokenSandbox(t);
+  const target = join(directory, 'real-token');
+  const link = join(directory, 'dashboard-token');
+  await writeFile(target, 'stolen\n', { mode: 0o600 });
+  await symlink(target, link);
+  assert.equal(await readDashboardTokenFile(link), undefined);
+});
+
+test('the token reader refuses non-regular files', async (t) => {
+  const directory = await tokenSandbox(t);
+  const path = join(directory, 'dashboard-token');
+  await mkdir(path, { mode: 0o700 });
+  assert.equal(await readDashboardTokenFile(path), undefined);
+});
+
+test('the token reader enforces its byte bound', async (t) => {
+  const directory = await tokenSandbox(t);
+  const path = join(directory, 'dashboard-token');
+  await writeFile(path, 'a'.repeat(257), { mode: 0o600 });
+  assert.equal(await readDashboardTokenFile(path), undefined, 'an oversized token was read');
+  await writeFile(path, 'a'.repeat(256), { mode: 0o600 });
+  assert.equal((await readDashboardTokenFile(path)).length, 256);
+});
+
+test('the token reader refuses a file other users can read', async (t) => {
+  if (process.platform === 'win32') return;
+  const directory = await tokenSandbox(t);
+  const path = join(directory, 'dashboard-token');
+  await writeFile(path, 'abc123\n', { mode: 0o600 });
+  await chmod(path, 0o644);
+  assert.equal(await readDashboardTokenFile(path), undefined, 'a world-readable token was accepted');
+});
+
+test('a missing token is not an error', async (t) => {
+  const directory = await tokenSandbox(t);
+  assert.equal(await readDashboardTokenFile(join(directory, 'dashboard-token')), undefined);
+});
+
+test('the token path honours XDG_CONFIG_HOME', () => {
+  assert.equal(dashboardTokenPath({ XDG_CONFIG_HOME: '/tmp/example-config' }), join('/tmp/example-config', 'omnihilbras', 'dashboard-token'));
 });

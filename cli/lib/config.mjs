@@ -31,9 +31,13 @@ export function configDirectory(env = process.env) {
 }
 
 /** The per-launch token the dashboard presents. Absent when no gateway has run yet. */
-export function readDashboardToken(env = process.env) {
+export function readDashboardToken(env = process.env, port = 20138) {
+  // The default port keeps the historical filename. Every other port gets its own file, because the
+  // desktop gateway (20198) and a checkout gateway (20138) are supported to run at the same time and
+  // one must not publish a token the other then overwrites.
+  const name = port === 20138 ? 'dashboard-token' : `dashboard-token-${port}`;
   try {
-    const value = fs.readFileSync(path.join(configDirectory(env), 'dashboard-token'), 'utf8').trim();
+    const value = fs.readFileSync(path.join(configDirectory(env), name), 'utf8').trim();
     return value || undefined;
   } catch {
     // A missing token is a normal state, not an error: the gateway may not have run yet, and every verb
@@ -43,20 +47,58 @@ export function readDashboardToken(env = process.env) {
 }
 
 /**
+ * Whether a hostname names this machine.
+ *
+ * The dashboard token is a local credential, so it is only ever presented to a loopback gateway. The
+ * check is on the host, not on the string: `127.0.0.1`, any `127/8` address, `localhost`, `*.localhost`
+ * and `::1` (the WHATWG parser keeps the brackets in `hostname`) are local; everything else is not.
+ */
+export function isLoopbackHost(hostname) {
+  const host = String(hostname ?? '').trim().toLowerCase().replace(/\.$/, '').replace(/^\[|\]$/g, '');
+  if (!host) return false;
+  if (host === 'localhost' || host.endsWith('.localhost')) return true;
+  if (host === '::1' || host === '0:0:0:0:0:0:0:1') return true;
+  return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host);
+}
+
+export function isLoopbackUrl(value) {
+  try {
+    return isLoopbackHost(new URL(String(value)).hostname);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * How this invocation authenticates.
  *
- * An explicit key wins, because a caller who supplied one meant it. Otherwise the local dashboard token.
- * Neither is ever printed, echoed in an error, or written to a log — the value is returned for the
+ * An explicit key wins, because a caller who supplied one meant it. Otherwise the local dashboard token —
+ * but **only when the gateway is on this machine**. The token is a `0600` file the gateway published for
+ * its own dashboard; sending it to a host named by `--gateway` would hand a local secret to whoever is
+ * listening there. A remote gateway gets `none`, and the 401 tells the caller to supply an API key.
+ *
+ * Neither value is ever printed, echoed in an error, or written to a log — the value is returned for the
  * request and nothing else.
  */
-export function resolveAuth(flags, env = process.env) {
+export function resolveAuth(flags, env = process.env, { gatewayUrl } = {}) {
   const apiKey = flags.apiKey?.trim() || env.OMNIHILBRAS_API_KEY?.trim();
   if (apiKey) return { kind: 'api-key', apiKey };
-  const dashboardToken = readDashboardToken(env);
+  if (gatewayUrl !== undefined && !isLoopbackUrl(gatewayUrl)) return { kind: 'none' };
+  const port = (() => {
+    try { return Number(new URL(gatewayUrl ?? DEFAULT_GATEWAY_URL).port || 20138); } catch { return 20138; }
+  })();
+  const dashboardToken = readDashboardToken(env, port);
   if (dashboardToken) return { kind: 'dashboard', dashboardToken };
   return { kind: 'none' };
 }
 
+/**
+ * The gateway address this invocation was asked for, unvalidated.
+ *
+ * `client.mjs` normalizes and validates it before the first request (`normalizeGatewayUrl`): a URL with
+ * userinfo, a query or a fragment is refused rather than concatenated into a request path, and plain HTTP
+ * is refused for anything that is not loopback.
+ */
 export function resolveGatewayUrl(flags, env = process.env) {
   const chosen = flags.gateway?.trim() || env.OMNIHILBRAS_GATEWAY_URL?.trim() || DEFAULT_GATEWAY_URL;
   // Trailing slashes are dropped so every caller can concatenate a path without thinking about it.

@@ -104,6 +104,36 @@ export class GatewaySupervisor extends EventEmitter {
     };
   }
 
+  /**
+   * Whether this supervisor owns a live gateway *right now*.
+   *
+   * `state === 'running'` is necessary but not sufficient: it is a label, and a label outlives the
+   * process it describes for the ticks between an exit and the restart handler. A credential-bearing
+   * operation must ask about the process itself, so this also requires a child handle that has not
+   * exited (`exitCode`/`signalCode` are both `null` only while the child is alive) and a real pid.
+   */
+  ownsRunningChild() {
+    if (this.state !== 'running') return false;
+    const child = this.child;
+    if (!child) return false;
+    if (!(child.pid > 0)) return false;
+    if (child.exitCode !== null || child.signalCode !== null) return false;
+    return true;
+  }
+
+  /**
+   * Throw unless this supervisor owns a live gateway.
+   *
+   * Every path that reads the dashboard token or forwards a credential calls this: ownership is a
+   * precondition, not a hint, and a stale `running` label must never be enough to send one.
+   */
+  assertOwnedGateway() {
+    if (!this.ownsRunningChild()) {
+      throw new Error(`The local gateway is not running under this app (state: ${this.state}).`);
+    }
+    return true;
+  }
+
   setState(state, detail) {
     if (!STATES.includes(state)) throw new Error(`unknown supervisor state ${state}`);
     this.state = state;

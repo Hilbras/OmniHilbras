@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { CODEX, CodexAdapter, codexAuthorizeUrl, codexCredentialFromTokenResponse, exchangeCodexCode, refreshCodexCredential } from '../codex/dist/adapter/index.js';
+import { CODEX, CodexAdapter, codexAuthorizeUrl, codexCredentialFromTokenResponse, codexModelsUrl, exchangeCodexCode, refreshCodexCredential } from '../codex/dist/adapter/index.js';
 
 function transportFor(events = []) {
   const calls = [];
@@ -24,6 +24,53 @@ test('the client version gating the catalog is overridable, because too low hide
   const adapter = new CodexAdapter({ transport: streaming, clientVersion: '0.170.0' });
   for await (const _c of adapter.streamChat({ model: 'm', messages: [{ role: 'user', content: 'hi' }] }, { credential: { type: 'oauth', value: 'access' } })) { }
   assert.equal(streaming.calls.at(-1).headers['User-Agent'], 'codex_cli_rs/0.170.0');
+});
+
+test('the shipped Codex CLI identity is current and every emitted identity string carries it', async () => {
+  // `0.171.0` is the published npm latest at the time of this bump. **No live Codex turn was made**:
+  // the catalog gates entries by `minimal_client_version`, so a newer value should not hide models,
+  // but that is an inference from the gate's shape, not a measured backend acceptance.
+  const expected = '0.171.0';
+  const parts = (value) => value.split('.').map(Number);
+  const [actual, floor] = [parts(CODEX.cliVersion), parts(expected)];
+  assert.ok(
+    actual[0] > floor[0] || (actual[0] === floor[0] && (actual[1] > floor[1] || (actual[1] === floor[1] && actual[2] >= floor[2]))),
+    `CODEX.cliVersion ${CODEX.cliVersion} is older than the expected ${expected}`,
+  );
+
+  // One constant, and every identity string the adapter emits is derived from it — not a second
+  // literal in the catalog URL, the config object, or the User-Agent.
+  assert.equal(CODEX.modelsUrl, codexModelsUrl(CODEX.cliVersion));
+  assert.match(codexModelsUrl(), /client_version=0\.171\.0/);
+  assert.match(codexModelsUrl(CODEX.cliVersion), new RegExp(`client_version=${expected.replaceAll('.', '\\.')}`));
+
+  const frames = [
+    `data: ${JSON.stringify({ type: 'response.output_text.delta', delta: 'ok' })}\n\n`,
+    `data: ${JSON.stringify({ type: 'response.completed', response: { status: 'completed' } })}\n\n`,
+  ];
+  const calls = [];
+  const transport = {
+    async request(input) {
+      calls.push(input);
+      return { status: 200, headers: new Headers(), data: { data: [{ id: 'gpt-5.4' }] } };
+    },
+    async *stream(input) {
+      calls.push(input);
+      yield* frames;
+    },
+  };
+  const adapter = new CodexAdapter({ transport });
+  const credential = { type: 'oauth', value: 'access' };
+  await adapter.listModels({ credential });
+  for await (const _chunk of adapter.streamChat({ model: 'm', messages: [{ role: 'user', content: 'hi' }] }, { credential })) { /* drain */ }
+
+  assert.equal(calls.length, 2, 'both identity-bearing calls were actually made');
+  assert.equal(calls[0].url, CODEX.modelsUrl);
+  assert.match(calls[0].url, /client_version=0\.171\.0/, 'the catalog asks for models with the shipped identity');
+  for (const call of calls) {
+    assert.equal(call.headers.originator, CODEX.originator);
+    assert.equal(call.headers['User-Agent'], `codex_cli_rs/${CODEX.cliVersion}`, 'the same version reaches the inference wire');
+  }
 });
 
 test('the model catalog is discovered from the account, not invented locally', async () => {

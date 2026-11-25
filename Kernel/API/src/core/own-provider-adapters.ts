@@ -58,10 +58,14 @@ const withTransport = (options?: OwnAdapterOptions): OpenAICompatibleAdapterOpti
  * bogus key, so an authenticated-catalog Check would report green for any string. The card says API
  * key and the gateway sends it; proving it belongs to a person is the model request's job.
  */
-const openAiRouter = (id: string, name: string, baseUrl: string): OwnAdapterEntry => ({
+const openAiRouter = (id: string, name: string, baseUrl: string, paths?: { chatPath?: string }): OwnAdapterEntry => ({
   validation: 'none',
   create: (options) => new OpenAICompatibleAdapter({
     id, name, baseUrl: options?.endpoint ?? baseUrl,
+    // A router whose published endpoint already ends in the chat path sets it explicitly: the shared
+    // adapter's default of `/chat/completions` would otherwise be appended twice. No model path is
+    // set here because none was measured for such a router, so the card claims no model list.
+    ...(paths?.chatPath ? { chatPath: paths.chatPath } : {}),
   }, withTransport(options)),
 });
 
@@ -126,6 +130,12 @@ export const OWN_PROVIDER_ADAPTERS: Readonly<Record<string, OwnAdapterEntry>> = 
   // It is a separate product and a separate key from `glm` (z.ai) and from the `zcode` Start Plan account.
   // `validation: 'none'` is declared beside the factory: a public catalog cannot prove a pasted key.
   'glm-cn': openAiRouter('glm-cn', 'GLM (China)', 'https://open.bigmodel.cn/api/coding/paas/v4'),
+  // Cycle 7's one honest slice: `mimo-free` is a plain API-key router whose published endpoint is the
+  // chat path itself, so the shared adapter is told to use it verbatim instead of appending
+  // `/chat/completions`. No browser impersonation, CLI identity header, OAuth flow or fabricated key
+  // validation is ported. `validation: 'none'` is declared beside the factory: a public free catalog
+  // cannot prove a pasted key belongs to the caller. No model path was measured, so none is set.
+  'mimo-free': openAiRouter('mimo-free', 'MiMo Code Free', 'https://api.xiaomimimo.com', { chatPath: '/api/free-ai/openai/chat' }),
   // xAI has its own SDK package because its video-job surface is not the shared chat wire. `none` is
   // declared, not inherited: no authenticated credential check was measured, and xAI's catalog is
   // public enough that a bogus key would look valid. Its own id keeps its own vault entry.

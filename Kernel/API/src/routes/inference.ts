@@ -9,7 +9,7 @@ import { requestIdOf } from '../core/http.js';
 
 import { estimatePromptTokens, estimateTokens } from '../core/token-estimate.js';
 import { anthropicMessageId, anthropicMessagesToChat, anthropicUsage, chatToMessagesBody, translatorFor } from '../core/format-translation.js';
-import { ProviderError, canonicalizeUsage, isLoopbackHostname, isPrivateHostname, isProviderError, type ChatChunk, type ChatMessage, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type ImageRequest, type ImageResponse, type MessageContent, type Model, type ProviderId, type ToolCall, type ToolDefinition } from '../core/index.js';
+import { ProviderError, canonicalizeUsage, isLoopbackHostname, isPrivateHostname, isProviderError, type ChatChunk, type ChatChunkAnnotation, type ChatChunkCodeInterpreterCall, type ChatChunkFileSearchCall, type ChatMessage, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type ImageRequest, type ImageResponse, type MessageContent, type Model, type ProviderId, type ToolCall, type ToolDefinition } from '../core/index.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { RouteContext } from './route-context.js';
 import { toolCaps } from '@omnihilbras/tools';
@@ -355,7 +355,10 @@ export async function handleResponses(request: IncomingMessage, response: Server
     // A call the gateway refused to forward ends the client's tool loop as an ordinary `stop`. Say so in the
     // record instead of counting a truncated turn as a completed one.
     ...(blockedCalls > 0 ? { incomplete: true } : {}),
-    model: completion.model,
+    // The client's id, not the provider's echo. A capacity pool or a virtual target changes the wire
+    // model, and streaming and failure paths already label with `chatRequest.model`; a success that
+    // named `completion.model` made one request carry two different model names in its own ledger.
+    model: chatRequest.model,
     providerId: completion.providerId,
     connectionId: serving?.connectionId,
     outcome: 'success',
@@ -373,7 +376,7 @@ export async function handleResponses(request: IncomingMessage, response: Server
     content: text,
     ...(completion.message.toolCalls ? { toolCalls: completion.message.toolCalls } : {}),
     ...(completion.usage ? { usage: completion.usage } : {}),
-  });
+  }, { status: completion.finishReason === 'length' ? 'incomplete' : 'completed' });
   sendJson(response, 200, {
     ...responsesBody,
     gateway: {
@@ -602,7 +605,10 @@ export async function handleMessages(request: IncomingMessage, response: ServerR
     // A call the gateway refused to forward ends the client's tool loop as an ordinary `stop`. Say so in the
     // record instead of counting a truncated turn as a completed one.
     ...(blockedCalls > 0 ? { incomplete: true } : {}),
-    model: completion.model,
+    // The client's id, not the provider's echo. A capacity pool or a virtual target changes the wire
+    // model, and streaming and failure paths already label with `chatRequest.model`; a success that
+    // named `completion.model` made one request carry two different model names in its own ledger.
+    model: chatRequest.model,
     providerId: completion.providerId,
     connectionId: serving?.connectionId,
     outcome: 'success',
@@ -679,6 +685,27 @@ async function streamResponses(input: {
   const servingOf = () => outcome.attempts.find((attempt) => attempt.ok);
   const reasoningItemId = `rs_${id}`;
   const textItemId = `msg_${id}`;
+  const refusalItemId = `refusal_${id}`;
+
+  // Contract extension for the event families an upstream can actually supply. Every value below is
+  // read from a chunk; none of it is inferred from prose or invented when an upstream stays silent.
+  let refusalText = '';
+  let refusalOpen = false;
+  let refusalOutputIndex: number | undefined;
+  let annotationsSeen = 0;
+  const contentParts = new Map<number, { type: string; text: string; annotations: readonly ChatChunkAnnotation[] }>();
+  const fileSearchCalls = new Map<string, { call: ChatChunkFileSearchCall; outputIndex: number; announced: boolean; closed: boolean; lastStatus?: string }>();
+  const codeInterpreterCalls = new Map<string, { call: ChatChunkCodeInterpreterCall; outputIndex: number; announced: boolean; closed: boolean; lastStatus?: string; inProgressEmitted: boolean }>();
+  const usedExtraIndices = new Set<number>();
+  /** Tool calls use the upstream's own `delta.index`; extras take the next index that is not taken yet. */
+  const nextExtraOutputIndex = () => {
+    let candidate = 1000;
+    while (usedExtraIndices.has(candidate)) candidate += 1;
+    usedExtraIndices.add(candidate);
+    return candidate;
+  };
+  /** The message/reasoning item owns index 0; tools start after it. */
+  const toolOutputIndex = (upstreamIndex: number) => upstreamIndex + 1;
   const write = (event: string, payload: Record<string, unknown>) => writeStreamData(response, `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`, signal);
   const initial = { id, object: 'response', created_at: Math.floor(streamStartedAt / 1000), model, status: 'in_progress', output: [] };
   // Open the stream before the first provider byte: a Responses client waits for `created` before it
@@ -698,6 +725,29 @@ async function streamResponses(input: {
     if (!textOpen) return;
     textOpen = false;
     await write('response.output_text.done', { type: 'response.output_text.done', output_index: 0, item_id: textItemId, text });
+  };
+
+  /** An upstream annotation is forwarded, not rewritten: a citation is a claim about a source. */
+  const annotationPayload = (annotation: ChatChunkAnnotation) => ({
+    ...(annotation.extra ?? {}),
+    type: annotation.type,
+    ...(annotation.url !== undefined ? { url: annotation.url } : {}),
+    ...(annotation.title !== undefined ? { title: annotation.title } : {}),
+    ...(annotation.snippet !== undefined ? { snippet: annotation.snippet } : {}),
+    ...(annotation.startIndex !== undefined ? { start_index: annotation.startIndex } : {}),
+    ...(annotation.endIndex !== undefined ? { end_index: annotation.endIndex } : {}),
+  });
+  const emitAnnotation = async (annotation: ChatChunkAnnotation) => {
+    const annotationIndex = annotationsSeen++;
+    await write('response.output_text.annotation.added', {
+      type: 'response.output_text.annotation.added',
+      response_id: id,
+      item_id: textItemId,
+      output_index: 0,
+      content_index: 0,
+      annotation_index: annotationIndex,
+      annotation: annotationPayload(annotation),
+    });
   };
 
   try {
@@ -730,13 +780,105 @@ async function streamResponses(input: {
         if (delta.function?.name) call.name = delta.function.name;
         if (!call.announced) {
           call.announced = true;
-          await writeStreamData(response, `event: response.output_item.added\ndata: ${JSON.stringify({ type: 'response.output_item.added', output_index: delta.index, item: { type: 'function_call', id: `fc_${id}_${delta.index}`, call_id: call.id, name: call.name, arguments: '', status: 'in_progress' } })}\n\n`, signal);
+          await writeStreamData(response, `event: response.output_item.added\ndata: ${JSON.stringify({ type: 'response.output_item.added', output_index: toolOutputIndex(delta.index), item: { type: 'function_call', id: `fc_${id}_${toolOutputIndex(delta.index)}`, call_id: call.id, name: call.name, arguments: '', status: 'in_progress' } })}\n\n`, signal);
         }
         if (delta.function?.arguments) {
           call.arguments += delta.function.arguments;
-          await writeStreamData(response, `event: response.function_call_arguments.delta\ndata: ${JSON.stringify({ type: 'response.function_call_arguments.delta', output_index: delta.index, delta: delta.function.arguments })}\n\n`, signal);
+          await writeStreamData(response, `event: response.function_call_arguments.delta\ndata: ${JSON.stringify({ type: 'response.function_call_arguments.delta', output_index: toolOutputIndex(delta.index), delta: delta.function.arguments })}\n\n`, signal);
         }
         toolCalls.set(delta.index, call);
+      }
+
+      // The rest of the union is upstream-only. A chunk that carries none of these fields produces
+      // exactly the events it always did; nothing here is derived from text that merely looks like a
+      // citation, a refusal or a tool result.
+      if (chunk.delta.refusal) {
+        refusalText += chunk.delta.refusal;
+        if (!refusalOpen) {
+          refusalOpen = true;
+          refusalOutputIndex = nextExtraOutputIndex();
+          await write('response.output_item.added', { type: 'response.output_item.added', output_index: refusalOutputIndex, item: { type: 'message', id: refusalItemId, status: 'in_progress', content: [] } });
+        }
+        await write('response.refusal.delta', { type: 'response.refusal.delta', response_id: id, item_id: refusalItemId, output_index: refusalOutputIndex, content_index: 0, delta: chunk.delta.refusal });
+      }
+      for (const part of chunk.delta.contentParts ?? []) {
+        const partIndex = part.index ?? 0;
+        let tracked = contentParts.get(partIndex);
+        if (!tracked) {
+          tracked = { type: part.type, text: part.text ?? '', annotations: part.annotations ?? [] };
+          contentParts.set(partIndex, tracked);
+          await write('response.content_part.added', { type: 'response.content_part.added', response_id: id, item_id: textItemId, output_index: 0, content_index: partIndex, part: { type: part.type, text: part.text ?? '' } });
+        } else if (part.text) {
+          tracked.text += part.text;
+        }
+        for (const annotation of part.annotations ?? []) await emitAnnotation(annotation);
+      }
+      for (const annotation of chunk.delta.annotations ?? []) await emitAnnotation(annotation);
+
+      const fsCall = chunk.delta.fileSearchCall;
+      if (fsCall) {
+        let entry = fileSearchCalls.get(fsCall.id);
+        if (!entry) {
+          entry = { call: fsCall, outputIndex: nextExtraOutputIndex(), announced: false, closed: false };
+          fileSearchCalls.set(fsCall.id, entry);
+        } else {
+          entry.call = { ...entry.call, ...fsCall };
+        }
+        if (!entry.announced) {
+          entry.announced = true;
+          const item = { type: 'file_search_call', id: fsCall.id, status: entry.call.status ?? 'in_progress', queries: [...(entry.call.queries ?? [])] };
+          await write('response.output_item.added', { type: 'response.output_item.added', output_index: entry.outputIndex, item });
+          await write('response.file_search_call.added', { type: 'response.file_search_call.added', output_index: entry.outputIndex, item });
+        }
+        const status = entry.call.status;
+        // One event per upstream status transition: an upstream that repeats a status in several
+        // deltas has not started the call twice, so the gateway must not emit it twice either.
+        const statusChanged = status !== undefined && status !== entry.lastStatus;
+        if (statusChanged) entry.lastStatus = status;
+        if (statusChanged && status === 'in_progress') await write('response.file_search_call.in_progress', { type: 'response.file_search_call.in_progress', output_index: entry.outputIndex, item_id: fsCall.id });
+        if (statusChanged && status === 'searching') {
+          await write('response.file_search_call.searching', { type: 'response.file_search_call.searching', output_index: entry.outputIndex, item_id: fsCall.id, ...(entry.call.queries ? { queries: [...entry.call.queries] } : {}) });
+        }
+        if (statusChanged && (status === 'completed' || status === 'failed')) {
+          const result = { ...(entry.call.results ? { results: entry.call.results } : {}) };
+          await write(`response.file_search_call.${status}`, { type: `response.file_search_call.${status}`, output_index: entry.outputIndex, item_id: fsCall.id, ...result });
+          await write('response.output_item.done', { type: 'response.output_item.done', output_index: entry.outputIndex, item: { type: 'file_search_call', id: fsCall.id, status, ...result } });
+          entry.closed = true;
+        }
+      }
+
+      const ciCall = chunk.delta.codeInterpreterCall;
+      if (ciCall) {
+        let entry = codeInterpreterCalls.get(ciCall.id);
+        if (!entry) {
+          entry = { call: ciCall, outputIndex: nextExtraOutputIndex(), announced: false, closed: false, inProgressEmitted: false };
+          codeInterpreterCalls.set(ciCall.id, entry);
+        } else {
+          entry.call = { ...entry.call, ...ciCall };
+        }
+        if (!entry.announced) {
+          entry.announced = true;
+          const item = { type: 'code_interpreter_call', id: ciCall.id, status: entry.call.status ?? 'in_progress', code: '' };
+          await write('response.output_item.added', { type: 'response.output_item.added', output_index: entry.outputIndex, item });
+          await write('response.code_interpreter_call.added', { type: 'response.code_interpreter_call.added', output_index: entry.outputIndex, item });
+        }
+        const status = entry.call.status;
+        const statusChanged = status !== undefined && status !== entry.lastStatus;
+        if (statusChanged) entry.lastStatus = status;
+        // `in_progress` and `running` are the same start announcement at two upstreams; emit it once.
+        if (!entry.inProgressEmitted && (status === 'in_progress' || status === 'running')) {
+          entry.inProgressEmitted = true;
+          await write('response.code_interpreter_call.in_progress', { type: 'response.code_interpreter_call.in_progress', output_index: entry.outputIndex, item_id: ciCall.id });
+        }
+        if (ciCall.codeDelta) await write('response.code_interpreter_call.code.delta', { type: 'response.code_interpreter_call.code.delta', output_index: entry.outputIndex, item_id: ciCall.id, delta: ciCall.codeDelta });
+        if (ciCall.code) await write('response.code_interpreter_call.code.done', { type: 'response.code_interpreter_call.code.done', output_index: entry.outputIndex, item_id: ciCall.id, code: ciCall.code });
+        if (ciCall.outputDelta) await write('response.code_interpreter_call.output.delta', { type: 'response.code_interpreter_call.output.delta', output_index: entry.outputIndex, item_id: ciCall.id, delta: ciCall.outputDelta });
+        if (ciCall.output) await write('response.code_interpreter_call.output.done', { type: 'response.code_interpreter_call.output.done', output_index: entry.outputIndex, item_id: ciCall.id, output: ciCall.output });
+        if (statusChanged && (status === 'completed' || status === 'incomplete' || status === 'failed')) {
+          await write(`response.code_interpreter_call.${status}`, { type: `response.code_interpreter_call.${status}`, output_index: entry.outputIndex, item_id: ciCall.id });
+          await write('response.output_item.done', { type: 'response.output_item.done', output_index: entry.outputIndex, item: { type: 'code_interpreter_call', id: ciCall.id, status } });
+          entry.closed = true;
+        }
       }
     }
     await closeReasoning();
@@ -754,9 +896,21 @@ async function streamResponses(input: {
       if (!response.destroyed && !response.writableEnded) response.end();
       return;
     }
-    // A stream that produced no text, reasoning or tool call and no finish reason ended without an
-    // answer. Calling that `completed` is the fabricated success this contract exists to refuse.
-    if (providerFinish === undefined && !sawText && !reasoningText && toolCalls.size === 0) {
+    // Close only what the upstream opened. A tool call whose upstream never sent a terminal status
+    // stays open rather than being declared complete here: the gateway does not invent endings.
+    if (refusalOpen) {
+      refusalOpen = false;
+      await write('response.refusal.done', { type: 'response.refusal.done', response_id: id, item_id: refusalItemId, output_index: refusalOutputIndex, content_index: 0, refusal: refusalText });
+      await write('response.output_item.done', { type: 'response.output_item.done', output_index: refusalOutputIndex, item: { type: 'message', id: refusalItemId, status: 'completed', content: [{ type: 'refusal', refusal: refusalText }] } });
+    }
+    for (const [partIndex, part] of [...contentParts.entries()].sort((left, right) => left[0] - right[0])) {
+      await write('response.content_part.done', { type: 'response.content_part.done', response_id: id, item_id: textItemId, output_index: 0, content_index: partIndex, part: { type: part.type, text: part.text } });
+    }
+    // A stream that produced none of the supported output kinds and no finish reason ended without
+    // an answer. Calling that `completed` is the fabricated success this contract exists to refuse.
+    if (providerFinish === undefined && !sawText && !reasoningText && toolCalls.size === 0
+      && !refusalText && contentParts.size === 0 && annotationsSeen === 0
+      && fileSearchCalls.size === 0 && codeInterpreterCalls.size === 0) {
       await write('response.failed', { type: 'response.failed', response: { ...initial, status: 'failed', error: { type: 'failed', code: 'STREAM_INCOMPLETE', message: 'The provider stream ended without any output.' } } });
       recordUsage(service, {
         model,
@@ -775,11 +929,32 @@ async function streamResponses(input: {
     const completedCalls: ToolCall[] = [...toolCalls.values()].map((call) => ({ id: call.id, type: 'function', function: { name: call.name, arguments: call.arguments || '{}' } }));
     // A strict Responses client waits for `output_item.done` before it runs a function. Announcing an item and
     // ending the stream without ever completing it made the agent abandon the tool round and answer prose.
-    for (const [index, call] of [...toolCalls.entries()]) {
-      const itemId = `fc_${id}_${index}`;
-      await writeStreamData(response, `event: response.function_call_arguments.done\ndata: ${JSON.stringify({ type: 'response.function_call_arguments.done', output_index: index, item_id: itemId, arguments: call.arguments || '{}' })}\n\n`, signal);
-      await writeStreamData(response, `event: response.output_item.done\ndata: ${JSON.stringify({ type: 'response.output_item.done', output_index: index, item: { type: 'function_call', id: itemId, call_id: call.id, name: call.name, arguments: call.arguments || '{}', status: 'completed' } })}\n\n`, signal);
+    const outputItems: Array<{ index: number; item: Record<string, unknown> }> = [];
+    if (textOpen || text || contentParts.size > 0) {
+      const content = contentParts.size > 0
+        ? [...contentParts.entries()].sort((left, right) => left[0] - right[0]).map(([, part]) => ({ type: part.type, text: part.text, annotations: part.annotations }))
+        : [{ type: 'output_text', text, annotations: [] }];
+      outputItems.push({ index: 0, item: { type: 'message', id: textItemId, role: 'assistant', status: 'completed', content } });
     }
+    if (refusalText) {
+      outputItems.push({ index: refusalOutputIndex ?? nextExtraOutputIndex(), item: { type: 'message', id: refusalItemId, status: 'completed', content: [{ type: 'refusal', refusal: refusalText }] } });
+    }
+    for (const [index, call] of [...toolCalls.entries()]) {
+      const outputIndex = toolOutputIndex(index);
+      const itemId = `fc_${id}_${outputIndex}`;
+      const item = { type: 'function_call', id: itemId, call_id: call.id, name: call.name, arguments: call.arguments || '{}', status: 'completed' };
+      outputItems.push({ index: outputIndex, item });
+      await writeStreamData(response, `event: response.function_call_arguments.done\ndata: ${JSON.stringify({ type: 'response.function_call_arguments.done', output_index: outputIndex, item_id: itemId, arguments: call.arguments || '{}' })}\n\n`, signal);
+      await writeStreamData(response, `event: response.output_item.done\ndata: ${JSON.stringify({ type: 'response.output_item.done', output_index: outputIndex, item })}\n\n`, signal);
+    }
+    for (const entry of fileSearchCalls.values()) {
+      outputItems.push({ index: entry.outputIndex, item: { type: 'file_search_call', id: entry.call.id, status: entry.call.status ?? 'completed', ...(entry.call.queries ? { queries: [...entry.call.queries] } : {}), ...(entry.call.results ? { results: entry.call.results } : {}) } });
+    }
+    for (const entry of codeInterpreterCalls.values()) {
+      outputItems.push({ index: entry.outputIndex, item: { type: 'code_interpreter_call', id: entry.call.id, status: entry.call.status ?? 'completed', ...(entry.call.code ? { code: entry.call.code } : {}), ...(entry.call.output ? { outputs: [{ type: 'logs', logs: entry.call.output }] } : {}) } });
+    }
+    const blockedCalls = service.blockedCallsFor(scope.id);
+    const incomplete = providerFinish === 'length' || providerFinish === undefined || blockedCalls > 0;
     const completed = chatToResponsesBody({
       id,
       model,
@@ -787,9 +962,11 @@ async function streamResponses(input: {
       content: text,
       ...(completedCalls.length ? { toolCalls: completedCalls } : {}),
       ...(usage ? { usage: { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, totalTokens: usage.totalTokens } } : {}),
+    }, {
+      status: incomplete ? 'incomplete' : 'completed',
+      output: outputItems.sort((left, right) => left.index - right.index).map((entry) => entry.item),
     });
-    const blockedCalls = service.blockedCallsFor(scope.id);
-    await write('response.completed', { type: 'response.completed', response: { ...completed, status: providerFinish === 'length' || providerFinish === undefined || blockedCalls > 0 ? 'incomplete' : completed.status, gateway: { requestId: scope.id, ...toolSupportNote(chatRequest.tools, servingOf()?.providerId), ...(blockedCalls > 0 ? { tools: 'call-dropped' } : {}) } } });
+    await write(incomplete ? 'response.incomplete' : 'response.completed', { type: incomplete ? 'response.incomplete' : 'response.completed', response: { ...completed, status: incomplete ? 'incomplete' : completed.status, gateway: { requestId: scope.id, ...toolSupportNote(chatRequest.tools, servingOf()?.providerId), ...(blockedCalls > 0 ? { tools: 'call-dropped' } : {}) } } });
     recordUsage(service, {
       model,
       providerId: servingOf()?.providerId,
@@ -1017,7 +1194,9 @@ async function handleChatRequest(input: {
     }
     const serving = attempts.find((attempt) => attempt.ok);
     recordUsage(service, {
-      model: completion.model,
+      // The requested id, matching the streaming and failure paths on this same surface. A capacity
+      // pool changes only the wire model; the ledger keeps the name the client used.
+      model: chatRequest.model,
       providerId: completion.providerId,
       connectionId: serving?.connectionId,
       outcome: 'success',
@@ -1288,22 +1467,24 @@ function responsesToolsToChat(value: unknown): unknown[] | undefined {
 }
 
 /** The Responses shape a client reads: an output list, plus `output_text` for the common single-text case. */
-export function chatToResponsesBody(chat: { id: string; model: string; createdAt: string; content: string; toolCalls?: readonly ToolCall[]; usage?: { inputTokens?: number; outputTokens?: number; totalTokens?: number } }) {
-  const output: Array<Record<string, unknown>> = [];
-  // An empty message is meaningful only when the turn produced no tool call; otherwise it is noise the
-  // client would render as an empty assistant bubble beside the call it actually needs.
-  if (chat.content || !chat.toolCalls?.length) {
-    output.push({ type: 'message', id: `msg_${chat.id}`, role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: chat.content, annotations: [] }] });
-  }
-  for (const [index, call] of (chat.toolCalls ?? []).entries()) {
-    output.push({ type: 'function_call', id: `fc_${chat.id}_${index}`, call_id: call.id, name: call.function.name, arguments: call.function.arguments, status: 'completed' });
+export function chatToResponsesBody(chat: { id: string; model: string; createdAt: string; content: string; toolCalls?: readonly ToolCall[]; usage?: { inputTokens?: number; outputTokens?: number; totalTokens?: number } }, options: { status?: string; output?: readonly Record<string, unknown>[] } = {}) {
+  const output: Array<Record<string, unknown>> = [...(options.output ?? [])];
+  if (output.length === 0) {
+    // An empty message is meaningful only when the turn produced no tool call; otherwise it is noise the
+    // client would render as an empty assistant bubble beside the call it actually needs.
+    if (chat.content || !chat.toolCalls?.length) {
+      output.push({ type: 'message', id: `msg_${chat.id}`, role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: chat.content, annotations: [] }] });
+    }
+    for (const [index, call] of (chat.toolCalls ?? []).entries()) {
+      output.push({ type: 'function_call', id: `fc_${chat.id}_${index + 1}`, call_id: call.id, name: call.function.name, arguments: call.function.arguments, status: 'completed' });
+    }
   }
   return {
     id: chat.id,
     object: 'response',
     created_at: Math.floor(Date.parse(chat.createdAt) / 1000),
     model: chat.model,
-    status: 'completed',
+    status: options.status ?? 'completed',
     output,
     output_text: chat.content,
     usage: {

@@ -3,7 +3,139 @@ import { quotaTierOrder } from './connections.js';
 import type { ConnectionRecord, ModelCooldown, ResilienceSettings } from './connections.js';
 
 /** Why a candidate was skipped, so the gateway can explain the decision. */
-export type RouteSkipReason = 'disabled' | 'no-credential' | 'unhealthy' | 'rate-limited' | 'model-cooling-down' | 'no-models';
+export type RouteSkipReason = 'disabled' | 'no-credential' | 'unhealthy' | 'rate-limited' | 'model-cooling-down' | 'no-models' | 'no-capability';
+
+/**
+ * Hard input capabilities a request can require and a catalog can state.
+ *
+ * Narrower than 9router's capability list on purpose: these four are the ones whose absence makes a
+ * turn impossible rather than merely worse, and each has a modality a provider can declare. The
+ * operator configures a pool of capable models per capability; there is no built-in fallback model —
+ * a pool with no explicit models stays empty, so the adapter can never silently substitute a vendor
+ * somebody else chose.
+ */
+export const CAPACITY_CAPABILITIES = ['vision', 'pdf', 'audioInput', 'videoInput'] as const;
+export type CapacityCapability = typeof CAPACITY_CAPABILITIES[number];
+
+export type CapacityPool = {
+  /** An absent `enabled` means on, so adding models is enough to arm a pool. */
+  enabled?: boolean;
+  /** Rotate the pool once per request instead of always starting at its first model. */
+  roundRobin?: boolean;
+  /** Explicit `provider/model` ids. Namespacing is what identifies the account that serves one. */
+  models: readonly string[];
+};
+
+/** Per-capability configuration. An absent capability is a disabled pool, never a guessed default. */
+export type CapacityAdapterConfig = Partial<Record<CapacityCapability, CapacityPool>>;
+
+const modalityToCapability: Readonly<Record<string, CapacityCapability>> = {
+  image: 'vision',
+  pdf: 'pdf',
+  audio: 'audioInput',
+  video: 'videoInput',
+};
+
+const NO_CAPABILITIES: ReadonlySet<CapacityCapability> = new Set();
+
+/** The capabilities a provider-stated input modality is evidence of. Only a stated modality counts. */
+export function capabilitiesFromModalities(modalities: readonly string[] | undefined): ReadonlySet<CapacityCapability> {
+  if (!modalities || modalities.length === 0) return NO_CAPABILITIES;
+  const found = new Set<CapacityCapability>();
+  for (const value of modalities) {
+    const capability = modalityToCapability[String(value).trim().toLowerCase()];
+    if (capability) found.add(capability);
+  }
+  return found;
+}
+
+/**
+ * What one connection's catalog says a model can take in.
+ *
+ * A bare id, a namespaced id and their spelling-normalized forms are all tried, for the same reason
+ * `narrowedToolCaps` tries them: the catalog keys are the ids the provider published, while a request
+ * may arrive with a prefix or a spelling the catalog did not use. Absent modalities stay absent —
+ * "the provider did not say" is not "the model cannot".
+ */
+export function modelCapacityCapabilities(
+  connection: Pick<ConnectionRecord, 'providerId' | 'modelMeta'>,
+  modelId: string,
+): ReadonlySet<CapacityCapability> {
+  const meta = connection.modelMeta;
+  if (!meta) return NO_CAPABILITIES;
+  const bare = bareModelFor(modelId, connection.providerId);
+  for (const key of [modelId, bare, lookupModelId(modelId), lookupModelId(bare)]) {
+    const stated = meta[key]?.i;
+    if (stated) return capabilitiesFromModalities(stated);
+  }
+  return NO_CAPABILITIES;
+}
+
+/**
+ * Capabilities the request itself requires.
+ *
+ * Content is the primary source: an image part is a hard vision requirement, and an explicit audio,
+ * PDF or video part is the corresponding one. A caller can also declare requirements in
+ * `providerOptions.requiredCapabilities` — the escape hatch for transports whose parts this gateway
+ * does not model (a PDF sent by URL in a text part, for example). Unknown names are dropped rather
+ * than treated as requirements nothing could ever satisfy.
+ */
+export function requiredCapabilitiesFromRequest(request: {
+  messages: readonly { content?: unknown }[];
+  providerOptions?: Record<string, unknown>;
+}): CapacityCapability[] {
+  const found = new Set<CapacityCapability>();
+  const consider = (value: unknown) => {
+    if (typeof value !== 'string') return;
+    const text = value.toLowerCase();
+    if (text.includes('image')) found.add('vision');
+    if (text.includes('pdf')) found.add('pdf');
+    if (text.includes('audio')) found.add('audioInput');
+    if (text.includes('video')) found.add('videoInput');
+  };
+  for (const message of request.messages ?? []) {
+    const content = message?.content;
+    if (typeof content === 'string') continue;
+    if (!Array.isArray(content)) continue;
+    for (const part of content) {
+      if (!part || typeof part !== 'object') continue;
+      const record = part as Record<string, unknown>;
+      consider(typeof record.type === 'string' ? record.type : undefined);
+      consider(record.mimeType);
+      // `image_url` carries its type as the discriminant; the URL itself is not evidence of a modality.
+      if (record.type === 'image_url') found.add('vision');
+    }
+  }
+  const declared = request.providerOptions?.requiredCapabilities;
+  if (Array.isArray(declared)) {
+    for (const value of declared) {
+      if (typeof value === 'string' && (CAPACITY_CAPABILITIES as readonly string[]).includes(value)) {
+        found.add(value as CapacityCapability);
+      }
+    }
+  }
+  return CAPACITY_CAPABILITIES.filter((capability) => found.has(capability));
+}
+
+/** The models of one enabled pool, in configuration order. No default model exists to fall back to. */
+export function enabledCapacityPoolModels(config: CapacityAdapterConfig | undefined, capability: CapacityCapability): string[] {
+  const pool = config?.[capability];
+  if (!pool || pool.enabled === false) return [];
+  return pool.models
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    .map((value) => value.trim());
+}
+
+/** Whether every required capability is stated by the model on this connection. */
+export function modelSatisfiesCapabilities(
+  connection: Pick<ConnectionRecord, 'providerId' | 'modelMeta'>,
+  modelId: string,
+  required: readonly CapacityCapability[],
+): boolean {
+  if (required.length === 0) return true;
+  const available = modelCapacityCapabilities(connection, modelId);
+  return required.every((capability) => available.has(capability));
+}
 
 export type RouteCandidate = {
   providerId: string;

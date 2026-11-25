@@ -10,20 +10,33 @@
  * ## Ports are cleared, but not blindly
  *
  * The reference launcher kills whatever holds its port. That is convenient and dangerous: a typo in
- * `--port 5432` must not kill PostgreSQL. So the default is to kill a listener whose command line looks
- * like this project's runtime (`node`, `vite`, `pnpm`, `omnihilbras`, `next-server`), and to stop with
- * the PID and command for anything else. `--force` is the explicit override.
+ * `--port 5432` must not kill PostgreSQL. So a listener is only cleared when its command line names **this
+ * install's** `gateway.mjs` or `static.mjs` — never because it merely looks like a Node/Vite/pnpm process,
+ * which matched every Node app on the machine. Anything else is reported, and `--force` is the explicit
+ * override.
  */
 
 import { execFileSync, spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readBundledRecord, writeBundledRecord, clearBundledRecord, bundledStateDir, stopBundledServers, waitPidGone } from '../lib/bundled-state.mjs';
+import {
+  bundledRuntimePaths,
+  bundledStateDir,
+  clearBundledRecordIf,
+  commandLineForPid,
+  isPidAlive,
+  readBundledRecord,
+  terminateBundledServers,
+  terminatePid,
+  waitPidGone,
+  writeBundledRecord,
+} from '../lib/bundled-state.mjs';
 import { selectMenu, statusHeader } from '../lib/menu.mjs';
 import { restartDecision, MAX_RESTARTS } from '../lib/restart-policy.mjs';
-import { checkForUpdate, updateCommand } from '../lib/update.mjs';
+import { checkForUpdate } from '../lib/update.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PKG = JSON.parse(fs.readFileSync(path.join(HERE, '..', 'package.json'), 'utf8'));
@@ -152,15 +165,8 @@ function run(command, args) {
   }
 }
 
-/** The command line of a PID, for a message and for the "is this ours" decision. */
-function commandLine(pid) {
-  if (process.platform === 'linux') {
-    try {
-      return fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0').join(' ').trim();
-    } catch { /* fall through to ps */ }
-  }
-  return run('ps', ['-p', String(pid), '-o', 'command=']) ?? '';
-}
+/** The exact files this install staged, for the ownership decision. */
+const RUNTIME = bundledRuntimePaths(path.join(HERE, 'main.mjs'));
 
 /** The process listening on a TCP port, when the platform tools can name it. */
 function listenerOn(port) {
@@ -174,37 +180,16 @@ function listenerOn(port) {
   }
   if (process.platform === 'darwin') {
     const pid = Number(run('lsof', ['-ti', `tcp:${port}`])?.split('\n')[0]);
-    return Number.isSafeInteger(pid) && pid > 0 ? { pid, command: commandLine(pid) } : undefined;
+    return Number.isSafeInteger(pid) && pid > 0 ? { pid, command: commandLineForPid(pid) } : undefined;
   }
   const output = run('ss', ['-ltnp', `sport = :${port}`]);
   const match = output?.match(/pid=(\d+)/);
   if (match) {
     const pid = Number(match[1]);
-    return Number.isSafeInteger(pid) && pid > 0 ? { pid, command: commandLine(pid) } : undefined;
+    return Number.isSafeInteger(pid) && pid > 0 ? { pid, command: commandLineForPid(pid) } : undefined;
   }
   const pid = Number(run('lsof', ['-ti', `tcp:${port}`])?.split('\n')[0]);
-  return Number.isSafeInteger(pid) && pid > 0 ? { pid, command: commandLine(pid) } : undefined;
-}
-
-function signalPid(pid, signal) {
-  if (process.platform === 'win32') {
-    run('taskkill', ['/F', '/T', '/PID', String(pid)]);
-    return;
-  }
-  try { process.kill(pid, signal); } catch { /* already gone */ }
-}
-
-function alive(pid) {
-  try { process.kill(pid, 0); return true; } catch { return false; }
-}
-
-async function waitGone(pid, timeoutMs = 1500) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (!alive(pid)) return true;
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  return !alive(pid);
+  return Number.isSafeInteger(pid) && pid > 0 ? { pid, command: commandLineForPid(pid) } : undefined;
 }
 
 function readPidFile() {
@@ -216,46 +201,59 @@ function writePidFile(record) {
 }
 
 function clearPidFile() {
-  clearBundledRecord();
+  clearBundledRecordIf(currentRunId);
 }
 
 /**
  * Stops the two processes this launcher started last time, and nothing else.
  *
  * A recorded pid is evidence of a past run, never authority to signal: it can outlive its process and be
- * recycled. This now uses the same ownership-verified helper as the `stop`/`restart` verbs — a live pid whose
- * command line is not one of this launcher's servers is reported and left alone, and the record is only
- * cleared when nothing was refused. (Security audit, 2026-11-20.)
+ * recycled. The shared helper verifies each pid's command line against the exact server files this install
+ * staged, stops the **supervisor first** so a deliberate stop is not read as a crash and respawned, and
+ * revalidates again before the uncatchable signal. A live pid that is not ours is reported and left alone,
+ * and the record is only cleared when nothing was refused and nothing survived. (Security audit, 2026-11-20.)
  */
 async function stopRecorded() {
   const record = readPidFile();
   if (!record) return;
-  const { stopped, refused } = stopBundledServers(record);
-  await Promise.all(stopped.map((pid) => waitPidGone(pid)));
+  const { stopped, refused, survivors } = await terminateBundledServers(record, {
+    serverPaths: RUNTIME.serverPaths,
+    supervisorPaths: RUNTIME.supervisorPaths,
+    // When this process *is* the supervisor in the record (the menu's own restart), stopping it here would
+    // signal the process doing the stopping; the children are what this call is for.
+    skipPids: [process.pid],
+  });
+  void stopped;
   for (const entry of refused) {
     console.log(paint(DIM, `Left pid ${entry.pid} alone: not one of this launcher's servers.`));
   }
-  if (refused.length === 0) clearPidFile();
+  if (refused.length === 0 && survivors.length === 0) clearPidFile();
 }
 
 /**
  * Clears one port.
  *
- * A listener that looks like this project's runtime is killed without a prompt — that is the common
- * case of a previous `pnpm dev`, Vite, or gateway. Anything else is reported, and `--force` is the
- * deliberate override. A port we cannot attribute is never killed.
+ * Only a listener whose command line names this install's `gateway.mjs` or `static.mjs` is stopped without a
+ * prompt. A generic runtime name is not evidence — `node`, `vite` and `pnpm` matched every Node app on the
+ * machine, so a typo in `--port` could kill an unrelated program. Anything else is reported, and `--force` is
+ * the deliberate override. A port we cannot attribute is never killed.
  */
 async function clearPort(port, { force }) {
   const listener = listenerOn(port);
   if (!listener) return { ok: true };
-  const ours = /node|vite|pnpm|omnihilbras|next-server/i.test(listener.command);
-  if (!ours && !force) {
+  const outcome = await terminatePid(listener.pid, {
+    serverPaths: RUNTIME.serverPaths,
+    force,
+    waitMs: 1500,
+    graceMs: 1000,
+  });
+  if (outcome.refused) {
     return { ok: false, port, pid: listener.pid, command: listener.command };
   }
-  console.log(`${paint(DIM, `Stopping pid ${listener.pid} on port ${port}${listener.command ? `: ${listener.command}` : ''}`)}`);
-  signalPid(listener.pid, 'SIGTERM');
-  if (!(await waitGone(listener.pid))) signalPid(listener.pid, 'SIGKILL');
-  await waitGone(listener.pid, 1000);
+  if (outcome.alive) {
+    return { ok: false, port, pid: listener.pid, command: listener.command, alive: true };
+  }
+  console.log(`${paint(DIM, `Stopped pid ${listener.pid} on port ${port}${listener.command ? `: ${listener.command}` : ''}`)}`);
   return { ok: true, pid: listener.pid };
 }
 

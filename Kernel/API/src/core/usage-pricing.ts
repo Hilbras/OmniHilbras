@@ -36,6 +36,8 @@ export type PricedUsage = {
    * connections to an API-key provider carry no price at all, because the provider does not publish one.
    */
   unpricedRequests: number;
+  /** Records whose total is a floor because at least one measured dimension had no quoted rate. */
+  partiallyPricedRequests: number;
   /** True when nothing could be priced, so `costUsd: 0` means "unknown", not "free". */
   unpricedEntirely: boolean;
 };
@@ -77,13 +79,34 @@ export function requestCostUsd(usage: PriceableUsage): number | undefined {
     parts.push((tokens / tokensPerMillion) * ratePer1M);
   };
 
-  add(usage.inputTokens, pricing.inputPer1M);
+  /**
+   * `inputTokens` is canonical total input, including cache reads and writes. Charging it in full and
+   * then charging the cache dimensions again was a double charge for exactly the requests that used
+   * a cache. Bill the uncached remainder at the input rate, then the cache subsets at their own rates.
+   */
+  const cacheRead = usage.cacheReadTokens ?? 0;
+  const cacheWrite = usage.cacheWriteTokens ?? 0;
+  const validInput = usage.inputTokens !== undefined && Number.isFinite(usage.inputTokens) && usage.inputTokens >= 0;
+  const uncachedInput = validInput
+    ? Math.max(0, usage.inputTokens! - cacheRead - cacheWrite)
+    : undefined;
+  add(uncachedInput, pricing.inputPer1M);
   add(usage.outputTokens, pricing.outputPer1M);
   add(usage.cacheReadTokens, pricing.cacheReadPer1M);
   add(usage.cacheWriteTokens, pricing.cacheWritePer1M);
 
   // A quote with rates but no matching tokens is not zero cost — it is a request we could not measure.
   return parts.length > 0 ? roundUsd(parts.reduce((total, part) => total + part, 0)) : undefined;
+}
+
+/** Whether a cost is a floor because a measured dimension had no published rate. */
+function isPartial(usage: PriceableUsage): boolean {
+  const { pricing } = usage;
+  if (!pricing) return false;
+  return (usage.inputTokens !== undefined && pricing.inputPer1M === undefined)
+    || (usage.outputTokens !== undefined && pricing.outputPer1M === undefined)
+    || (usage.cacheReadTokens !== undefined && pricing.cacheReadPer1M === undefined)
+    || (usage.cacheWriteTokens !== undefined && pricing.cacheWritePer1M === undefined);
 }
 
 /**
@@ -96,6 +119,7 @@ export function priceUsage<T extends PriceableUsage>(records: readonly T[]): Pri
   let costUsd = 0;
   let pricedRequests = 0;
   let unpricedRequests = 0;
+  let partiallyPricedRequests = 0;
 
   for (const record of records) {
     const cost = requestCostUsd(record);
@@ -103,6 +127,7 @@ export function priceUsage<T extends PriceableUsage>(records: readonly T[]): Pri
     else {
       costUsd += cost;
       pricedRequests += 1;
+      if (isPartial(record)) partiallyPricedRequests += 1;
     }
   }
 
@@ -110,6 +135,7 @@ export function priceUsage<T extends PriceableUsage>(records: readonly T[]): Pri
     costUsd: roundUsd(costUsd),
     pricedRequests,
     unpricedRequests,
+    partiallyPricedRequests,
     // `records.length === 0` is not "nothing was priced" in the sense that matters: an empty page should say
     // so rather than implying a figure. Distinguishing it keeps a caller from rendering "$0.00" on day one.
     unpricedEntirely: records.length === 0 || pricedRequests === 0,
@@ -124,10 +150,13 @@ export function priceUsage<T extends PriceableUsage>(records: readonly T[]): Pri
  * shown is a caveat nobody reads.
  */
 export function pricingCaveat(priced: PricedUsage): string | null {
-  if (priced.unpricedRequests === 0) return null;
+  if (priced.unpricedRequests === 0 && priced.partiallyPricedRequests === 0) return null;
   if (priced.pricedRequests === 0) {
     const requests = `${priced.unpricedRequests} recorded request${priced.unpricedRequests === 1 ? '' : 's'}`;
     return `No cost shown: none of the ${requests} had a price from its provider.`;
   }
-  return `Cost covers ${priced.pricedRequests} of ${priced.pricedRequests + priced.unpricedRequests} requests; the rest had no published price.`;
+  const total = priced.pricedRequests + priced.unpricedRequests;
+  const base = `Cost covers ${priced.pricedRequests} of ${total} requests; the rest had no published price.`;
+  if (priced.partiallyPricedRequests === 0) return base;
+  return `${base} ${priced.partiallyPricedRequests} priced request${priced.partiallyPricedRequests === 1 ? ' is' : 's are'} a floor because a measured token dimension had no quoted rate.`;
 }

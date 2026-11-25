@@ -33,16 +33,34 @@ export async function handleMediaRoute(ctx: RouteContext): Promise<boolean> {
     try {
       const responseBody = await service.audioWithFailover(audioRequest, explicitProviderId, signal, scope);
       const serving = responseBody.attempts.find((attempt) => attempt.ok);
+      void service.usage?.record({
+        at: new Date().toISOString(),
+        model: audioRequest.model,
+        ...(serving?.providerId ? { providerId: serving.providerId } : {}),
+        ...(serving?.connectionId ? { connectionId: serving.connectionId } : {}),
+        outcome: 'success',
+        attempts: responseBody.attempts.length,
+        latencyMs: Date.now() - startedAt,
+        requestId: scope.id,
+      }).catch(() => undefined);
       response.statusCode = 200;
       response.setHeader('Content-Type', responseBody.response.contentType);
       response.setHeader('X-Request-Id', scope.id);
       response.end(Buffer.from(responseBody.response.audio));
     } catch (error) {
       const details = error instanceof ProviderError ? error.details : undefined;
-      const ledger: unknown[] =
-        typeof details === 'object' && details !== null && Array.isArray((details as { attempts?: unknown }).attempts)
-          ? ((details as { attempts: unknown[] }).attempts)
-          : [];
+      const ledger = typeof details === 'object' && details !== null && Array.isArray((details as { attempts?: unknown }).attempts)
+        ? ((details as { attempts: unknown[] }).attempts)
+        : [];
+      void service.usage?.record({
+        at: new Date().toISOString(),
+        model: audioRequest.model,
+        outcome: signal.aborted ? 'cancelled' : 'failure',
+        attempts: ledger.length,
+        latencyMs: Date.now() - startedAt,
+        ...(error instanceof ProviderError ? { errorCode: error.code } : { errorCode: 'AUDIO_FAILED' }),
+        requestId: scope.id,
+      }).catch(() => undefined);
       throw attachRequestId(error, scope);
     }
     return true;
@@ -67,9 +85,20 @@ export async function handleMediaRoute(ctx: RouteContext): Promise<boolean> {
     const explicitProviderId = getExplicitProviderId(request, body);
     const scope = service.startScope(transcriptionRequest.model, explicitProviderId, undefined, requestIdOf(request));
 
+    const startedAt = Date.now();
     try {
       const responseBody = await service.transcribeWithFailover(transcriptionRequest, explicitProviderId, signal, scope);
       const serving = responseBody.attempts.find((attempt) => attempt.ok);
+      void service.usage?.record({
+        at: new Date().toISOString(),
+        model: transcriptionRequest.model,
+        ...(serving?.providerId ? { providerId: serving.providerId } : {}),
+        ...(serving?.connectionId ? { connectionId: serving.connectionId } : {}),
+        outcome: 'success',
+        attempts: responseBody.attempts.length,
+        latencyMs: Date.now() - startedAt,
+        requestId: scope.id,
+      }).catch(() => undefined);
       sendJson(response, 200, {
         text: responseBody.response.text,
         ...(responseBody.response.language !== undefined ? { language: responseBody.response.language } : {}),
@@ -78,6 +107,15 @@ export async function handleMediaRoute(ctx: RouteContext): Promise<boolean> {
         gateway: { requestId: scope.id, ...(responseBody.attempts.length > 1 ? { attempts: responseBody.attempts.map(toPublicAttempt) } : {}) },
       }, origin);
     } catch (error) {
+      void service.usage?.record({
+        at: new Date().toISOString(),
+        model: transcriptionRequest.model,
+        outcome: signal.aborted ? 'cancelled' : 'failure',
+        attempts: 0,
+        latencyMs: Date.now() - startedAt,
+        ...(error instanceof ProviderError ? { errorCode: error.code } : { errorCode: 'TRANSCRIPTION_FAILED' }),
+        requestId: scope.id,
+      }).catch(() => undefined);
       throw attachRequestId(error, scope);
     }
     return true;
@@ -93,9 +131,25 @@ export async function handleMediaRoute(ctx: RouteContext): Promise<boolean> {
     let ddgJson: Record<string, unknown> = {};
     try {
       const res = await fetch(ddgUrl, { signal });
-      if (res.ok) ddgJson = (await res.json()) as Record<string, unknown>;
-    } catch {
-      ddgJson = {};
+      if (!res.ok) {
+        const code = res.status === 429 ? 'RATE_LIMITED' : 'PROVIDER_REQUEST_FAILED';
+        const message = `The search provider answered HTTP ${res.status}.`;
+        throw new ProviderError(code, message, {
+          retryable: res.status === 429 || res.status >= 500,
+          publicMessage: res.status === 429
+            ? 'The search provider is rate limiting this gateway. Try again shortly.'
+            : 'The search provider could not answer the request.',
+        });
+      }
+      ddgJson = (await res.json()) as Record<string, unknown>;
+    } catch (error) {
+      if (error instanceof ProviderError) throw error;
+      if (signal.aborted) throw error;
+      throw new ProviderError('PROVIDER_REQUEST_FAILED', 'The search provider could not be reached.', {
+        retryable: true,
+        publicMessage: 'The search provider could not be reached.',
+        cause: error,
+      });
     }
 
     const results: { title: string; url: string; snippet: string }[] = [];

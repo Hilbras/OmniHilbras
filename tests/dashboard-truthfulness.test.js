@@ -401,3 +401,19 @@ test('THE COUNT, asserted so it cannot drift quietly', () => {
   assert.ok(offenders.length > 0, 'there are success states in the dashboard, so the check above is not vacuous');
   console.log(`    dashboard files: ${files.length}   success states: ${offenders.length}   produced by a timer: 0`);
 });
+
+test('the translator inspector reports only what the gateway answered', () => {
+  // The page is a read-only view of `GET /v1/translators`. It has no translate/send/save surface, so
+  // there is no result it could simulate and no timer that could be mistaken for one. Both facts are
+  // asserted against the page source: an import that is never called would satisfy the general
+  // "asks the gateway" guard while rendering nothing but literals.
+  const page = stripComments(readFileSync(join(DASHBOARD, 'pages', 'TranslatorPage.tsx'), 'utf8'));
+  assert.match(page, /import \{ getGatewayTranslators/, 'the page does not import the inventory client');
+  assert.match(page, /getGatewayTranslators\(controller\.signal\)/, 'the imported client is never called');
+  assert.ok(!page.includes('setTimeout') && !page.includes('setInterval'), 'a timer changes a state the gateway did not answer');
+  assert.equal(/set[A-Za-z]*\(\s*'success'\s*\)/.test(page), false, 'the inspector reports a success nothing measured');
+  // A refused request is printed, not turned into an empty-but-healthy inventory.
+  assert.match(page, /setError\(cause instanceof Error \? cause\.message/, 'the gateway refusal is swallowed');
+  const client = stripComments(readFileSync(join(DASHBOARD, 'lib', 'gatewayClient.ts'), 'utf8'));
+  assert.match(client, /requestJson<[^>]*>\('\/v1\/translators', \{ signal \}\)/, 'the client does not ask the route the page renders');
+});

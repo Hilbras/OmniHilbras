@@ -234,6 +234,35 @@ export function RoutingContent() {
             {connections.map((connection) => <ConnectionCard key={connection.connectionId} connection={connection} threshold={state?.failureThreshold ?? 0} />)}
           </section>
 
+          {/*
+            The capability pools are configuration the gateway already loaded, not a preview of what
+            routing might do. Nothing here is measured and nothing is clickable: there is no write
+            route for these pools, so a control that appeared to save one would be a lie.
+          */}
+          <section className="card mt-5 p-4 sm:p-5" aria-label="Capability fallback pools">
+            <h3 className="text-sm font-semibold">Capability fallback pools</h3>
+            <p className="muted mt-1 text-[11px] leading-relaxed">
+              When no planned model declares what a request needs, routing tries these configured models first.
+              A requested model that already declares the capability is never replaced.
+            </p>
+            {Object.entries(state?.capacityAdapter ?? {}).length === 0 ? (
+              <p className="mt-3 font-mono text-[10px]">No pools configured — no model is substituted.</p>
+            ) : (
+              <ul className="mt-3 space-y-2">
+                {Object.entries(state?.capacityAdapter ?? {}).map(([capability, pool]) => (
+                  <li key={capability} className="rounded-lg border border-line bg-bg-soft/60 px-3 py-2.5">
+                    <p className="font-mono text-[11px]">
+                      {capability}
+                      {pool.enabled === false ? ' (disabled)' : ''}
+                      {pool.roundRobin === true ? ' · round-robin' : ''}
+                    </p>
+                    <p className="muted mt-1 break-words font-mono text-[10px]">{pool.models.join(', ')}</p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
           <div className="mt-5 flex items-start gap-3 rounded-xl border border-line bg-bg-soft/50 px-4 py-3.5">
             <Clock className="mt-0.5 h-4 w-4 shrink-0 text-muted" aria-hidden="true" />
             <div>

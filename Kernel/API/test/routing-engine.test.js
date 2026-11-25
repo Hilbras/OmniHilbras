@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync, readdirSync } from 'node:fs';
 import { RoutingEngine } from '../dist/src/core/routing-engine.js';
-import { HealthRegistry, SlidingWindowRateLimiter } from '../dist/src/core/routing.js';
+import { HealthRegistry, SlidingWindowRateLimiter, modelCapacityCapabilities } from '../dist/src/core/routing.js';
 import { ProviderError } from '../dist/src/core/index.js';
 import { providerIds } from './support/providerIds.js';
 
@@ -38,7 +38,7 @@ const connection = (over = {}) => ({
  * exists to consult is a double for the thing under test, and the mismatch showed up as eight
  * failures about a method the test itself had invented.
  */
-function engine({ failures = 0, threshold = 3, known = ['p', 'openai'], now } = {}) {
+function engine({ failures = 0, threshold = 3, known = ['p', 'openai'], now, capacityAdapter } = {}) {
   const clock = { value: 1_000_000 };
   const readClock = () => clock.value;
   const health = new HealthRegistry(readClock, 60_000);
@@ -49,6 +49,9 @@ function engine({ failures = 0, threshold = 3, known = ['p', 'openai'], now } = 
     rateLimiter: limiter,
     defaultProviderId: 'openai',
     requireAdapter: (providerId) => { if (!known.includes(providerId)) throw new ProviderError('NOT_FOUND', `Provider adapter is not registered: ${providerId}.`); },
+    ...(capacityAdapter
+      ? { capacityAdapter, capabilitiesFor: (candidate, modelId) => modelCapacityCapabilities(candidate, modelId) }
+      : {}),
   });
   return { instance, health, clock };
 }
@@ -244,6 +247,47 @@ test('the waits are readable, and a sent request is not a wait', async () => {
   assert.equal(instance.waits().size, 0);
   instance.recordRequest('c1');
   assert.equal(instance.waits().size, 0);
+});
+
+test('a hard capability mismatch prepends the configured pool and sends the pool model upstream', async () => {
+  // The requested model has no stated modalities, so it cannot serve an image. The only honest
+  // substitute is a model the operator named; a built-in fallback would send a vendor's choice.
+  const { instance } = engine({ capacityAdapter: { vision: { models: ['vision-provider/seer'] } } });
+  const connections = [
+    connection({ id: 'plain-conn', providerId: 'p', modelIds: ['plain'], modelMeta: { plain: { i: ['text'] } } }),
+    connection({ id: 'vision-conn', providerId: 'vision-provider', modelIds: ['seer'], modelMeta: { seer: { i: ['image'] } } }),
+  ];
+  const decision = await instance.plan({ connections, model: 'plain', requiredCapabilities: ['vision'] });
+  assert.deepEqual(
+    decision.candidates.map((candidate) => [candidate.connectionId, candidate.model]),
+    [['vision-conn', 'seer']],
+    'an incapable original is not a fallback for an image request',
+  );
+  assert.deepEqual(
+    decision.skipped,
+    [{ providerId: 'p', reason: 'no-capability' }],
+    'the refused original is named rather than silently dropped',
+  );
+});
+
+test('an already-capable requested model is not replaced by a capacity pool', async () => {
+  const { instance } = engine({ capacityAdapter: { vision: { models: ['vision-provider/seer'] } } });
+  const connections = [
+    connection({ id: 'plain-conn', providerId: 'p', modelIds: ['plain'], modelMeta: { plain: { i: ['image'] } } }),
+    connection({ id: 'vision-conn', providerId: 'vision-provider', modelIds: ['seer'], modelMeta: { seer: { i: ['image'] } } }),
+  ];
+  const decision = await instance.plan({ connections, model: 'plain', requiredCapabilities: ['vision'] });
+  assert.deepEqual(decision.candidates.map((candidate) => candidate.connectionId), ['plain-conn']);
+  assert.equal(decision.candidates[0].model, undefined, 'no substitution was necessary, so none happened');
+});
+
+test('a model cooldown on one account does not suppress a sibling on the same provider and model', async () => {
+  const { instance, health } = engine();
+  health.recordModelRateLimit('c1', 'm');
+  const connections = [connection({ id: 'c1' }), connection({ id: 'c2' })];
+  const decision = await instance.plan({ connections, model: 'm' });
+  assert.deepEqual(decision.candidates.map((candidate) => candidate.connectionId), ['c2']);
+  assert.deepEqual(decision.skipped, [{ providerId: 'p', reason: 'model-cooling-down' }]);
 });
 
 test('THE INVARIANT: the engine names no provider', () => {

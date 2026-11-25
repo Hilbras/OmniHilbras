@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { Link } from 'react-router-dom';
 import { CheckCircle2, CircleAlert, MonitorCog, Moon, Palette, RefreshCw, Save, ShieldCheck, Sun, Terminal, Timer, Wrench } from 'lucide-react';
 import { DashboardShell } from '../components/DashboardShell';
 import {
@@ -13,6 +14,7 @@ import { useUpdateState } from '../lib/useUpdateState';
 import { copyText } from '../lib/copyText';
 import { z } from 'zod';
 import { badgeTone } from '../ui/primitives';
+import { dashboardRoutes } from '../lib/routes';
 import { Switch } from '../ui/Switch';
 
 /**
@@ -322,7 +324,7 @@ export function SettingsContent() {
 
       <Section icon={<Terminal className="h-4 w-4 text-gold-text" aria-hidden="true" />} id="settings-data" title="Data and recovery" description="Backups and diagnostics are on About; they are not duplicated here.">
         <div className="flex flex-wrap gap-2 py-3">
-          <a href="/dashboard/about" className="btn-ghost !px-3 !py-2 !text-xs">Encrypted backup</a>
+          <Link to={dashboardRoutes.about} className="btn-ghost !px-3 !py-2 !text-xs">Encrypted backup</Link>
           {bridge && <button type="button" onClick={() => void bridge.diagnostics.export()} className="btn-ghost !px-3 !py-2 !text-xs">Export diagnostics</button>}
         </div>
       </Section>

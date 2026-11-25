@@ -182,7 +182,8 @@ test('THE COUNT, asserted so it cannot drift quietly', () => {
   // 63-67 are cycle 4's five API-key routers; all five are in `api-key`, so the dialog gains five too.
   // 68 is cycle 5's `glm`, a paid Z.ai coding-plan key in `api-key`; it joins both counts.
   // 69 is cycle 6's `glm-cn`, the mainland BigModel key in `api-key`; it joins both counts too.
-  assert.equal(providerCatalog.length, 69, `the catalog now has ${providerCatalog.length} cards`);
-  assert.equal(providerOptions.length, 45, `the dialog now offers ${providerOptions.length} options`);
+  // 70 is cycle 7's `mimo-free`, another keyed API-key router; it joins both counts.
+  assert.equal(providerCatalog.length, 70, `the catalog now has ${providerCatalog.length} cards`);
+  assert.equal(providerOptions.length, 46, `the dialog now offers ${providerOptions.length} options`);
   console.log(`    cards: ${providerCatalog.length}   dialog options: ${providerOptions.length}   ids tested: ${knownIds().length + UNKNOWN_IDS.length}`);
 });

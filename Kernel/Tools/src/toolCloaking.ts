@@ -19,7 +19,7 @@ import type { ToolChoice, ToolDefinition, ToolMessage, ToolRequest } from './typ
 export const CLAUDE_TOOL_SUFFIX = '_ide';
 
 /** Provider ids whose connection uses the Claude tool surface. */
-export const CLAUDE_TOOL_PROVIDERS: ReadonlySet<string> = new Set(['anthropic', 'claude-code']);
+export const CLAUDE_TOOL_PROVIDERS: ReadonlySet<string> = new Set(['anthropic', 'claude-code', 'claude']);
 
 /** A name no client can declare and no validator can allow; decoy calls are renamed to it before validation. */
 export const DECOY_CALL_NAME = '\u0000decoy-call';
@@ -86,9 +86,22 @@ export function cloakClaudeTools<T extends ToolRequest>(request: T): CloakedTool
   const originals = new Set(tools.map((tool) => tool.name));
   const renames = new Map<string, string>();
   const toWire = new Map<string, string>();
+  const usedWireNames = new Set<string>();
   const cloaked: ToolDefinition[] = [];
   for (const tool of tools) {
-    const wire = tool.name.endsWith(CLAUDE_TOOL_SUFFIX) ? tool.name : `${tool.name}${CLAUDE_TOOL_SUFFIX}`;
+    /**
+     * A client may declare both `foo` and `foo_ide`. Appending the suffix only when it is absent
+     * made both declarations `foo_ide`, and the restore map then turned a call to the real
+     * `foo_ide` into `foo` — a different tool with different effects. Keep the suffix readable but
+     * resolve a collision with a numeric continuation the restore map can still name exactly.
+     */
+    let wire = tool.name.endsWith(CLAUDE_TOOL_SUFFIX) ? tool.name : `${tool.name}${CLAUDE_TOOL_SUFFIX}`;
+    if (usedWireNames.has(wire)) {
+      let sequence = 2;
+      while (usedWireNames.has(`${wire}_${sequence}`)) sequence += 1;
+      wire = `${wire}_${sequence}`;
+    }
+    usedWireNames.add(wire);
     toWire.set(tool.name, wire);
     if (wire !== tool.name) renames.set(wire, tool.name);
     cloaked.push({ ...tool, name: wire });

@@ -61,14 +61,14 @@ async function startPair(t) {
 
   // The gateway is the writer of its own token; the shipped server is the reader. They must agree.
   const dashboardToken = createDashboardToken();
-  await publishDashboardToken(dashboardToken, env);
-  assert.equal(dashboardTokenPath(env), path.join(env.XDG_CONFIG_HOME, 'omnihilbras', 'dashboard-token'), 'the shipped reader points where the gateway writes');
 
   const apiKeys = new InMemoryApiKeyStore();
   await apiKeys.setEnforced(true); // the documented local-mode default for a store that has minted a key.
   const service = new GatewayService(new ProviderRegistry(), new InMemorySecretStore({ ollama: { type: 'api-key', value: 'x' } }), new InMemoryConnectionStore(), apiKeys);
   const gateway = createGatewayServer(service, { corsOrigins: [DASHBOARD_ORIGIN], dashboardToken });
   const gatewayPort = await listenOnEphemeral(gateway);
+  await publishDashboardToken(dashboardToken, env, gatewayPort);
+  assert.equal(dashboardTokenPath(env, gatewayPort), path.join(env.XDG_CONFIG_HOME, 'omnihilbras', `dashboard-token-${gatewayPort}`), 'the shipped reader points where the gateway writes');
   t.after(() => new Promise((resolve) => gateway.close(resolve)));
 
   // A throwaway dashboard root with one SPA shell, so the proxy test never depends on a real `dist/`.
@@ -104,7 +104,7 @@ test('the proxied token is the dashboard token the gateway itself published', as
   assert.equal(noToken.status, 401, 'an allowlisted Origin without the token is still refused — the gate was not loosened');
 
   // And with the token the gateway accepts, presented directly, it is trusted again — proving which value grants it.
-  const token = fs.readFileSync(path.join(env.XDG_CONFIG_HOME, 'omnihilbras', 'dashboard-token'), 'utf8').trim();
+  const token = fs.readFileSync(path.join(env.XDG_CONFIG_HOME, 'omnihilbras', `dashboard-token-${gatewayPort}`), 'utf8').trim();
   const withToken = await raw(gatewayPort, { path: '/v1/connections', headers: { host: `127.0.0.1:${gatewayPort}`, origin: DASHBOARD_ORIGIN, 'sec-fetch-site': 'same-origin', [dashboardTokenHeader]: token } });
   assert.equal(withToken.status, 200, 'the gateway accepts exactly the token it published');
 });

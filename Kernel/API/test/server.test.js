@@ -124,7 +124,10 @@ test('local gateway restricts browser origins to the configured allowlist', asyn
   const denied = await fetch(`${baseUrl}/health`, { headers: { origin: 'https://evil.example' } });
   assert.equal(denied.status, 403);
   assert.equal(denied.headers.get('access-control-allow-origin'), null);
-  assert.deepEqual(await denied.json(), { error: { code: 'CORS_ORIGIN_DENIED', message: 'This browser origin is not allowed.' } });
+  const deniedBody = await denied.json();
+  assert.equal(deniedBody.error.code, 'CORS_ORIGIN_DENIED');
+  assert.equal(deniedBody.error.message, 'This browser origin is not allowed.');
+  assert.match(deniedBody.error.requestId, /^[0-9a-f]{32}$/, 'the refusal carries the id the header announced');
 
   const crossSite = await fetch(`${baseUrl}/health`, { headers: { 'sec-fetch-site': 'cross-site' } });
   assert.equal(crossSite.status, 403);

@@ -1,4 +1,5 @@
 import { FetchHttpTransport, ProviderRegistry, canonicalLoopbackHost, isLoopbackHostname, loopbackBaseUrl, type ProviderCredential, type SecretStore } from './index.js';
+import { CAPACITY_CAPABILITIES, type CapacityAdapterConfig } from './routing.js';
 import { AnthropicAdapter } from '@omnihilbras/sdk-anthropic';
 import { OpenAICompatibleAdapter } from '@omnihilbras/sdk-openai';
 import { GeminiAdapter } from '@omnihilbras/sdk-gemini';
@@ -70,6 +71,17 @@ export type GatewayConfig = {
   toolSchemaBytes: number;
   /** Re-anchor provider cache breakpoints on the final body. */
   cacheAnchor?: boolean;
+  /**
+   * Explicit fallback pools by hard input capability. There is no default model: an unconfigured
+   * capability stays unconfigured, so a request that needs vision cannot be quietly sent to a model
+   * nobody chose. Parsed from `OMNIHILBRAS_CAPACITY_ADAPTER` as JSON.
+   */
+  capacityAdapter?: CapacityAdapterConfig;
+  /**
+   * Explicit System One endpoints, keyed by connection id (or by provider id as a fallback).
+   * A provider that has no entry declares no System One wire and is refused by name.
+   */
+  systemOne?: { endpoints: Record<string, string>; headers?: Record<string, string> };
   /** Output-shaping prompt levels. */
   caveman?: { level: CavemanLevel };
   ponytail?: { level: PonytailLevel };
@@ -138,6 +150,61 @@ export function isContainerDeployment(env: Readonly<Record<string, string | unde
   return ['1', 'true', 'on', 'yes'].includes((env.OMNIHILBRAS_CONTAINER ?? '').trim().toLowerCase());
 }
 
+/**
+ * Reads the capacity adapter pools from an environment JSON object.
+ *
+ * A typo is not a reason to refuse to start the gateway: the setting is an opt-in improvement to
+ * routing, so an unreadable value simply leaves the adapter off. What is read is validated rather
+ * than trusted — only the four hard capabilities exist, only explicit `provider/model` strings are
+ * kept, and a pool with no models is dropped instead of acquiring an invented default.
+ */
+export function parseCapacityAdapterConfig(raw: string | undefined): CapacityAdapterConfig | undefined {
+  if (!raw?.trim()) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+  const source = parsed as Record<string, unknown>;
+  const out: CapacityAdapterConfig = {};
+  for (const capability of CAPACITY_CAPABILITIES) {
+    const value = source[capability];
+    // An array is accepted as an enabled pool; an object states `enabled` and `roundRobin` beside it.
+    const pool: Record<string, unknown> | undefined = Array.isArray(value)
+      ? { models: value }
+      : (value && typeof value === 'object' ? value as Record<string, unknown> : undefined);
+    if (!pool) continue;
+    const models = Array.isArray(pool.models)
+      ? pool.models.filter((model): model is string => typeof model === 'string' && model.trim().includes('/')).map((model) => model.trim())
+      : [];
+    if (models.length === 0) continue;
+    out[capability] = {
+      ...(pool.enabled === false ? { enabled: false } : {}),
+      ...(pool.roundRobin === true ? { roundRobin: true } : {}),
+      models,
+    };
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/** Reads an optional JSON string map, keeping only string values. A typo leaves the map absent. */
+function parseStringMap(raw: string | undefined): Record<string, string> | undefined {
+  if (!raw?.trim()) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+    const out: Record<string, string> = {};
+    for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof value === 'string' && value.trim()) out[key] = value.trim();
+    }
+    return Object.keys(out).length > 0 ? out : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function loadGatewayConfig(env: Readonly<Record<string, string | undefined>> = process.env): GatewayConfig {
   const container = isContainerDeployment(env);
   const requestedHost = (env.OMNIHILBRAS_HOST ?? (container ? '0.0.0.0' : '127.0.0.1')).trim();
@@ -152,6 +219,9 @@ export function loadGatewayConfig(env: Readonly<Record<string, string | undefine
   const ponytail = parseChoice(env.OMNIHILBRAS_PONYTAIL, PONYTAIL_LEVELS, 'OMNIHILBRAS_PONYTAIL');
   const headroomUrl = parseOptionalUrl(env.OMNIHILBRAS_HEADROOM_URL, 'OMNIHILBRAS_HEADROOM_URL');
   const pxpipeUrl = parseOptionalUrl(env.OMNIHILBRAS_PXPIPE_URL, 'OMNIHILBRAS_PXPIPE_URL');
+  const capacityAdapter = parseCapacityAdapterConfig(env.OMNIHILBRAS_CAPACITY_ADAPTER);
+  const systemOneEndpoints = parseStringMap(env.OMNIHILBRAS_SYSTEMONE_ENDPOINTS);
+  const systemOneHeaders = parseStringMap(env.OMNIHILBRAS_SYSTEMONE_HEADERS);
 
   return {
     host,
@@ -172,6 +242,10 @@ export function loadGatewayConfig(env: Readonly<Record<string, string | undefine
       ? { historyTrim: { maxInputTokens: parseOptionalLimit(env.OMNIHILBRAS_HISTORY_TRIM_TOKENS, 1_000, 10_000_000)!, keepRecent: parseNonNegativeInteger(env.OMNIHILBRAS_HISTORY_TRIM_KEEP_RECENT, 8, 'OMNIHILBRAS_HISTORY_TRIM_KEEP_RECENT', 200) } }
       : {}),
     ...(['1', 'true', 'on', 'yes'].includes((env.OMNIHILBRAS_CACHE_ANCHOR ?? '').trim().toLowerCase()) ? { cacheAnchor: true } : {}),
+    ...(capacityAdapter ? { capacityAdapter } : {}),
+    ...(systemOneEndpoints
+      ? { systemOne: { endpoints: systemOneEndpoints, ...(systemOneHeaders ? { headers: systemOneHeaders } : {}) } }
+      : {}),
     ...(caveman ? { caveman: { level: caveman } } : {}),
     ...(ponytail ? { ponytail: { level: ponytail } } : {}),
     ...(headroomUrl ? {
@@ -287,6 +361,8 @@ export function createGatewayService(config: GatewayConfig = loadGatewayConfig()
     ...(config.thinkingBudgetCap ? { thinkingBudgetCap: config.thinkingBudgetCap } : {}),
     toolSchemaBytes: config.toolSchemaBytes,
     ...(config.historyTrim ? { historyTrim: config.historyTrim } : {}),
+    ...(config.capacityAdapter ? { capacityAdapter: config.capacityAdapter } : {}),
+    ...(config.systemOne ? { systemOne: config.systemOne } : {}),
     ...(config.cacheAnchor ? { cacheAnchor: config.cacheAnchor } : {}),
     ...(config.caveman ? { caveman: config.caveman } : {}),
     ...(config.ponytail ? { ponytail: config.ponytail } : {}),

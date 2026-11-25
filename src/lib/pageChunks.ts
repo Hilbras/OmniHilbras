@@ -33,6 +33,7 @@ export const ProxyPoolsContent = lazy(() => import('../pages/ProxyPoolsPage').th
 export const TunnelsContent = lazy(() => import('../pages/TunnelsPage').then((module) => ({ default: module.TunnelsContent })));
 export const SkillsContent = lazy(() => import('../pages/SkillsPage').then((module) => ({ default: module.SkillsContent })));
 export const TranslatorContent = lazy(() => import('../pages/TranslatorPage').then((module) => ({ default: module.TranslatorContent })));
+export const CliToolsContent = lazy(() => import('../pages/CliToolsPage').then((module) => ({ default: module.CliToolsContent })));
 
 /**
  * The module behind each nav path, for the preload.
@@ -57,6 +58,7 @@ const prefetchable: Record<string, () => Promise<unknown>> = {
   '/tunnels': () => import('../pages/TunnelsPage'),
   '/skills': () => import('../pages/SkillsPage'),
   '/translators': () => import('../pages/TranslatorPage'),
+  '/cli-tools': () => import('../pages/CliToolsPage'),
 };
 
 /**

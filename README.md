@@ -24,7 +24,7 @@
   <a href="./CONTRIBUTING.md">Contributing</a>
 </p>
 
-**Current version: 3.98.1**
+**Current version: 3.99.0**
 
 OmniHilbras sits between your application and the model providers you already use. It gives every client one
 OpenAI-compatible endpoint, keeps credentials on your machine, and decides which saved connection serves each
@@ -382,6 +382,7 @@ One React Router app mounted at `/dashboard`; client-side navigation never reloa
 | `/dashboard/tunnels` | Saved tunnels from `GET /v1/tunnels` |
 | `/dashboard/skills` | Saved skills from `GET /v1/skills` |
 | `/dashboard/translators` | Read-only format pairs from `GET /v1/translators` |
+| `/dashboard/cli-tools` | Gateway-reported values for a CLI client snippet |
 | `/dashboard/about` | Build provenance and the limits of this installation |
 
 There is no Overview page: the earlier one had no data source and was removed rather than kept. `/dashboard`
@@ -479,6 +480,11 @@ the answer as data and nothing else.
 | `keys` | Key metadata; `--mint` creates one and prints the secret once |
 | `routing` | Live routing state: failures, ejection, waits, latency, strategy (`--problems` narrows) |
 | `logs` | Follow finished requests — model, provider, account, outcome, attempts, error code |
+| `ps` | The recorded bundled run: process ownership, ports, uptime and gateway health |
+| `open` | Open the recorded dashboard in a browser |
+| `stop` | Stop the bundled servers, verifying each recorded PID belongs to this install |
+| `restart` | Stop and start the bundled servers, preserving their ports and foreground/background mode |
+| `update` | Check for or install a newer published CLI; `--check` only reports |
 
 ```bash
 omnihilbras status

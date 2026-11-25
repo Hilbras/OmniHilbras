@@ -105,6 +105,12 @@ export type GatewayRoutingState = {
   failureThreshold: number;
   /** The strategy set for each provider; a provider with none set is `priority`. */
   strategies?: Partial<Record<string, GatewayProviderStrategy>>;
+  /** Explicit capability fallback pools, exactly as the gateway loaded them. Absent means none configured. */
+  capacityAdapter?: Partial<Record<'vision' | 'pdf' | 'audioInput' | 'videoInput', {
+    enabled?: boolean;
+    roundRobin?: boolean;
+    models: string[];
+  }>>;
   connections: Array<{
     connectionId: string;
     providerId: string;
@@ -1182,6 +1188,8 @@ export type GatewayUsageCost = {
   costUsd: number;
   pricedRequests: number;
   unpricedRequests: number;
+  /** Priced requests whose total is a floor because a measured token dimension had no rate. */
+  partiallyPricedRequests?: number;
   unpricedEntirely: boolean;
   /** `null` when every record was priced; a caveat printed every time is one nobody reads. */
   caveat: string | null;

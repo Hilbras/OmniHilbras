@@ -20,6 +20,12 @@ export const restart = {
   usage: 'omnihilbras restart [--force] [--skip-update]',
   flags: ['--force', '--skip-update'],
   async run({ out, flags }) {
+    if (out.json) {
+      throw new CliError('`restart --json` is not supported because the launcher owns the terminal session.', {
+        code: 2,
+        hint: 'Run `omnihilbras restart` without --json, or query `omnihilbras ps --json` afterwards.',
+      });
+    }
     // First thing on restart: check for a newer release, like the reference launcher does at every launch.
     // Fail-open and opt-in — it only notices; installing stays the explicit `omnihilbras update`.
     if (!flags.skipUpdate) {
@@ -27,6 +33,11 @@ export const restart = {
       if (updateInfo?.updateAvailable) {
         out.line(out.warn(`Update available: ${updateInfo.current} → ${updateInfo.latest}. Run \`omnihilbras update\` to install it.`));
       }
+    }
+
+    // Preflight before stopping: a broken install must not take down a healthy run.
+    if (!hasBundledServer()) {
+      throw new CliError('This install has no bundled server to start.', { hint: 'Reinstall @hilbras/omnihilbras, or start the servers from the desktop app.' });
     }
 
     const record = readBundledRecord();
@@ -45,10 +56,13 @@ export const restart = {
       clearBundledRecord();
     }
 
-    if (!hasBundledServer()) {
-      throw new CliError('This install has no bundled server to start.', { hint: 'Reinstall @hilbras/omnihilbras, or start the servers from the desktop app.' });
+const argv = [];
+    if (record) {
+      argv.push('--port', String(record.dashboardPort), '--gateway-port', String(record.gatewayPort));
+      if (record.background) argv.push('--background');
     }
-    out.line(out.muted('Restarting the bundled servers…'));
-    return await runBundledServer([]);
+    if (flags.skipUpdate) argv.push('--skip-update');
+    out.line(out.muted('Restarting the bundled servers...'));
+    return await runBundledServer(argv);
   },
 };

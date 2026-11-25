@@ -55,12 +55,11 @@ npm link            # puts `omnihilbras` on your PATH, pointed at this checkout
 omnihilbras setup   # check the tools before starting anything
 ```
 
-> **`npm i -g @hilbras/omnihilbras` installs the *client*, not the server.** Since 3.50.0 this name is
-> this project's gateway client — the verbs in [`docs/CLI.md`](./CLI.md) — and it **cannot start a
-> server**: a globally installed package has no checkout to run. Versions before 3.0.0 were the previous
-> project and are deprecated with the same warning. For a command that starts the servers as well, use
-> `npm link` from a checkout and run `omnihilbras setup` (see below); for the server itself, install the
-> desktop app.
+> **`npm i -g @hilbras/omnihilbras` installs the client and a bundled server.** Since 3.73.0 the
+> package stages the gateway, static dashboard server and locales, so bare `omnihilbras` starts both
+> without a checkout. The client verbs remain in [`docs/CLI.md`](./CLI.md). Versions before 3.0.0 were
+> the previous project and are deprecated with the same warning. The desktop app remains the packaged
+> alternative.
 
 ## The `omnihilbras` command
 

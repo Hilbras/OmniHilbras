@@ -77,13 +77,14 @@ test('no reported tokens is an absence, not a zero', () => {
 
 test('cache tokens are priced at their own rates', () => {
   const cost = requestCostUsd({
-    inputTokens: 1_000,
+    // Canonical total input includes 10k cache reads and 2k cache writes; 1k is uncached input.
+    inputTokens: 13_000,
     outputTokens: 100,
     cacheReadTokens: 10_000,
     cacheWriteTokens: 2_000,
     pricing: { inputPer1M: 10, outputPer1M: 30, cacheReadPer1M: 1, cacheWritePer1M: 5 },
   });
-  // 0.01 + 0.003 + 0.01 + 0.01
+  // 0.01 uncached + 0.003 output + 0.01 cache read + 0.01 cache write
   assert.equal(cost, 0.033);
 });
 

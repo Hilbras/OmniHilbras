@@ -44,7 +44,7 @@ test('an unverified update cannot be installed without an explicit decision', ()
   assert.match(main, /Confirm that you want to install an unverified update/, 'with a message that says what is being asked');
   // Nothing else in the process may pass that flag on its own: the IPC handler forwards what the
   // renderer sent, and the renderer is where the confirmation lives.
-  assert.match(main, /ipcMain\.handle\('update:install', \(_event, options\) => installUpdate\(options \?\? \{\}\)\)/);
+  assert.match(main, /ipcMain\.handle\('update:install', \(event, options\) => \{[\s\S]{0,160}?installUpdate\(options \?\? \{\}\);/);
 });
 
 test('one in-app question is used by every surface that can install', () => {

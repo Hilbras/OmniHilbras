@@ -16,9 +16,12 @@ import { atomicWrite, defaultStateDirectory, readOptionalText } from './secure-s
 export const dashboardTokenHeader = 'x-omnihilbras-dashboard-token';
 const tokenFileName = 'dashboard-token';
 const maxTokenBytes = 256;
+/** The historical single-gateway port, whose file keeps its original name. */
+const LEGACY_PORT = 20138;
 
-export function dashboardTokenPath(env: Readonly<Record<string, string | undefined>> = process.env) {
-  return join(defaultStateDirectory(env), tokenFileName);
+export function dashboardTokenPath(env: Readonly<Record<string, string | undefined>> = process.env, port?: number) {
+  const name = port === undefined || port === LEGACY_PORT ? tokenFileName : `${tokenFileName}-${port}`;
+  return join(defaultStateDirectory(env), name);
 }
 
 /**
@@ -41,13 +44,13 @@ export function createDashboardToken(): string {
  * The file is a claim about which token the running gateway accepts, so it may only be written by a gateway
  * that is in fact running. A caller that has not bound its port has nothing to claim.
  */
-export async function publishDashboardToken(token: string, env: Readonly<Record<string, string | undefined>> = process.env) {
-  await atomicWrite(dashboardTokenPath(env), token);
+export async function publishDashboardToken(token: string, env: Readonly<Record<string, string | undefined>> = process.env, port?: number) {
+  await atomicWrite(dashboardTokenPath(env, port), token);
 }
 
 /** The token the gateway issued at start, read back from disk, or undefined when it is missing. */
-export async function readDashboardToken(env: Readonly<Record<string, string | undefined>> = process.env) {
-  const value = await readOptionalText(dashboardTokenPath(env), maxTokenBytes);
+export async function readDashboardToken(env: Readonly<Record<string, string | undefined>> = process.env, port?: number) {
+  const value = await readOptionalText(dashboardTokenPath(env, port), maxTokenBytes);
   return value?.trim() || undefined;
 }
 

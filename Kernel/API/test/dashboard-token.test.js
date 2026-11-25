@@ -79,7 +79,7 @@ test('the token is published only after the port is bound', async () => {
   const source = await import('node:fs/promises').then((fs) => fs.readFile(new URL('../src/server.ts', import.meta.url), 'utf8'));
   const mint = source.indexOf('const dashboardToken = createDashboardToken()');
   const listening = source.indexOf("server.once('listening', onListening)");
-  const publish = source.indexOf('await publishDashboardToken(dashboardToken, options.env)');
+  const publish = source.indexOf('await publishDashboardToken(dashboardToken, options.env, config.port)');
   assert.ok(mint >= 0 && listening >= 0 && publish >= 0, 'all three steps are present');
   assert.ok(mint < listening, 'the token is minted before the server starts listening');
   assert.ok(listening < publish, 'and published only after it is listening');

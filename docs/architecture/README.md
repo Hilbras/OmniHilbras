@@ -43,6 +43,18 @@ provider are separate accounts, not one account with aliases.
 - `proxyPool` is not enforced by a transport yet. A non-`none` value is refused rather than sent direct;
   pretending the label isolates egress would be worse than the clear error.
 
+## Identity boundary
+
+This release remains **single-operator by contract**. A gateway API key is an admin credential: it
+can read and change the same local vault the dashboard can. `workspaceId` and `responsibility.owner`
+are metadata, not authorization principals, and no route claims tenant isolation. A hosted multi-user
+deployment needs scopes and a principal threaded through every route before it can safely expose the
+same stores; adding that half-way would make the fields look enforced while leaving cross-workspace
+access open.
+
+The one administrative boundary that is enforced is process ownership: a desktop or CLI credential is
+read only after the caller proves it owns the gateway process it is about to address.
+
 ## Virtual models
 
 A virtual model is one public `oh/` id with one or more account/upstream-model targets. `GatewayService.planRoute`
@@ -70,20 +82,20 @@ that holds is one a machine re-derives.
 
 | Surface | Lines | Provider ids named | Note |
 | --- | --- | --- | --- |
-| `Kernel/API/src/core/routing.ts` | 817 | **0** | provider-agnostic; `isRetryableFailure` judges an unreadable answer a provider fault |
+| `Kernel/API/src/core/routing.ts` | 949 | **0** | provider-agnostic; `isRetryableFailure` judges an unreadable answer a provider fault |
 | `Kernel/API/src/core/provider-resolver.ts` | 347 | 1 | enforced by a test that greps the file; the per-provider tables live in `provider-client-identity.ts` and `provider-responses-lane.ts` it reads |
 | `Kernel/API/src/core/circuit-breaker.ts` | 192 | **0** | per-connection closed → open → half-open; counts what it refused |
 | `Kernel/API/src/core/request-executor.ts` | 1049 | **0** | the failover loop, the attempt ledger, the ordering |
 | `Kernel/API/src/core/connection-manager.ts` | 383 | **0** | one error mapper, one catalog merge, one lock scope |
-| `Kernel/API/src/core/service.ts` | 5151 | 54 | every `.onDemand()` registration, in one constructor |
+| `Kernel/API/src/core/service.ts` | 5336 | 54 | every `.onDemand()` registration, in one constructor |
 | `Kernel/API/src/core/http.ts` | 357 | **0** | the vocabulary every route shares |
 | `Kernel/API/src/routes/oauth.ts` | 967 | 14 | the module a provider split would help most |
 | `Kernel/API/src/routes/connections.ts` | 410 | 1 | one OpenRouter save shortcut, the generic quota route, the build stamp, and the route that forgets an added model |
-| `Kernel/API/src/routes/inference.ts` | 1782 | **0** | `/v1/models`, `/v1/chat/completions`, `/v1/responses`, `/v1/messages` (Anthropic shape + SSE), the video path constants, and the auth gate |
+| `Kernel/API/src/routes/inference.ts` | 1963 | **0** | `/v1/models`, `/v1/chat/completions`, `/v1/responses`, `/v1/messages` (Anthropic shape + SSE), the video path constants, and the auth gate |
 | `Kernel/API/src/routes/api-keys.ts` | 105 | **0** | the key list, the one mutable setting, and the PATCH that either pauses or renames — never both |
 | `Kernel/API/src/routes/status.ts` | 220 | **0** | `/health`, `/`, `/v1/system`, `/v1/routing`, and the build stamp |
 | `Kernel/API/src/core/codexCallbackListener.ts` | 92 | **0** | the loopback socket a registered redirect points at |
-| `Kernel/API/src/server.ts` | 486 | **1** | refuses a half-configured Codex OAuth override at startup, dispatches the video surface, and gives every request the id its record will carry |
+| `Kernel/API/src/server.ts` | 498 | **1** | refuses a half-configured Codex OAuth override at startup, dispatches the video surface, and gives every request the id its record will carry |
 
 **The Core was far more provider-neutral than it looked.** The non-zero cells above are the entire
 provider-specific surface of the gateway core, and none of it is a scattered conditional — it is a

@@ -280,3 +280,70 @@ test('stream: a provider failure ends with one response.failed and no response.c
   assert.ok(failed[0].data.response.error.code, 'the failure carries the gateway error code');
   assert.ok(events.some((entry) => entry.event === 'response.output_text.done'), 'the partial text block is closed even on failure');
 });
+
+/**
+ * The extended union. This upstream is deliberately synthetic: it supplies every optional delta the
+ * normalized ChatChunk now carries so each event family can be proven individually. A real upstream
+ * that stays silent must produce the older, shorter event list — the exact-list tests above assert
+ * that nothing here is emitted unless the bytes came from the provider.
+ */
+test('stream: refusal, annotation, content part and file-search/code-interpreter events are emitted only when the upstream supplies them', async (t) => {
+  const provider = {
+    id: 'fake', name: 'Fake',
+    capabilities: { chat: true, streaming: true, models: true },
+    async listModels() { return [{ id: 'fake-1', providerId: 'fake' }]; },
+    async healthCheck() { return { status: 'healthy', checkedAt: new Date().toISOString() }; },
+    async chat() { throw new Error('the streamed test must not reach the non-streaming path'); },
+    async *streamChat() {
+      const base = { id: 'r5', providerId: 'fake', model: 'fake-1' };
+      yield { ...base, delta: { refusal: 'I cannot ' } };
+      yield { ...base, delta: { refusal: 'help with that.' }, finishReason: 'stop' };
+      yield { ...base, delta: { contentParts: [{ index: 0, type: 'output_text', text: 'A sourced sentence', annotations: [{ type: 'url_citation', url: 'https://example.test/a', title: 'Source A' }] }] } };
+      yield { ...base, delta: { annotations: [{ type: 'url_citation', url: 'https://example.test/b', title: 'Source B' }] } };
+      yield { ...base, delta: { fileSearchCall: { id: 'fs_1', status: 'in_progress' } } };
+      yield { ...base, delta: { fileSearchCall: { id: 'fs_1', status: 'searching', queries: ['mimo'] } } };
+      yield { ...base, delta: { fileSearchCall: { id: 'fs_1', status: 'completed', results: [{ title: 'Document' }] } } };
+      yield { ...base, delta: { codeInterpreterCall: { id: 'ci_1', status: 'in_progress' } } };
+      yield { ...base, delta: { codeInterpreterCall: { id: 'ci_1', status: 'running', codeDelta: 'print(1)' } } };
+      yield { ...base, delta: { codeInterpreterCall: { id: 'ci_1', status: 'completed', code: 'print(1)', output: '1' } } };
+    },
+  };
+  const apiKeys = new InMemoryApiKeyStore();
+  const key = (await apiKeys.create('responses')).key;
+  const store = new InMemoryConnectionStore();
+  await store.save({ id: 'fake', providerId: 'fake', name: 'Fake', endpoint: 'https://f.example/v1', priority: 1, enabled: true, proxyPool: 'none', modelPolicy: 'all', resilience: { maxRetries: 0, requestsPerMinute: 0, timeoutMs: 5_000, hedgeAfterMs: 0 } }, { type: 'api-key', value: 'k' });
+  const service = new GatewayService(new ProviderRegistry().register(provider), new InMemorySecretStore({}), store, apiKeys, { failureThreshold: 1_000 });
+  service.setHealthInterval(0);
+  const server = createGatewayServer(service, { corsOrigin: 'http://localhost:5173' });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+
+  const response = await fetch(`http://127.0.0.1:${server.address().port}/v1/responses`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
+    body: JSON.stringify({ model: 'fake-1', input: 'ping', stream: true }),
+  });
+  assert.equal(response.status, 200);
+  const events = (await response.text()).split('\n\n').filter(Boolean).map((block) => ({
+    event: /^event: (.+)$/m.exec(block)?.[1],
+    data: JSON.parse(/^data: (.+)$/m.exec(block)[1]),
+  }));
+  const named = (name) => events.filter((entry) => entry.event === name);
+
+  assert.deepEqual(named('response.refusal.delta').map((entry) => entry.data.delta), ['I cannot ', 'help with that.']);
+  assert.equal(named('response.refusal.done')[0].data.refusal, 'I cannot help with that.');
+
+  assert.equal(named('response.content_part.added')[0].data.part.text, 'A sourced sentence');
+  assert.equal(named('response.content_part.done')[0].data.part.text, 'A sourced sentence');
+  assert.deepEqual(named('response.output_text.annotation.added').map((entry) => entry.data.annotation.url), ['https://example.test/a', 'https://example.test/b']);
+
+  for (const name of ['response.file_search_call.added', 'response.file_search_call.in_progress', 'response.file_search_call.searching', 'response.file_search_call.completed']) {
+    assert.equal(named(name).length, 1, `${name} was not emitted from the upstream's file-search call`);
+  }
+  assert.deepEqual(named('response.file_search_call.completed')[0].data.results, [{ title: 'Document' }]);
+  for (const name of ['response.code_interpreter_call.added', 'response.code_interpreter_call.in_progress', 'response.code_interpreter_call.code.delta', 'response.code_interpreter_call.code.done', 'response.code_interpreter_call.completed']) {
+    assert.equal(named(name).length, 1, `${name} was not emitted from the upstream's code-interpreter call`);
+  }
+  assert.equal(named('response.code_interpreter_call.code.delta')[0].data.delta, 'print(1)');
+  assert.equal(events.at(-1).event, 'response.completed', 'the extended stream still ends with a normal completion');
+});

@@ -4,7 +4,14 @@ import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { readFile } from 'node:fs/promises';
 import { dirname, join, normalize, sep } from 'node:path';
-import { createGatewayClient } from './gateway-ipc.mjs';
+import {
+  APP_ORIGIN,
+  bindStreamAbortToOwnership,
+  createGatewayClient,
+  createStreamControllerRegistry,
+  isTrustedIpcSender,
+  sendToTrustedIpc,
+} from './gateway-ipc.mjs';
 import { redact } from './redact.mjs';
 import { createGatewaySupervisor } from './supervisor.mjs';
 
@@ -18,7 +25,7 @@ import { createGatewaySupervisor } from './supervisor.mjs';
  */
 
 const APP_SCHEME = 'app';
-const APP_ORIGIN = `${APP_SCHEME}://omnihilbras`;
+// `APP_ORIGIN` is imported from the IPC module so sender validation and this server cannot drift.
 const DEV_URL = `${APP_ORIGIN}/dashboard/`;
 
 protocol.registerSchemesAsPrivileged([
@@ -121,7 +128,13 @@ const gateway = createGatewaySupervisor({
     OMNIHILBRAS_CORS_ORIGINS: ['http://localhost:5173', 'http://127.0.0.1:5173', ...corsOrigins()].join(','),
   },
 });
-const gatewayClient = createGatewayClient({ host: '127.0.0.1', port: () => gateway.port });
+const gatewayClient = createGatewayClient({
+  host: '127.0.0.1',
+  port: () => gateway.port,
+  // Every credential-bearing call asks the supervisor first: a token is read and a request sent only
+  // while this app owns a live gateway child.
+  isOwned: () => gateway.ownsRunningChild(),
+});
 saveUserConfig({ gatewayPort: gateway.port, webPort: resolvedWebPort });
 
 let window;
@@ -138,7 +151,10 @@ let providerSignInWindow;
 let installingUpdate = false;
 let logSubscription;
 let logAbort;
-const streamControllers = new Map();
+const streamControllers = createStreamControllerRegistry();
+// A chat stream is a credential-bearing request in flight. When the supervisor stops owning its child
+// — stopping, restarting or failed — every tracked stream is aborted rather than read from a corpse.
+bindStreamAbortToOwnership(gateway, streamControllers);
 
 function showWindow() {
   if (!window) {
@@ -484,6 +500,12 @@ gateway.on('log', (entry) => send('server:log', entry));
 
 async function startLogForwarding() {
   await stopLogForwarding();
+  // A log subscription presents the dashboard token. If this app does not own a live gateway child,
+  // there is no log to forward and nothing to authenticate to.
+  if (!gateway.ownsRunningChild()) {
+    send('gateway:log-state', { connected: false, reason: 'The local gateway is not running.' });
+    return;
+  }
   logAbort = new AbortController();
   try {
     logSubscription = await gatewayClient.subscribeLogs((event) => send('gateway:log', event), { signal: logAbort.signal });
@@ -504,6 +526,20 @@ async function stopLogForwarding() {
 gateway.on('state', (state) => {
   if (state.state === 'running') void startLogForwarding();
   else if (state.state !== 'starting') void stopLogForwarding();
+});
+
+/**
+ * Ownership loss closes credential surfaces rather than leaving them armed.
+ *
+ * A provider sign-in window holds a live session page; when this app stops owning the gateway there is
+ * nowhere left to hand that session, so the window is closed rather than left polling. The log stream
+ * is stopped here as well as in the state listener above, because `starting` is a state that listener
+ * deliberately ignores and it is not owned either.
+ */
+gateway.on('state', () => {
+  if (gateway.ownsRunningChild()) return;
+  if (providerSignInWindow && !providerSignInWindow.isDestroyed()) providerSignInWindow.close();
+  void stopLogForwarding();
 });
 
 function mimeFor(path) {
@@ -559,23 +595,44 @@ async function serveApp(request) {
   }
 }
 
+/**
+ * IPC is a capability boundary.
+ *
+ * The preload is the only intended caller, and it lives in this window's `webContents`. A handler that
+ * accepted any sender would be a general bridge for any frame Electron ever hosts, so every channel
+ * below either throws (invoke) or returns without effect (send) when the sender is not ours.
+ */
+function trustedIpcSender(event) {
+  return isTrustedIpcSender(event, window?.webContents);
+}
+
+function requireTrustedIpc(event) {
+  if (!trustedIpcSender(event)) throw new Error('That request did not come from the OmniHilbras window.');
+}
+
 function wireIpc() {
-  ipcMain.handle('server:state', () => gateway.snapshot());
-  ipcMain.handle('server:start', async () => {
+  ipcMain.handle('server:state', (event) => {
+    requireTrustedIpc(event);
+    return gateway.snapshot();
+  });
+  ipcMain.handle('server:start', async (event) => {
+    requireTrustedIpc(event);
     try {
       return await gateway.start();
     } finally {
       broadcastState();
     }
   });
-  ipcMain.handle('server:stop', async () => {
+  ipcMain.handle('server:stop', async (event) => {
+    requireTrustedIpc(event);
     try {
       return await gateway.stop();
     } finally {
       broadcastState();
     }
   });
-  ipcMain.handle('server:restart', async () => {
+  ipcMain.handle('server:restart', async (event) => {
+    requireTrustedIpc(event);
     try {
       return await gateway.restart();
     } finally {
@@ -583,25 +640,42 @@ function wireIpc() {
     }
   });
 
-  ipcMain.on('window:minimize', () => window?.minimize());
-  ipcMain.on('window:toggle-maximize', () => {
+  ipcMain.on('window:minimize', (event) => {
+    if (!trustedIpcSender(event)) return;
+    window?.minimize();
+  });
+  ipcMain.on('window:toggle-maximize', (event) => {
+    if (!trustedIpcSender(event)) return;
     if (!window) return;
     if (window.isMaximized()) window.unmaximize();
     else window.maximize();
   });
-  ipcMain.on('window:close', () => window?.close());
-  ipcMain.handle('window:is-maximized', () => window?.isMaximized() ?? false);
-  ipcMain.handle('diagnostics:export', exportDiagnostics);
-  ipcMain.handle('app:info', () => ({
-    version: app.getVersion(),
-    platform: process.platform,
-    arch: process.arch,
-    packaged: app.isPackaged,
-    electron: process.versions.electron,
-    chrome: process.versions.chrome,
-    node: process.versions.node,
-  }));
-  ipcMain.handle('backup:save', async (_event, payload) => {
+  ipcMain.on('window:close', (event) => {
+    if (!trustedIpcSender(event)) return;
+    window?.close();
+  });
+  ipcMain.handle('window:is-maximized', (event) => {
+    requireTrustedIpc(event);
+    return window?.isMaximized() ?? false;
+  });
+  ipcMain.handle('diagnostics:export', (event) => {
+    requireTrustedIpc(event);
+    return exportDiagnostics();
+  });
+  ipcMain.handle('app:info', (event) => {
+    requireTrustedIpc(event);
+    return {
+      version: app.getVersion(),
+      platform: process.platform,
+      arch: process.arch,
+      packaged: app.isPackaged,
+      electron: process.versions.electron,
+      chrome: process.versions.chrome,
+      node: process.versions.node,
+    };
+  });
+  ipcMain.handle('backup:save', async (event, payload) => {
+    requireTrustedIpc(event);
     if (!payload || typeof payload.content !== 'string' || typeof payload.filename !== 'string') throw new Error('The backup could not be written.');
     const { canceled, filePath } = await dialog.showSaveDialog(window, {
       title: 'Save encrypted backup',
@@ -615,11 +689,24 @@ function wireIpc() {
     chmodSync(filePath, 0o600);
     return { saved: true, path: filePath };
   });
-  ipcMain.handle('update:state', () => updateState);
-  ipcMain.handle('update:check', () => checkForUpdates(true));
-  ipcMain.handle('update:download', () => downloadUpdate());
-  ipcMain.handle('update:install', (_event, options) => installUpdate(options ?? {}));
-  ipcMain.handle('update:open-release', () => {
+  ipcMain.handle('update:state', (event) => {
+    requireTrustedIpc(event);
+    return updateState;
+  });
+  ipcMain.handle('update:check', (event) => {
+    requireTrustedIpc(event);
+    return checkForUpdates(true);
+  });
+  ipcMain.handle('update:download', (event) => {
+    requireTrustedIpc(event);
+    return downloadUpdate();
+  });
+  ipcMain.handle('update:install', (event, options) => {
+    requireTrustedIpc(event);
+    return installUpdate(options ?? {});
+  });
+  ipcMain.handle('update:open-release', (event) => {
+    requireTrustedIpc(event);
     void shell.openExternal('https://github.com/Hilbras/OmniHilbras/releases/latest');
   });
   /**
@@ -630,7 +717,8 @@ function wireIpc() {
    * tab it opened, and the old flow waited for the user to click an "Open" link. This bridge lets the
    * sign-in start from the click that chose the provider, with no second click.
    */
-  ipcMain.handle('shell:open-external', async (_event, url) => {
+  ipcMain.handle('shell:open-external', async (event, url) => {
+    requireTrustedIpc(event);
     if (typeof url !== 'string') throw new Error('A URL string is required.');
     let parsed;
     try {
@@ -643,8 +731,12 @@ function wireIpc() {
     }
     await shell.openExternal(parsed.toString());
   });
-  ipcMain.handle('settings:get', () => appSettings());
-  ipcMain.handle('settings:set', async (_event, patch) => {
+  ipcMain.handle('settings:get', (event) => {
+    requireTrustedIpc(event);
+    return appSettings();
+  });
+  ipcMain.handle('settings:set', async (event, patch) => {
+    requireTrustedIpc(event);
     if (!patch || typeof patch !== 'object') throw new Error('Settings must be an object.');
     const next = {};
     for (const key of ['closeToTray', 'autoStartGateway', 'checkUpdatesOnLaunch']) {
@@ -682,12 +774,14 @@ function wireIpc() {
   // the preload set the global before any page script runs.
   ipcMain.on('gateway:port', (event) => { event.returnValue = gateway.port; });
   // `app://` pages have no reliable navigator.clipboard in Electron. The main process owns the OS clipboard.
-  ipcMain.handle('clipboard:write', (_event, text) => {
+  ipcMain.handle('clipboard:write', (event, text) => {
+    requireTrustedIpc(event);
     if (typeof text !== 'string' || text.length > 1_000_000) throw new Error('Nothing to copy.');
     clipboard.writeText(text);
     return true;
   });
-  ipcMain.handle('gateway:request', async (_event, request) => {
+  ipcMain.handle('gateway:request', async (event, request) => {
+    requireTrustedIpc(event);
     try {
       return await gatewayClient.request(request ?? {});
     } catch (error) {
@@ -715,7 +809,8 @@ function wireIpc() {
    * The partition is persistent and named, so a second sign-in is a click rather than a password: the
    * session and the provider's own trusted-device cookie live there between runs.
    */
-  ipcMain.handle('provider:sign-in', async (_event, request) => {
+  ipcMain.handle('provider:sign-in', async (event, request) => {
+    requireTrustedIpc(event);
     const provider = String(request?.provider ?? '');
     if (provider !== 'deepseek-web-v2') return { ok: false, reason: 'unsupported', message: 'That provider has no window sign-in.' };
     if (providerSignInWindow && !providerSignInWindow.isDestroyed()) {
@@ -787,6 +882,12 @@ function wireIpc() {
           // Not JSON: the value is the token itself.
         }
         if (!token.trim()) return;
+        // The page session is a credential, so ownership is checked here as well as inside the client:
+        // if this app no longer owns a live gateway there is nowhere to submit it.
+        if (!gateway.ownsRunningChild()) {
+          finish({ ok: false, reason: 'gateway', message: 'The local gateway stopped before the sign-in completed.' });
+          return;
+        }
         const fingerprint = (value) => (typeof value === 'string' && value.trim() && value !== 'null' ? value.trim() : undefined);
         const sent = await gatewayClient.request({
           method: 'POST',
@@ -811,34 +912,50 @@ function wireIpc() {
   });
 
   ipcMain.on('gateway:stream:start', async (event, id, request) => {
-    const controller = new AbortController();
-    streamControllers.set(id, controller);
+    // A foreign frame gets no channel names, no reason and no stream.
+    if (!trustedIpcSender(event)) return;
     const chunkChannel = `gateway:stream:chunk:${id}`;
     const endChannel = `gateway:stream:end:${id}`;
     const errorChannel = `gateway:stream:error:${id}`;
+    // A stream carries the dashboard token upstream. Without an owned child there is no request to make,
+    // so the caller is told that and nothing is read from disk or sent to a port.
+    if (!gateway.ownsRunningChild()) {
+      sendToTrustedIpc(event, window?.webContents, errorChannel, 'The local gateway is not running.');
+      return;
+    }
+    const controller = new AbortController();
+    streamControllers.set(id, controller);
+    const reply = (channel, payload) => sendToTrustedIpc(event, window?.webContents, channel, payload);
     try {
       const upstream = await gatewayClient.streamChat({ ...request, signal: controller.signal });
       if (!upstream.ok || !upstream.stream) {
-        event.sender.send(errorChannel, upstream.text || `The gateway answered ${upstream.status}.`);
+        reply(errorChannel, upstream.text || `The gateway answered ${upstream.status}.`);
         return;
       }
       const reader = upstream.stream.getReader();
       const decoder = new TextDecoder();
       for (;;) {
+        // Ownership can be lost between chunks. Check before reading and before forwarding, so a
+        // gateway that died mid-stream does not leave a reader attached to a gone process.
+        if (!gateway.ownsRunningChild()) {
+          controller.abort();
+          return;
+        }
         const { value, done } = await reader.read();
         if (done) break;
-        event.sender.send(chunkChannel, decoder.decode(value, { stream: true }));
+        reply(chunkChannel, decoder.decode(value, { stream: true }));
       }
-      event.sender.send(endChannel);
+      reply(endChannel);
     } catch (error) {
       if (!controller.signal.aborted) {
-        event.sender.send(errorChannel, error instanceof Error ? error.message : 'The stream failed.');
+        reply(errorChannel, error instanceof Error ? error.message : 'The stream failed.');
       }
     } finally {
       streamControllers.delete(id);
     }
   });
-  ipcMain.on('gateway:stream:cancel', (_event, id) => {
+  ipcMain.on('gateway:stream:cancel', (event, id) => {
+    if (!trustedIpcSender(event)) return;
     streamControllers.get(id)?.abort();
     streamControllers.delete(id);
   });

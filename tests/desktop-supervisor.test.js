@@ -196,3 +196,101 @@ test('the log ring is bounded', async () => {
     await supervisor.stop();
   }
 });
+
+/**
+ * Ownership is the precondition every credential path asks about.
+ *
+ * The distinction these tests protect is between the state *label* and the process it describes: a
+ * supervisor that says `running` while its child has already exited must answer no, because that is
+ * exactly the window in which a token would otherwise be read and sent to a gone port.
+ */
+test('ownership is a claim about the process, not the state label', () => {
+  const supervisor = supervisorFor(1);
+  assert.equal(supervisor.ownsRunningChild(), false, 'a stopped supervisor owns nothing');
+  assert.throws(() => supervisor.assertOwnedGateway(), /not running/i);
+
+  supervisor.state = 'running';
+  assert.equal(supervisor.ownsRunningChild(), false, 'a running label with no child is not ownership');
+
+  supervisor.child = { pid: 4242, exitCode: null, signalCode: null };
+  assert.equal(supervisor.ownsRunningChild(), true);
+  assert.equal(supervisor.assertOwnedGateway(), true);
+
+  supervisor.child.exitCode = 0;
+  assert.equal(supervisor.ownsRunningChild(), false, 'an exited child is not ownership');
+  assert.throws(() => supervisor.assertOwnedGateway(), /not running/i);
+
+  supervisor.child.exitCode = null;
+  supervisor.child.signalCode = 'SIGKILL';
+  assert.equal(supervisor.ownsRunningChild(), false, 'a signalled child is not ownership');
+
+  supervisor.child.signalCode = null;
+  supervisor.child.pid = 0;
+  assert.equal(supervisor.ownsRunningChild(), false, 'a child without a pid is not a live process');
+});
+
+test('ownership follows the real gateway lifecycle', async () => {
+  const port = await freePort();
+  const supervisor = supervisorFor(port);
+  try {
+    assert.equal(supervisor.ownsRunningChild(), false, 'stopped');
+    const running = await supervisor.start();
+    assert.equal(running.state, 'running');
+    assert.equal(supervisor.ownsRunningChild(), true, 'running');
+
+    // The labels that are not "this app owns a live child". `setState` is what the supervisor itself
+    // uses, so this exercises the same predicate the IPC client calls.
+    supervisor.setState('restarting', 'test');
+    assert.equal(supervisor.ownsRunningChild(), false, 'restarting');
+    assert.throws(() => supervisor.assertOwnedGateway(), /not running/i);
+    supervisor.setState('starting');
+    assert.equal(supervisor.ownsRunningChild(), false, 'starting');
+    supervisor.setState('running');
+    assert.equal(supervisor.ownsRunningChild(), true, 'running again');
+
+    await supervisor.stop();
+    assert.equal(supervisor.ownsRunningChild(), false, 'stopped after a run');
+  } finally {
+    await supervisor.stop();
+  }
+});
+
+test('a failed start owns no gateway', async () => {
+  const port = await freePort();
+  const holder = createServer();
+  await new Promise((resolve, reject) => {
+    holder.once('error', reject);
+    holder.listen(port, '127.0.0.1', resolve);
+  });
+  const supervisor = supervisorFor(port);
+  try {
+    await assert.rejects(() => supervisor.start(), /already in use/i);
+    assert.equal(supervisor.state, 'failed');
+    assert.equal(supervisor.ownsRunningChild(), false);
+    assert.throws(() => supervisor.assertOwnedGateway(), /not running/i);
+  } finally {
+    await new Promise((resolve) => holder.close(resolve));
+  }
+});
+
+test('a crashed gateway is not owned while it backs off', async () => {
+  const port = await freePort();
+  const supervisor = supervisorFor(port, {
+    autoRestart: true,
+    maxRestarts: 2,
+    restartBackoffMs: [2_000],
+    env: { FAKE_CRASH_AFTER_MS: '300' },
+  });
+  try {
+    await supervisor.start();
+    const deadline = Date.now() + 15_000;
+    while (Date.now() < deadline && supervisor.state !== 'restarting') {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    assert.equal(supervisor.state, 'restarting');
+    assert.equal(supervisor.ownsRunningChild(), false);
+    assert.throws(() => supervisor.assertOwnedGateway(), /not running/i);
+  } finally {
+    await supervisor.stop();
+  }
+});

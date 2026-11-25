@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { InMemoryVirtualModelStore, ProviderError, ProviderRegistry } from '../dist/src/core/index.js';
-import { GatewayService, InMemoryApiKeyStore, InMemoryConnectionStore } from '../dist/src/index.js';
+import { GatewayService, InMemoryApiKeyStore, InMemoryConnectionStore, InMemoryUsageStore, createGatewayServer } from '../dist/src/index.js';
 
 /**
  * One `oh/` id, several providers.
@@ -139,6 +139,62 @@ test('an authentication failure in one target hands off to the next target', asy
   assert.equal(response.providerId, 'b', 'the healthy target answers');
   assert.deepEqual(captured.map((entry) => entry.providerId), ['a', 'b'], 'the refused target is asked once, then the next');
   assert.deepEqual(attempts.map((attempt) => `${attempt.providerId}:${attempt.ok ? 'ok' : attempt.errorCode}`), ['a:AUTHENTICATION_FAILED', 'b:ok']);
+});
+
+test('a hard capability requirement substitutes the configured pool on the wire, not in the usage record', async (t) => {
+  // Two different ids for one turn, deliberately. The adapter must see the pool model — otherwise the
+  // image would be sent to a model whose catalog says it takes text only — while the usage ledger
+  // keeps the id the client asked for. A substitution that rewrote the latter would make the bill
+  // unreadable to the person who made the request.
+  const captured = [];
+  const store = new InMemoryConnectionStore();
+  const save = (id, providerId, modelId, modelMeta) => store.save({
+    id, providerId, name: id, endpoint: `https://${providerId}.example/v1`, priority: 1, proxyPool: 'none',
+    enabled: true, modelPolicy: 'all', modelIds: [modelId], modelMeta,
+    resilience: { maxRetries: 0, requestsPerMinute: 0, timeoutMs: 5_000, hedgeAfterMs: 0 },
+  }, { type: 'api-key', value: 'key' });
+  await save('plain-conn', 'plain-provider', 'plain', { plain: { i: ['text'] } });
+  await save('vision-conn', 'vision-provider', 'seer', { seer: { i: ['image'] } });
+  const answer = (providerId) => ({
+    id: 'r', providerId, model: 'served', createdAt: new Date().toISOString(),
+    message: { role: 'assistant', content: 'ok' }, finishReason: 'stop',
+  });
+  const registering = (id) => ({
+    id, name: id, capabilities: { chat: true, streaming: false, models: true },
+    async listModels() { return [{ id: 'x', providerId: id }]; },
+    async chat(request) { captured.push({ providerId: id, model: request.model }); return answer(id); },
+  });
+  const usageStore = new InMemoryUsageStore();
+  const apiKeys = new InMemoryApiKeyStore();
+  await apiKeys.setEnforced(false);
+  const service = new GatewayService(
+    new ProviderRegistry().register(registering('plain-provider')).register(registering('vision-provider')),
+    store, store, apiKeys,
+    { usageStore, capacityAdapter: { vision: { models: ['vision-provider/seer'] } } },
+  );
+  const server = createGatewayServer(service, { corsOrigin: 'http://localhost:5173' });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => server.close());
+  const response = await fetch(`http://127.0.0.1:${server.address().port}/v1/chat/completions`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      model: 'plain',
+      messages: [{ role: 'user', content: [
+        { type: 'text', text: 'describe this' },
+        { type: 'image_url', image_url: { url: 'data:image/png;base64,AAA' } },
+      ] }],
+    }),
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(captured, [{ providerId: 'vision-provider', model: 'seer' }], 'the requested text-only model saw the image');
+  let records = [];
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    records = await usageStore.list({ limit: 1 });
+    if (records.length > 0) break;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  assert.equal(records[0]?.model, 'plain', 'the usage record named the substituted wire id');
 });
 
 test('an unknown or disabled virtual id does not fall through to concrete routing', async () => {

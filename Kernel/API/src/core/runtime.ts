@@ -99,8 +99,8 @@ export type AuthContext = {
  * deployment changes: a hosted gateway is public and *every* request needs a key, while a loopback
  * gateway exempts its own dashboard so the operator can test models without one.
  */
-export function isTrustedDashboard(auth: AuthContext): boolean {
-  return auth.kind === 'dashboard';
+export function isTrustedDashboard(auth: AuthContext | undefined): boolean {
+  return auth?.kind === 'dashboard';
 }
 
 /**

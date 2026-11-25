@@ -18,6 +18,7 @@ import { ProviderError, isProviderError } from '../core/provider-error.js';
 import {
   VIDEO_POLL_PREFIX, extractApiKey, getExplicitConnectionId, getExplicitProviderId, isVideoRoute,
 } from './inference.js';
+import { isTrustedDashboard } from '../core/runtime.js';
 
 const VIDEO_ACTIONS = new Set(['generations', 'edits', 'extensions']);
 
@@ -35,7 +36,7 @@ export async function handleVideoRoute(ctx: RouteContext): Promise<boolean> {
   // The same gate `handleInferenceRoute` applies to the rest of the spend surface. This handler is
   // registered before it in `server.ts`, and the dispatcher's fast path excludes video paths, so this
   // is the only auth decision made for these requests.
-  await service.authorizePublicRequest(extractApiKey(request));
+  if (!isTrustedDashboard(ctx.auth)) await service.authorizePublicRequest(extractApiKey(request));
 
   const creating = request.method === 'POST';
   const scope = service.startScope('video-generation', undefined, undefined, requestIdOf(request));

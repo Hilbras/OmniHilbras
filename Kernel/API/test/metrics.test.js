@@ -56,6 +56,20 @@ test('latency is exported as a sum and a count, so Prometheus can rate it', () =
   assert.doesNotMatch(text, /quantile=/);
 });
 
+test('estimated tokens are not presented as provider-reported tokens', () => {
+  const text = renderPrometheusMetrics({
+    version: '1',
+    records: [
+      record({ providerId: 'a', inputTokens: 100, outputTokens: 10 }),
+      record({ providerId: 'a', inputTokens: 40, outputTokens: 5, tokensEstimated: true }),
+    ],
+  });
+  assert.match(text, /^omnihilbras_tokens_total\{provider="a",kind="input"\} 100$/m);
+  assert.match(text, /^omnihilbras_tokens_total\{provider="a",kind="output"\} 10$/m);
+  assert.match(text, /^omnihilbras_tokens_estimated_total\{provider="a",kind="input"\} 40$/m);
+  assert.match(text, /^omnihilbras_tokens_estimated_total\{provider="a",kind="output"\} 5$/m);
+});
+
 test('a request no provider served is counted, not dropped', () => {
   const text = renderPrometheusMetrics({ version: '1', records: [record({ providerId: undefined, outcome: 'cancelled' })] });
   assert.match(text, /^omnihilbras_requests_total\{provider="unattributed",outcome="cancelled"\} 1$/m);

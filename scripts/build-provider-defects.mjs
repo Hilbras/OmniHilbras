@@ -76,6 +76,24 @@ const DEFECTS = {
     status: 'partial — keyed OpenAI-compatible chat only; no Claude headers, CLI identity or OAuth',
     test: 'Kernel/SDK/tests/glm.test.js',
   },
+  // Cycle 6's glm-cn entry is a plain apikey router in the reference — a different host from glm and
+  // no OAuth or client identity. The honest slice is the keyed OpenAI chat path; the reference's usage
+  // quota endpoint and model list are not copied because nothing here measures either.
+  'glm-cn': {
+    failure: 'The reference ships a mainland BigModel coding entry with a usage-quota URL and a listed model catalogue; OmniHilbras serves the keyed OpenAI-compatible chat path only and claims no measured usage or models.',
+    source: '9router/open-sse/providers/registry/glm-cn.js:15',
+    status: 'partial — keyed OpenAI-compatible chat only; no usage probe, model list, OAuth or client identity',
+    test: 'tests/provider-validation.test.js',
+  },
+  // Cycle 7's mimo-free entry is a plain API-key router whose published endpoint is already the chat
+  // path. The keyed OpenAI-compatible chat path is the whole honest slice; the reference's client
+  // identity and validation claims are not copied, and no model listing was measured.
+  'mimo-free': {
+    failure: 'The reference ships a client-identity and validation story for this free router; OmniHilbras serves the plain API-key OpenAI-compatible chat path only.',
+    source: '9router/open-sse/providers/registry/mimo-free.js:1',
+    status: 'partial — keyed OpenAI-compatible chat only; no impersonation, OAuth, model list or key check',
+    test: 'Kernel/SDK/tests/mimo-free.test.js',
+  },
   ...Object.fromEntries(['gemini-cli', 'cursor', 'zed'].map((id) => [id, {
     failure: 'The reference ships a registry/OAuth flow for this id; OmniHilbras has no card, adapter or flow.',
     source: `9router/open-sse/providers/registry/${id}.js:1`,

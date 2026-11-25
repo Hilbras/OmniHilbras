@@ -258,7 +258,8 @@ test('THE COUNT, asserted so it cannot drift quietly', () => {
   // 63-67 are cycle 4's five API-key routers — catalog metadata only, so the merge property holds.
   // 68 is cycle 5's `glm` keyed router — also metadata until a connection reports something.
   // 69 is cycle 6's `glm-cn`, its mainland sibling — metadata until its own connection reports something.
-  assert.equal(providerCatalog.length, 69, `the catalog now has ${providerCatalog.length} cards`);
+  // 70 is cycle 7's `mimo-free`, also metadata until its own connection reports something.
+  assert.equal(providerCatalog.length, 70, `the catalog now has ${providerCatalog.length} cards`);
   const connected = mergeGatewayConnections(providerCatalog, [connection()], health());
   assert.equal(connected.length, providerCatalog.length, 'a merge must not add or drop a card');
   console.log(`    cards: ${providerCatalog.length}   fields that may change on a merge: 5   that may not: 2`);

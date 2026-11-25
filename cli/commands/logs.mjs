@@ -18,6 +18,17 @@ export const logs = {
   flags: ['--limit'],
   async run({ client, out, flags }) {
     const response = await client.request('/v1/logs/stream', { raw: true });
+    if (!response.ok) {
+      throw new CliError(`The gateway refused the log stream with HTTP ${response.status}.`, {
+        hint: response.status === 401
+          ? 'Management routes need the local dashboard token or an API key.'
+          : await response.text().catch(() => undefined),
+      });
+    }
+    const contentType = response.headers.get('content-type') ?? '';
+    if (!contentType.includes('text/event-stream')) {
+      throw new CliError(`The gateway answered with ${contentType || 'no content type'} instead of an event stream.`);
+    }
     if (!response.body) throw new CliError('The gateway accepted the request but sent no stream body.');
 
     const limit = flags.limit ?? 0;
@@ -48,7 +59,7 @@ export const logs = {
           } catch {
             continue;
           }
-          if (out.json) out.data(record);
+          if (out.json) out.ndjson(record);
           else {
             const when = String(record.at ?? record.timestamp ?? '').slice(11, 19);
             const outcome = record.outcome === 'success' ? out.ok('ok') : out.bad(String(record.outcome ?? 'failed'));

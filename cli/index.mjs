@@ -46,9 +46,24 @@ import { update } from './commands/update.mjs';
 export const verbs = { setup, doctor, status, ps, open, stop, restart, update, providers, models, test, keys, routing, logs };
 
 /** Flags every verb accepts, so none of them has to re-implement them or forget one. */
-const globalFlags = new Set(['--json', '--gateway', '--api-key', '--help', '-h']);
+const globalFlags = new Set(['--json', '--gateway', '--api-key', '--help']);
 
 const valueFlags = new Set(['--gateway', '--api-key', '--provider', '--mint', '--limit']);
+
+/** The largest `--limit` accepted. A bound keeps a typo from asking for an unbounded slice/counter. */
+export const MAX_LIMIT = 100_000;
+
+/** `--limit` is a count, so it is parsed and bounded here rather than in each verb that takes one. */
+function parseLimit(value) {
+  if (!/^\d+$/.test(String(value))) {
+    throw new CliError(`\`--limit\` must be a whole number, not \`${value}\`.`, { code: 2 });
+  }
+  const limit = Number(value);
+  if (!Number.isSafeInteger(limit) || limit < 0 || limit > MAX_LIMIT) {
+    throw new CliError(`\`--limit\` must be between 0 and ${MAX_LIMIT}.`, { code: 2 });
+  }
+  return limit;
+}
 
 export function parseArgv(argv) {
   const args = [];
@@ -61,14 +76,20 @@ export function parseArgv(argv) {
     }
     if (token.startsWith('-')) {
       const [name, inline] = token.includes('=') ? [token.slice(0, token.indexOf('=')), token.slice(token.indexOf('=') + 1)] : [token, undefined];
-      const key = name.replace(/^--?/, '').replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
+      // The short forms are normalized to the long key they advertise (`-h` is `--help`), so the accepted-flag
+      // check and the early help/version branches see one name rather than a second spelling nobody handles.
+      const key = name === '-h'
+        ? 'help'
+        : name === '-v'
+          ? 'version'
+          : name.replace(/^--?/, '').replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
       if (valueFlags.has(name)) {
         const value = inline ?? argv[index + 1];
         if (value === undefined || (value.startsWith('-') && !/^-?\d/.test(value))) {
           throw new CliError(`\`${name}\` needs a value.`, { code: 2 });
         }
         if (inline === undefined) index += 1;
-        flags[key] = name === '--limit' ? Number(value) : value;
+        flags[key] = name === '--limit' ? parseLimit(value) : value;
       } else {
         flags[key] = true;
       }

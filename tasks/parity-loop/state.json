@@ -1,12 +1,12 @@
 {
-  "cycle": 5,
+  "cycle": 6,
   "step": 2,
   "status": "running",
   "stopped": false,
   "last_reports": {
-    "full_comparison": "docs/reports/parity-cycle-5-system.md",
+    "full_comparison": "docs/reports/parity-cycle-6-system.md",
     "provider_comparison": "docs/reports/parity-cycle-4-providers.md",
-    "improvement_plan": "docs/reports/parity-cycle-5-system.md"
+    "improvement_plan": "docs/reports/parity-cycle-6-system.md"
   },
   "history": [
     {
@@ -74,6 +74,23 @@
       "reports": [
         "docs/reports/parity-cycle-5-system.md",
         "docs/reports/parity-cycle-5-review.md"
+      ]
+    },
+    {
+      "cycle": 6,
+      "step": 2,
+      "event": "bookkeeping re-synced to the cycle-6 whole-system report: cycle 6, step 2, running; last_reports now name parity-cycle-6-system.md for the full comparison and the improvement plan. The cycle-6 slice implemented in the working tree is one plain API-key router (glm-cn on open.bigmodel.cn) and one read-only GET /v1/translators inventory with its dashboard page. The 3.98.0 release ceremony is still pending, so row 12 stays red; no release, tag or publish is claimed by this entry.",
+      "reports": [
+        "docs/reports/parity-cycle-6-system.md"
+      ]
+    },
+    {
+      "cycle": 6,
+      "step": 2,
+      "event": "review note appended, not a rewind. The ranked plan in docs/reports/parity-cycle-2-system.md section 11 was re-measured against the current tree; it is an older path, so the loop stays at cycle 6 step 2. The one red offline gate is the release-trail tag: v3.96.0 points at 3e4088f9 (whose manifest says 3.98.0) while bcd6222d carries 3.96.0 and is on main. The repair is to move that tag to bcd6222d (not to downgrade any manifest), which is a release operation this working-tree implementation does not perform; no tag move, force-push, GitHub release or npm publish is claimed by this note. 3.96.0 already has a recorded npm gap with a reason in scripts/audit-release-trail.mjs, so no exemption is added and the pinned count stays 22 + 88 + 1. The remaining ranked items are implemented in the working tree where they are local code changes; tier/suffix upstream-id mapping is deferred because no catalog row in this tree states a tiered upstream id.",
+      "reports": [
+        "docs/reports/parity-cycle-2-system.md",
+        "docs/reports/parity-cycle-6-system.md"
       ]
     }
   ]

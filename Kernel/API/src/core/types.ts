@@ -243,6 +243,52 @@ export type AudioTranscriptionResponse = {
   duration?: number;
 };
 
+/**
+ * An annotation an upstream actually attached to a text part.
+ *
+ * The gateway never invents one: a citation is a claim about a source, and a fabricated URL is a lie
+ * a client will follow. Individual vendors add fields beyond these; they ride in `extra` unchanged so
+ * a new annotation shape does not have to be modelled before it can be forwarded.
+ */
+export type ChatChunkAnnotation = {
+  type: string;
+  url?: string;
+  title?: string;
+  snippet?: string;
+  startIndex?: number;
+  endIndex?: number;
+  extra?: Readonly<Record<string, unknown>>;
+};
+
+/** A content part an upstream emitted inside a delta, e.g. a text part carrying citations. */
+export type ChatChunkContentPart = {
+  /** Zero-based position within the message; defaults to 0 when the upstream omits it. */
+  index?: number;
+  type: string;
+  text?: string;
+  annotations?: readonly ChatChunkAnnotation[];
+};
+
+/** A file-search tool call an upstream emitted inside a delta. */
+export type ChatChunkFileSearchCall = {
+  /** The upstream's own id for the call. The gateway does not mint one. */
+  id: string;
+  status?: 'in_progress' | 'searching' | 'completed' | 'failed';
+  queries?: readonly string[];
+  results?: readonly unknown[];
+};
+
+/** A code-interpreter tool call an upstream emitted inside a delta. */
+export type ChatChunkCodeInterpreterCall = {
+  /** The upstream's own id for the call. The gateway does not mint one. */
+  id: string;
+  status?: 'in_progress' | 'running' | 'completed' | 'incomplete' | 'failed';
+  code?: string;
+  codeDelta?: string;
+  output?: string;
+  outputDelta?: string;
+};
+
 export type ChatChunk = {
   id: string;
   providerId: ProviderId;
@@ -253,6 +299,13 @@ export type ChatChunk = {
     /** Reasoning text when a thinking model emits it before the answer. */
     reasoning?: string;
     toolCalls?: readonly ToolCallDelta[];
+    /** In-stream refusal text, when the upstream refuses in the answer rather than as a request error. */
+    refusal?: string;
+    /** Content parts and annotations the upstream actually supplied. Never synthesised here. */
+    contentParts?: readonly ChatChunkContentPart[];
+    annotations?: readonly ChatChunkAnnotation[];
+    fileSearchCall?: ChatChunkFileSearchCall;
+    codeInterpreterCall?: ChatChunkCodeInterpreterCall;
   };
   finishReason?: FinishReason;
   usage?: TokenUsage;

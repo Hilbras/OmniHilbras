@@ -35,7 +35,7 @@ for (const entry of pages) {
     });
     await page.goto(`/dashboard${entry.path}`);
     await expect(page.getByRole('heading', { name: entry.title })).toBeVisible();
-    await expect(page.getByText(String(entry.row.name))).toBeVisible();
+    await expect(page.getByText(String(entry.row.name), { exact: true })).toBeVisible();
     expect(requested).toContain(entry.route.replace('**', ''));
   });
 }
@@ -47,5 +47,5 @@ test('an operator page prints a gateway NOT_SUPPORTED refusal verbatim', async (
     json: { error: { code: 'NOT_SUPPORTED', message: 'Skills are not available in this gateway build.' } },
   }));
   await page.goto('/dashboard/skills');
-  await expect(page.getByRole('alert')).toContainText('Skills are not available in this gateway build.');
+  await expect(page.getByRole('alert').filter({ hasText: 'Skills are not available in this gateway build.' })).toBeVisible();
 });

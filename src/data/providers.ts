@@ -1764,6 +1764,32 @@ export const providerCatalog: ProviderRecord[] = [
     riskSeverity: 'standard',
   },
   {
+    id: 'mimo-free',
+    name: 'MiMo Code Free',
+    // Cycle 7's one honest slice: a plain API-key router on Xiaomi's free OpenAI-compatible chat
+    // endpoint. The published endpoint is the whole chat path, so the adapter sets it verbatim
+    // instead of appending `/chat/completions`. No browser impersonation, CLI identity header,
+    // OAuth grant, usage probe or model listing was measured, so none is claimed here. The initial
+    // is the mark fallback; no bundled logo was added for a card with no measured history.
+    description: 'Xiaomi MiMo’s free OpenAI-compatible chat endpoint. A saved key is sent only to api.xiaomimimo.com. Check cannot prove a pasted key from a public free catalog.',
+    category: 'Model provider',
+    group: 'api-key',
+    status: 'available',
+    auth: 'API key',
+    models: '—',
+    latency: '—',
+    requests: '0',
+    lastUsed: 'never',
+    health: 0,
+    color: '#ff6a3d',
+    initial: 'M',
+    endpoint: 'https://api.xiaomimimo.com',
+    modelList: [],
+    riskNotice:
+      'This is a free API-key router on the OpenAI-compatible chat wire only. The reference project’s client impersonation, CLI identity and key-validation claims are not ported; Check declares no validation because a public free catalog cannot prove a pasted key.',
+    riskSeverity: 'standard',
+  },
+  {
     id: 'custom',
     name: 'Custom endpoint',
     description: 'Connect any OpenAI-compatible gateway, proxy, or local server.',

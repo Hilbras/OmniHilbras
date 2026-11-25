@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import {
   BarChart3,
@@ -16,6 +16,7 @@ import {
   Route as RouteIcon,
   Server,
   Settings2,
+  Terminal,
   X,
 } from 'lucide-react';
 import { ThemeToggle } from './ThemeToggle';
@@ -39,7 +40,7 @@ import { compareVersions } from '../lib/versionCompare.mjs';
  * it. `tests/marketing-claims.test.js` pins which entries are still disabled, so this comment going stale
  * fails a test rather than misleading the next reader quietly.
  */
-type DashboardPage = 'home' | 'overview' | 'providers' | 'models' | 'routing' | 'keys' | 'usage' | 'logs' | 'settings' | 'about' | 'token-saver' | 'mitm' | 'proxy-pools' | 'tunnels' | 'skills' | 'translators';
+type DashboardPage = 'home' | 'overview' | 'providers' | 'models' | 'routing' | 'keys' | 'usage' | 'logs' | 'settings' | 'about' | 'token-saver' | 'mitm' | 'proxy-pools' | 'tunnels' | 'skills' | 'translators' | 'cli-tools';
 
 type SidebarItem = {
   label: string;
@@ -83,6 +84,9 @@ const insightItems: SidebarItem[] = [
   // A real read-only capability inventory, not a configurator: the gateway serves no write route
   // behind it, so this entry cannot promise anything the page does not do.
   { label: 'Translators', icon: Boxes, to: dashboardRoutes.translators, page: 'translators' },
+  // A real page that reads `GET /v1/settings` and `GET /v1/keys`; it is reachable here so the
+  // route is not a URL-only orphan.
+  { label: 'CLI tools', icon: Terminal, to: dashboardRoutes.cliTools, page: 'cli-tools' },
 ];
 
 const sidebarStorageKey = 'omnihilbras-sidebar-collapsed';
@@ -300,6 +304,8 @@ export function DashboardShell({
 }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(getInitialCollapsed);
+  const mobileNavRef = useRef<HTMLDivElement>(null);
+  const mobileOpenerRef = useRef<HTMLButtonElement>(null);
 
   /*
     The same hook the sidebar badge uses, so the header badge and the sidebar cannot disagree — they were
@@ -324,13 +330,48 @@ export function DashboardShell({
     }
   }, [collapsed]);
 
+  // The mobile drawer is a modal surface. Without this it remained in the tab order behind the
+  // overlay and Escape did nothing, so keyboard users could not leave it predictably.
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const panel = mobileNavRef.current;
+    const opener = mobileOpenerRef.current;
+    const focusable = () => [...(panel?.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])') ?? [])];
+    focusable()[0]?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setMobileOpen(false);
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const items = focusable();
+      if (items.length === 0) return;
+      const first = items[0]!;
+      const last = items[items.length - 1]!;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      opener?.focus();
+    };
+  }, [mobileOpen]);
+
   return (
     <div className="dashboard-shell min-h-screen bg-bg text-text">
+      <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-[70] focus:rounded-lg focus:bg-surface focus:px-3 focus:py-2 focus:text-xs focus:text-text">Skip to content</a>
       {/* App-wide announcement of failed requests; renders nothing itself. */}
       <FailureNotifications />
       {mobileOpen && <button type="button" aria-label="Close dashboard navigation" onClick={() => setMobileOpen(false)} className="fixed inset-0 z-40 bg-black/45 backdrop-blur-[2px] lg:hidden" />}
 
-      <div className={`fixed inset-y-0 left-0 z-50 transition-transform duration-200 lg:translate-x-0 ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+      <div id="dashboard-mobile-nav" ref={mobileNavRef} className={`fixed inset-y-0 left-0 z-50 transition-transform duration-200 lg:translate-x-0 ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}`} aria-hidden={!mobileOpen && undefined}>
         <Sidebar onClose={() => setMobileOpen(false)} activePage={activePage} collapsed={collapsed} onToggleCollapse={() => setCollapsed((value) => !value)} status={gatewayStatus} />
       </div>
 
@@ -353,7 +394,7 @@ export function DashboardShell({
       <div className={`min-h-screen min-w-0 transition-[padding] duration-200 ${collapsed ? 'lg:pl-[76px]' : 'lg:pl-[252px]'}`}>
         <header className="dashboard-header window-drag sticky top-0 z-30 flex min-h-[72px] items-center justify-between gap-4 border-b border-line/80 bg-bg px-4 sm:px-6 lg:px-8">
           <div className="flex min-w-0 items-center gap-3">
-            <button type="button" onClick={() => setMobileOpen(true)} aria-label="Open dashboard navigation" className="window-no-drag muted grid h-9 w-9 shrink-0 place-items-center rounded-lg hover:bg-bg-soft hover:text-gold-text lg:hidden"><Menu className="h-5 w-5" aria-hidden="true" /></button>
+            <button ref={mobileOpenerRef} type="button" onClick={() => setMobileOpen(true)} aria-label="Open dashboard navigation" aria-expanded={mobileOpen} aria-controls="dashboard-mobile-nav" className="window-no-drag muted grid h-9 w-9 shrink-0 place-items-center rounded-lg hover:bg-bg-soft hover:text-gold-text lg:hidden"><Menu className="h-5 w-5" aria-hidden="true" /></button>
             <div className="min-w-0"><p className="mono-label hidden sm:block">Workspace / Local instance</p><h1 className="truncate text-lg font-semibold tracking-tight sm:mt-0.5 sm:text-xl">{pageTitle}</h1><p className="muted hidden truncate text-xs sm:block">{pageDescription}</p></div>
           </div>
 
@@ -380,7 +421,7 @@ export function DashboardShell({
           </div>
         </header>
 
-        <main className="dashboard-grid-bg relative min-h-[calc(100vh-72px)] overflow-hidden"><div className="dashboard-content relative mx-auto max-w-[1440px] px-4 py-6 sm:px-6 sm:py-8 lg:px-8 lg:py-9">{children}</div></main>
+        <main id="main" tabIndex={-1} className="dashboard-grid-bg relative min-h-[calc(100vh-72px)] overflow-hidden"><div className="dashboard-content relative mx-auto max-w-[1440px] px-4 py-6 sm:px-6 sm:py-8 lg:px-8 lg:py-9">{children}</div></main>
       </div>
     </div>
   );

@@ -49,8 +49,10 @@ those versions; they are deprecated with a message saying so, and `docs/INSTALL.
    npm publish --access public
    ```
 
-   No `prepublishOnly` build: this package is plain ESM with **no dependencies**, so what is in the tree is
-   what ships. (The old process built an SDK here; there is no build step left to get wrong.)
+   `prepack` runs `scripts/build-cli-server.mjs`: it builds the SDK, TokenSaver, Tools, gateway and
+   dashboard, then stages `cli/server/gateway.mjs`, `static.mjs`, the dashboard and locales. The
+   published package therefore has a build step and an optional runtime dependency (`playwright-core`);
+   both are exercised by packing and installing the tarball below.
 
 5. Confirm — this step is not a formality:
 

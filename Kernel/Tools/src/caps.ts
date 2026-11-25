@@ -61,6 +61,7 @@ const OPENAI_WIRE = [
   'deepseek',
   'glm',
   'glm-cn',
+  'mimo-free',
   'groq',
   'grok',
   'kimi',

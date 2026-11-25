@@ -34,6 +34,10 @@ omnihilbras test zcode          # probe every account of that provider
 omnihilbras routing --problems  # who is ejected, who is waiting
 omnihilbras keys                # the gateway's API keys
 omnihilbras logs                # follow finished requests
+omnihilbras ps                  # the recorded bundled run and its ownership
+omnihilbras stop                # stop only the servers this install started
+omnihilbras restart             # preserve recorded ports and background mode
+omnihilbras update --check      # ask npm whether a newer CLI exists
 ```
 
 Run `omnihilbras help` for the same list with the flags each verb takes.

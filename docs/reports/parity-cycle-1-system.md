@@ -1,38 +1,84 @@
-# 9router parity, cycle 1 — whole-system comparison
+# 9router parity, cycle 1 — whole-system comparison at the current commits
 
-**Step 1 of `tasks/parity-loop/README.md`.** Both trees were read at their current commits, not at the
-commits used by the previous comparison:
+A fresh step-1 comparison of the two trees as they stand now. This report supersedes the earlier
+cycle-1 report written at OH `632eb79a` / `3.95.0`; both trees have moved since, and the working tree
+is no longer clean. It covers architecture, routing and failover, provider onboarding, credentials,
+model IDs and capabilities, tool calling, streaming protocols, web-session and free-tier providers,
+dashboard, observability, security, tests/CI and release discipline, and ends with a ranked concrete
+improvement plan.
 
-| Tree | Commit read | Version | Working tree |
+## Trees read
+
+| Tree | Commit read | Version | Working-tree state |
 | --- | --- | --- | --- |
-| OmniHilbras (OH) | `632eb79a62e4302d05427826275a334b357bc887` (2026-11-23 04:19:31 +0300) | `3.95.0` (`package.json:4`, `Kernel/API/package.json:3`, `cli/package.json:3`) | only untracked `.zcode/` |
-| 9router (9R) | `1855aa44473e88feac9d3f131b9c0c5fc9706b68` (2026-11-12 18:50:35 +0700) | root `0.5.116`, CLI `0.5.119`, CHANGELOG `0.5.119` | untracked `pnpm-lock.yaml`, `pnpm-workspace.yaml` |
+| OmniHilbras (OH) | `3e4088f966df0d64b26cca3c60c95062c68e175c` (2026-11-23 14:00:01 +0300) | `3.98.0` in all three manifests (`package.json:4`, `Kernel/API/package.json:3`, `cli/package.json:3`) | **dirty**: 20 tracked files modified, 12 untracked source/report files (see below) |
+| 9router (9R) | `1855aa44473e88feac9d3f131b9c0c5fc9706b68` (2026-11-12 18:50:35 +0700, `# v0.5.119`) | root `0.5.116` (`package.json:3`), CLI `0.5.119` (`cli/package.json:3`), CHANGELOG `0.5.119` | two untracked lockfiles only |
 
-Commands that established the commits and versions (run in this ask):
-
-```
-cd /mnt/sda3/work/Hilbras/OmniHilbras && git log -1 --format='%H %ad %s' --date=iso && git status --short && grep -n '"version"' package.json Kernel/API/package.json cli/package.json
-cd /mnt/sda3/work/projects.old/9router && git log -1 --format='%H %ad %s' --date=iso && git status --short && grep -n '"version"' package.json cli/package.json && grep -n '^# v' CHANGELOG.md | head -3
-```
-
-OH has advanced 22 commits since the previous comparison (`git log --oneline 49021443..HEAD | wc -l` → `22`),
-including tool-contract refusal, Codex/AgentRouter tool lanes, upstream model-id preservation, 4xx
-scoping, model catalog facts and the parity scorecard itself. 9router is at the same commit as in that
-comparison. So this report re-measures, rather than repeating, the 2026-11-20 conclusions.
-
-**Checks actually run here** (nothing else is claimed as passed):
+Commands that established this (run in this ask):
 
 ```
-node scripts/check-version.mjs                       -> "version check passed: 3.95.0", exit 0
-node --test tests/no-secrets.test.js tests/browser-storage.test.js tests/gateway-routes.test.js tests/release-trail.test.js
-                                                     -> 24 tests, 24 pass, 0 fail
-node --test tests/9router-catalog.test.js            -> 4 tests, 0 pass, 0 fail, 4 SKIP
+cd /mnt/sda3/work/Hilbras/OmniHilbras && git rev-parse HEAD && git log -1 --format='%H %ci %s' && git status --short
+cd /mnt/sda3/work/projects.old/9router && git rev-parse HEAD && git log -1 --format='%H %ci %s' && git status --short
+grep -n '"version"' package.json Kernel/API/package.json cli/package.json
+grep -n '"version"' /mnt/sda3/work/projects.old/9router/package.json /mnt/sda3/work/projects.old/9router/cli/package.json
 ```
 
-`pnpm verify`, the full unit suite, Playwright and `pnpm app:smoke` were **not run** (the ask forbids
-`verify`, and no live provider key is available). Counts of files, registry entries and provider ids
-come from the commands quoted at the point of use. Internet calls were limited to four pages that the
-two trees cannot supply (protocol/spec/registry facts); each is cited in §13.
+OH has advanced 9 commits since the earlier cycle-1 measurement (`git log --oneline v3.95.0..HEAD | wc -l`
+→ `9`), including committed `smart`/`fusion` virtual models, a real xAI video adapter, a redacted
+request-detail store, MCP Streamable HTTP and a fixed 9router catalog guard. 9router is at the same
+commit it was at for the previous comparison. The **uncommitted** OH working tree adds routing/config
+changes, a System One route, a translators route and dashboard page, and Claude tool cloaking; it also
+introduces two red checks (§13). This report describes the checkout as it stands and marks which
+findings exist only in uncommitted files.
+
+Untracked OH source files (from `git status --short`): `Kernel/API/src/routes/systemone.ts`,
+`Kernel/API/src/routes/translators.ts`, `Kernel/API/test/tool-cloaking.test.js`,
+`Kernel/API/test/translators-route.test.js`, `Kernel/Tools/src/toolCloaking.ts`,
+`Kernel/Tools/test/toolCloaking.test.js`, `src/pages/TranslatorPage.tsx`,
+`tests/e2e/translators.spec.ts`, plus three parity report files and `.zcode/`.
+
+## Checks actually run in this ask
+
+Nothing below is claimed as passed unless the command was executed here. `pnpm verify` was **not**
+run (the ask forbids it); nor were Playwright, `pnpm app:smoke`, 9router's Vitest suite, or any live
+provider request.
+
+```
+node --version                                  -> v26.13.1
+node scripts/check-version.mjs                   -> "version check passed: 3.98.0", exit 0
+node --test tests/*.test.js                      -> 505 tests, 497 pass, 2 fail, 6 skipped, EXIT=1
+  failing: tests/documentation-counts.test.js:266 (architecture doc line counts stale)
+  failing: tests/release-trail.test.js:48 (v3.96.0 tag vs manifest)
+pnpm --filter @omnihilbras/kernel-api test       -> EXIT=1 at tsc:
+  src/core/service.ts(5030,23): error TS2304: Cannot find name 'noCandidateMessage'.
+  (no gateway tests executed because compilation failed)
+node --test Kernel/SDK/tests/*.test.js           -> 982 tests, 982 pass, 0 fail, EXIT=0
+node --test tests/9router-catalog.test.js        -> 6 tests, 0 pass, 0 fail, 6 SKIP (no explicit root)
+NINEROUTER_ROOT=/mnt/sda3/work/projects.old/9router node --test tests/9router-catalog.test.js
+                                                 -> 6 tests, 6 pass, 0 fail, EXIT=0
+node --test Kernel/API/test/video-route.test.js   -> 7 tests, 7 pass, 0 fail
+pnpm --filter @omnihilbras/kernel-api exec tsc -p tsconfig.json
+                                                 -> one error: service.ts(5030,23) TS2304
+pnpm release:audit                               -> exit 1: "v3.98.0 has no npm version"
+  (178 tags, 265 npm versions, 178 GitHub releases; recorded gaps for 3.0.0–3.49.0,
+   3.70.0 and 3.96.0)
+node --test tests/no-secrets.test.js tests/browser-storage.test.js tests/gateway-routes.test.js
+                                                 -> all three files green in the 497 passes above
+```
+
+The two red repo-suite tests and the gateway compile error are diagnosed in §13. Two of the three are
+regressions in the uncommitted working tree; the release-trail failure exists at HEAD as well.
+
+Counting commands run here:
+
+```
+OH provider cards: rg -o "id: '[a-z0-9-]+'" src/data/providers.ts | ... | sort -u | wc -l -> 69
+9R registry entries: find open-sse/providers/registry -maxdepth 1 -name '*.js' ! -name index.js | wc -l -> 148
+OH SDK directories: find Kernel/SDK -mindepth 1 -maxdepth 1 -type d | wc -l -> 57
+9R OAuth modules: find src/lib/oauth -name '*.js' | wc -l -> 57
+9R test files: find tests -name '*.test.js' | wc -l -> 456
+9R dashboard sections: find 'src/app/(dashboard)/dashboard' -mindepth 1 -maxdepth 1 -type d | wc -l -> 16
+```
 
 ---
 
@@ -40,454 +86,398 @@ two trees cannot supply (protocol/spec/registry facts); each is cited in §13.
 
 Neither tree is a superset of the other, and the loop's stop condition is not met.
 
-- OH is decisively ahead on **credential storage, browser secret hygiene, tool-contract honesty,
-  failure-ledger auditability, a single green CI gate, and release discipline**. Twenty-two further
-  commits closed several of the gaps the previous report named: combos now exist as virtual models,
-  upstream model ids are preserved and sent, the Responses lane exists on AgentRouter, 360 s stream
-  idle tolerance is configured, provider validation strategies are declared, and a forced tool call a
-  provider cannot honour is a stated refusal rather than a silent prose answer.
-- 9router remains ahead on **declared provider breadth (149 registry entries vs 58 OH cards),
-  smart/fusion combo routing, special-provider knowledge and OAuth breadth, Responses stream event
-  completeness, media/fetch protocols, MCP client-plugin bridging, Claude tool cloaking, and the
-  operator dashboard's configurators**.
-- Both trees are **unmeasured on live requests**: no live key was available in this ask. Every
-  "works" below means implemented and covered by scripted/local tests, never a live vendor turn.
+- OH is ahead on **credential encryption at rest, browser secret hygiene, per-provider validation
+  strategies, tool-contract honesty, redacted observability, a single CI gate that runs, and release
+  bookkeeping conventions**. Since the earlier cycle-1 report it has also closed several functional
+  gaps: `smart`/`fusion` virtual models are committed, video is a real xAI job lane, Responses streams
+  carry the full lifecycle set, `/v1/fetch` exists, request details are redacted and bounded, MCP
+  negotiates Streamable HTTP `2025-11-25`, and the 9router catalog guard runs when given an explicit
+  root.
+- 9R remains ahead on **declared provider breadth (148 registry ids vs 69 OH cards), special-provider
+  OAuth/CLI wires, the operator dashboard's configurators and editors, richer capability family
+  defaults, and dashboard login/SSO**. It is behind on credential storage (plaintext SQLite
+  `data TEXT NOT NULL`, `9router/src/lib/db/schema.js:43`; usage `apiKey` column at `:120`) and on CI
+  (no root `test` script, `9router/package.json:9-21`; no workflow runs tests).
+- The **current working tree is red**: the gateway does not typecheck, and two repo guards fail.
+  Release discipline has regressed for the second time in this loop: `v3.96.0` points at a commit
+  whose manifest says `3.98.0`, and `3.98.0` is tagged and GitHub-released but absent from npm.
+- Both trees are **unmeasured on live requests**: no live provider key was used. Every "works" below
+  means implemented and covered by scripted/local tests.
 
-### Cycle-1 scorecard measurement (evidence below)
+### Scorecard (scale from `docs/reports/9router-parity-scorecard.md:24-25`)
 
-Scale from `docs/reports/9router-parity-scorecard.md:24-25`: 0 absent, 1 declared but broken,
-2 common case, 3 with guards, 4 measured across providers with regression tests, 5 better than reference.
-
-| # | Criterion | 9R | OH | OH ≥ 9R? | Where the evidence is |
+| # | Criterion | 9R | OH | OH ≥ 9R? | Evidence |
 | --- | --- | --- | --- | --- | --- |
-| 1 | Working provider coverage on live requests | 3 | 3 | = | §7; 149 vs 58 declared, no live calls either side |
-| 2 | Credential validation | 3 | 4 | yes | §8; OH declares strategy per registration |
-| 3 | Model-ID / upstream-ID / capability mapping | 4 | 4 | = | §6; both full-id then stripped, both keep upstream ids |
-| 4 | Tool calling breadth and reliability | 4 | 4 | = | §5; 9R cloaking/MCP, OH asserted refusal/loops |
-| 5 | Failover and multi-account rotation | 4 | 3 | **no** | §3; `smart`/`fusion` missing in OH |
-| 6 | Streaming / protocol surfaces | 4 | 3 | **no** | §5; video/fetch and Responses events missing |
-| 7 | Web-session / free-tier / special providers | 4 | 3 | **no** | §7; 9R has 21 OAuth + more special executors |
-| 8 | Observability | 3 | 4 | yes | §9; no prompt/header field in OH usage records |
-| 9 | Dashboard and operator surfaces | 4 | 3 | **no** | §10; CLI-tool/translator/MITM config pages |
-| 10 | Security at rest and in browser | 2 | 4 | yes | §8; 9R plaintext provider credential column |
-| 11 | Test/CI gate that runs and fails | 2 | 5 | yes | §11; 24 OH guards passed here |
-| 12 | Release discipline and audit trail | 2 | 5 | yes | §12; OH version check and audit passed here |
+| 1 | Working provider coverage on live requests | 3 | 3 | = | §6; 148 vs 69 declared, no live calls either side |
+| 2 | Credential validation | 3 | 4 | yes | §8; declared strategies beside factories |
+| 3 | Model-ID / upstream-ID / capability mapping | 4 | 4 | = | §5; both full-id then stripped; 9R regex family defaults richer |
+| 4 | Tool calling breadth and reliability | 4 | 4 | = | §7; OH cloaking (untracked) + asserted refusals + MCP bridge |
+| 5 | Failover and multi-account rotation | 4 | 4 | yes | §3; smart/fusion committed; 9R capacity adapter unmatched |
+| 6 | Streaming / protocol surfaces | 4 | 3 | **no** | §7; video/fetch/systemone now served, but some Responses event families absent |
+| 7 | Web-session / free-tier / special providers | 4 | 3 | **no** | §6; 148 vs 69 ids; OH stronger on OpenCode tier |
+| 8 | Observability | 3 | 4 | yes | §10; redacted request details, no content fields |
+| 9 | Dashboard and operator surfaces | 4 | 3 | **no** | §9; no CLI-tool configurator, editors or drag-and-drop combos |
+| 10 | Security at rest and in browser | 2 | 4 | yes | §11; 9R plaintext credentials; OH guards green |
+| 11 | Test/CI gate that runs and fails | 2 | 3 | yes | §12; OH gate exists but is red (2 repo failures + compile error) |
+| 12 | Release discipline and audit trail | 2 | 1 | **no** | §13; repeated tag/version defect + 3.98.0 npm gap |
 
-Rows 5, 6, 7 and 9 are behind and keep the loop running.
+Rows 6, 7, 9 and 12 keep the loop running, plus the working-tree compile break in §13.
 
 ---
 
 ## 2. Architecture
 
 **OH.** Plain Node `http` service, no web framework. Every request gets a 32-hex request id before
-any handler (`Kernel/API/src/server.ts:177-188`); guard order is loopback `Host` → 421, exact CORS
-origin → 403, cross-site check with exact OAuth-callback carve-out → 403, then an auth context decided
-once from allowlisted origin **and** per-launch token (`server.ts:189-219`). Build order is SDK →
-TokenSaver → Tools → API → frontend → CLI (`package.json:24-33`). The gateway is independently
-deployable; the published CLI bundles it and starts it (`package.json:44,62`).
+any handler (`Kernel/API/src/server.ts:207-209`); guard order is loopback `Host` → 421
+(`server.ts:210-212`), exact CORS origin → 403 (`:216`), cross-site check → 403 (`:225`), then one
+auth context from allowlisted origin and per-launch token (`:230`). Loopback binding is asserted
+outside containers (`server.ts:295-297`). Build order is SDK → TokenSaver → Tools → API → frontend →
+CLI (`package.json:24-33`); CI runs the same `pnpm verify` command (`package.json:44`,
+`.github/workflows/verify.yml:44`).
 
 **9R.** Next.js 16 standalone with a custom server that monkey-patches `http.createServer`
-(`custom-server.js:6-14`) to stamp a peer token and sanitise forwarded headers, and starts background
-token refresh (`custom-server.js:17-30`). `/v1/*` is rewritten to `/api/v1/*`, including repair of
-`/v1/v1/*` (`next.config.mjs:73-112`), so middleware authorises pre-rewrite paths. The engine claims
-to be standalone but imports app modules (`open-sse/handlers/chatCore.js:15`, prior report).
+(`9router/custom-server.js:6-14`) and rewrites `/v1/*` to `/api/v1/*`
+(`9router/next.config.mjs:73-112`). The engine claims to be standalone but imports app modules
+(`9router/open-sse/handlers/chatCore.js:15`).
 
-**Difference that matters:** OH's guard set is in one place and asserted; 9R's network-trust guard
-depends on which server entry point was used — a bare `next start` was a real GHSA
-(`CHANGELOG.md:602-610` in the prior comparison). OH has no equivalent of 9R's standalone engine
-package; a provider vendor that wants to embed only the router cannot do so from this tree.
-
----
+**Difference that matters.** OH's network-trust guards live in one place and are asserted; 9R's
+depend on which server entry point was used. OH has no equivalent of 9R's standalone embeddable
+engine package: a vendor that wants to embed only the router cannot do so from this tree.
 
 ## 3. Routing and failover
 
 **OH.** `RoutingEngine.plan()` reads health, limiter and latency as injected questions
-(`Kernel/API/src/core/routing-engine.ts:24-48, 100-118`). `resolveRoute()` filters enabled +
-credentialed connections, sorts by quota tier → priority → name, rotates balanced and `fastest`
-candidates, pins a named account first, then skips named reasons (`unhealthy`,
-`model-cooling-down`, `rate-limited`, `no-models`) at `routing.ts:669-817`. The explicit provider
-pin is a fence: a pin with no usable connection is refused rather than billed elsewhere
-(`routing.ts:711-724`). A per-connection health check avoids one account ejecting its siblings
-(`routing.ts:755-775`). `RequestExecutor` enforces deadlines, breaker and ledger
-(`request-executor.ts:175, 528, 649, 814`); hedging is its own policy (`hedge-policy.ts:24-93`).
+(`Kernel/API/src/core/routing-engine.ts:24-48`). `resolveRoute()` filters enabled and credentialed
+connections, sorts by quota tier → priority → name, rotates balanced/fastest candidates, pins a named
+account, and skips named reasons (`unhealthy`, `rate-limited`, `model-cooling-down`, `no-models`;
+`Kernel/API/src/core/routing.ts:658-705`, skip reason union at `:6`). A provider pin is a fence: a pin
+with no usable connection is refused rather than billed elsewhere (`routing.ts:876-883`). An explicit
+provider prefix may only be taken by a connection whose id or slug owns it (`:677`, `:848`). Failure
+wording distinguishes real quota/capacity refusals from other errors (`:422-465`). `RequestExecutor`
+enforces deadlines, breaker and attempt ledger, and hedging is a separate policy (`hedge-policy.ts`).
 
-**9R.** Combos are a first-class routing mode: `fallback | round-robin | smart | fusion`
-(`src/sse/handlers/chat.js:109-165`), with session stickiness, a router model and confidence
-threshold for `smart` (`open-sse/services/combo.js:344-450`), an anonymised judge panel for
-`fusion` (`:714-890`), and a capacity adapter that adds models when the requested one lacks a
-required capability (`chat.js:167-178`). Account rotation uses config-driven text/status rules,
-exponential 429 backoff and per-model locks (`open-sse/services/accountFallback.js:9-75`);
-unmatched 4xx is request-scoped and does not cool the account (`:59-71`). OH has since copied that
-last rule (`9c2d9b1c`, "Scope unmatched 4xx failures and honour Retry-After on retry").
+Virtual combos are now first-class: strategy union `priority | round-robin | fastest | smart |
+fusion` (`Kernel/API/src/core/virtual-models.ts:16,123-149`), `smart` requires a concrete router model
+and does one real router turn with bounded session stickiness (`service.ts:379-381,4523-4611`),
+`fusion` requires a judge model, anonymises panel answers and enforces quorum/grace/hard timeouts
+(`service.ts:4615-4750`). 9R's equivalents are `fallback | round-robin | smart | fusion`
+(`9router/src/sse/handlers/chat.js:109-165`) with an anonymised judge panel
+(`9router/open-sse/services/combo.js:714-890`) and account rotation rules
+(`9router/open-sse/services/accountFallback.js:9-75`).
 
-**Gap (high):** OH virtual models offer only `priority | round-robin | fastest`
-(`Kernel/API/src/core/virtual-models.ts:11,97`; resolution at `service.ts:4231-4267`), so a combo
-cannot ask a router model to choose by task, keep a session sticky for prompt-cache reasons, or fuse
-a panel of answers through a judge. 9R does all three. The improvement item 1 in §14 closes this.
+**Remaining gap (medium).** 9R has a capacity adapter that adds candidate models when the requested
+one lacks a required capability (`9router/src/sse/handlers/chat.js:167-178`). OH has no equivalent:
+a request for a model without a capability fails instead of being routed to a capable sibling.
 
----
+## 4. Provider onboarding and capabilities
 
-## 4. Provider integration, model IDs and capabilities
-
-**OH.** One private SDK package per provider with `adapter/` and vendored `lib/` (55 directories
-under `Kernel/SDK/`; `find Kernel/SDK -mindepth 1 -maxdepth 1 -type d | wc -l` → `55`). Registration
-is a typed table in `Kernel/API/src/core/service.ts:737-820` carrying factory and validation
-strategy; `ProviderResolver` has no provider id in its algorithm. Prefix stripping splits on the
-**first** slash and only for a connected provider (`Kernel/API/src/core/routing.ts:533-552`), `bareModelFor`
-removes only the dispatched provider's own prefix (`:556-568`), and `lookupModelId` normalises
-dots/dashes and thinking suffixes for comparison only (`:573-579`). Catalog-declared upstream ids are
-persisted as `modelMeta.u` (`connection-manager.ts:62-93`) and sent on dispatch
-(`service.ts:983-997, 3903, 3942, 3955`). Per-model tool narrowing tries the full id, bare id and
-normalised forms (`modelCapabilities.ts:8-28`) — the full-id-then-stripped pattern 9R uses at
-`open-sse/providers/capabilities.js:839-883`. 9R's `getModelUpstreamId` additionally rewrites
-thinking suffixes and tier variants (`open-sse/config/providerModels.js:95-133`), which OH's
-catalog does not do.
+**OH.** One private SDK package per provider with `adapter/` and vendored `lib/` (57 directories),
+and a typed registration table carrying factory plus validation strategy
+(`Kernel/API/src/core/service.ts:737-865`; strategies also in
+`Kernel/API/src/core/own-provider-adapters.ts:61-121`). 69 catalog cards are catalog metadata only;
+`tests/provider-cards.test.js` and `tests/provider-card-merge.test.js` assert that cards carry no
+measured claims and that the merge changes only values the gateway actually reported.
 
 **9R.** Declarative registry entries generate a static import index
-(`open-sse/providers/registry/index.js:1-80`, auto-generated comment at `:1`); wire quirks live in
-43 executors (`find open-sse/executors -maxdepth 1 -name '*.js' | wc -l` → `43`) over
-`BaseExecutor` (`open-sse/executors/base.js:11-204`). Adding a provider is cheaper than OH's new
-package, but the knowledge is spread across index, registry, models, capabilities, executor and
-tests.
+(`9router/open-sse/providers/registry/index.js:1-80`) and 43 executors over `BaseExecutor`
+(`9router/open-sse/executors/base.js:11-204`). Adding a provider is cheaper, but the knowledge is
+spread across index, registry, models, capabilities, executor and tests.
 
-**Verdict:** parity on identity mapping after the recent OH work; 9R still ahead on the number of
-provider-specific wire decisions captured.
+**Gap (high).** 148 9R registry ids vs 69 OH cards. Missing high-value ids include `cursor`, `zed`,
+`gemini-cli`, `grok-cli`, `commandcode`, `mimo-free`, `perplexity`, `together`, `fireworks`, `vertex`
+and `bedrock`. 9R also has 57 OAuth modules (e.g. `cursor`, `antigravity`, `gemini-cli`, `xai`,
+`zed`, `windsurf`, `trae`, `iflow`); OH's OAuth flows cover a smaller set. No live verification was
+performed on either side, so raw counts are not a claim that all 148 work.
 
----
+**Gap (medium).** Three shared ids disagree with 9R's product definitions: `xai` (9R has OAuth plus
+image/video/search lanes; OH has chat + video), `kimi` (9R coding endpoint), and `glm` (9R Z.ai CLI
+poll OAuth plus a second Claude-format transport; OH has an API-key-only slice at
+`src/data/providers.ts:1360`, `own-provider-adapters.ts:115-121`).
 
-## 5. Tool calling and streaming protocols
+## 5. Model IDs, upstream IDs and capabilities
 
-**Tool contract.** OH's single table declares `tools`, `toolChoice` and `web` for every id
-(`Kernel/Tools/src/caps.ts:24-26, 113-142`). `normalizeToolsRequest` refuses a forced call without
-definitions and drops/renames unsanitised definitions (`Kernel/Tools/src/normalize.ts:71-137`).
-`applyToolContract` now refuses declared-but-unserved tools before any provider call instead of
-letting an agent loop end as normal prose (`Kernel/API/src/core/service.ts:3775-3805`). Call IDs are
-healed deterministically (`Kernel/Tools/src/toolHistory.ts:14-58`; tests
-`Kernel/Tools/test/toolHistory.test.js:5-42`), matching the intent of 9R's
-`open-sse/translator/concerns/toolCall.js:9-27,123-163`. `tests/tools-caps.test.js` makes rows
-match what adapters actually send; `Kernel/API/test/tool-contract.test.js:137-146` pins the healed
-id. Local tools are read-only `glob/grep/read` with `bash` removed
-(`Kernel/Tools/src/gatewayTools.ts:3-31`).
+**OH.** Prefix stripping splits on the first slash and only for a connected provider
+(`Kernel/API/src/core/routing.ts:658-677`), `bareModelFor` removes only the dispatched provider's
+prefix (`:688-695`), and `lookupModelId` normalises dots/dashes for comparison only (`:705`). The
+full-id-then-bare-then-normalised search is used for per-model tool narrowing
+(`Kernel/API/src/core/modelCapabilities.ts:8-28`, called at `routing.ts:66-67`). Catalog-declared
+upstream ids are persisted and sent on dispatch (`service.ts:983-997`).
 
-**What OH lacks here (medium):** 9R repairs and cloaks Claude tool names with decoys and a restore
-map (`open-sse/utils/claudeCloaking.js:58-118,134-169`) and bridges external MCP plugins from stdio
-to SSE (`src/lib/mcp/stdioSseBridge.js:1-8`). OH's `/v1/mcp` is a gateway-introspection JSON-RPC
-endpoint with three tools (`Kernel/API/src/routes/mcp.ts:31-42`) — useful, but not a client-plugin
-bridge, and no cloaking code exists anywhere in OH (`rg 'cloak|decoy' Kernel/API/src Kernel/SDK/*/adapter Kernel/SDK/*/lib Kernel/Tools/src` → no matches).
+**9R.** `getModelUpstreamId` additionally rewrites thinking suffixes and tier variants
+(`9router/open-sse/config/providerModels.js:95-133`), and family defaults are regex-driven
+(`9router/open-sse/providers/capabilities.js:573-584`).
 
-**Streaming OH.** Failover is decided before the first byte; clean streams end with one
-`[DONE]`, mid-stream failure emits `event: error` with no sentinel
-(`Kernel/API/src/routes/inference.ts:949-1054`). Anthropic Messages reframes the same normalized
-chunks with indexed blocks and tool deltas (`:553-523`), Responses emits text/tool/terminal events
-(`:628-727`), and 360 s idle / 1800 s absolute stream budgets are explicit
-(`Kernel/API/src/core/config.ts:25-37,152-153`) — matching 9R's `STREAM_STALL_TIMEOUT_MS` at
-`open-sse/config/runtimeConfig.js:53`.
+**Gap (low).** OH does not implement tier/suffix upstream-id rewriting and has fewer family defaults.
+The working tree deliberately defers tier mapping because no OH catalog row currently states a tiered
+upstream id; adding unmeasured context windows would be a truthfulness regression.
 
-**Gap (high): Responses event completeness.** OH emits `response.output_text.delta`,
-`response.output_item.added`, `response.function_call_arguments.delta/.done`,
-`response.output_item.done` and `response.completed`
-(`Kernel/API/src/routes/inference.ts:669-715`). 9R emits `response.created`,
-`response.in_progress`, `response.reasoning_summary_part.added`,
-`response.reasoning_summary_text.delta/.done`, `response.reasoning_summary_part.done`,
-`response.output_text.done` and `response.failed`
-(`open-sse/translator/response/openai-responses.js:81-95,190-204`,
-`open-sse/transformer/responsesTransformer.js:105-141,278-292`,
-`open-sse/utils/responsesStreamHelpers.js:7-45`). Official OpenAI streaming guidance lists the
-wider event union (§13). A strict Responses client that waits for `response.created` or a terminal
-`response.failed` will not see either from OH on error.
+## 6. Web-session and free-tier providers
 
-**Gap (medium): protocol breadth.** OH serves chat, messages, responses, embeddings, images
-(`Kernel/API/src/routes/inference.ts:42-84`), audio speech/transcriptions and search
-(`Kernel/API/src/routes/media.ts:13,51,85`). 9R additionally serves video generation
-(`src/sse/handlers/videoGeneration.js:1-20`), web fetch (`src/sse/handlers/fetch.js:1-20`),
-systemone, and TTS/STT handler families (`src/sse/handlers/`). OH has no video or fetch route.
+**OH.** Descriptors carry provider-owned instructions and paste/check routes for ChatGPT, Qwen,
+DeepSeek, Gemini, Grok, Perplexity, Token Harbor and DuckDuckGo (`src/lib/webSessionProviders.ts:17,
+63,111,142,179,220,257,296,329`). The OpenCode Console/Go free tier is integrated beyond 9R:
+runtime discovery, opt-in install, `/proc`-based adoption of the gateway's own orphan, streamed
+`session.text.delta`/`session.reasoning.delta`, a deny-first read-only tool allow list, and documented
+read exposure (`Kernel/API/src/core/opencode-runtime.ts:24-55,180-242`, `opencode-service.ts`).
 
----
+**9R.** Web executors for `chatgpt-web`, `deepseek-web`, `gemini-web`, `muse-web`, `uc-web`,
+`veoaifree-web`; special/provider CLI wires such as `cursor.js`, `commandcode.js`, `antigravity.js`,
+`mimo-free.js`, `zed.js`. Its `opencode` and `opencode-zen` executors have no equivalent
+install/adopt/tool-scope story.
 
-## 6. Credentials, auth and security
+**Gap (high).** The 79-id breadth difference (§4) is concentrated here. Copying 9R's browser
+impersonation, anti-bot and MITM stack is explicitly out of scope; the parcels in §15 take only the
+wire knowledge, not the spoofing.
+
+## 7. Tool calling and streaming protocols
+
+**Tools.** OH's single table declares `tools`, `toolChoice` and `web` per id
+(`Kernel/Tools/src/caps.ts:27-30,127-151`); `normalizeToolsRequest` refuses forced calls without
+definitions; `applyToolContract` refuses declared-but-unserved tools before a provider call
+(`Kernel/API/src/core/service.ts:3775-3805`). Deterministic call-id healing and local read-only tools
+are asserted. Claude tool cloaking with suffixed names, unavailable decoys and a restore map is
+present in the **uncommitted** `Kernel/Tools/src/toolCloaking.ts:19-30` and wired at
+`service.ts:3848-4016`, echoing 9R's `open-sse/utils/claudeCloaking.js:58-169` without its forged
+billing header or TLS impersonation. The supervised MCP plugin bridge spawns only registered ids with
+`shell:false` (`Kernel/API/src/routes/mcpPlugins.ts:7,107-143`). `/v1/mcp` negotiates MCP
+`2025-11-25` with a `2024-11-05` fallback and an `Accept` check
+(`Kernel/API/src/routes/mcp.ts:8-23,100-113`).
+
+**Streaming.** Failover is decided before the first byte; mid-stream failure emits `event: error`
+without a false `[DONE]` (`Kernel/API/src/routes/inference.ts`). Responses SSE now emits
+`response.created`, `response.in_progress`, `response.output_text.delta/.done`,
+`response.output_item.added/.done`, `response.function_call_arguments.delta/.done`,
+`response.reasoning_summary_part.added/.done`, `response.reasoning_summary_text.delta/.done`,
+`response.completed` and `response.failed` (`inference.ts:630-811`). Idle/absolute budgets are 360 s
+and 1800 s (`Kernel/API/src/core/config.ts:223-224`). `/v1/fetch` is served
+(`Kernel/API/src/routes/fetch.ts:1-35`); `/v1/videos/*` is a real xAI asynchronous job lane with a
+connection-bound poll (`Kernel/API/src/routes/video.ts:5-14,99-132`,
+`Kernel/SDK/xai/adapter/index.ts:11-17,87-118`), and 7 scripted route tests passed here. A native
+System One JSON lane exists in the uncommitted `Kernel/API/src/routes/systemone.ts:1-20` wired at
+`Kernel/API/src/server.ts:39,143,427`, matching 9R's `src/sse/handlers/systemone.js`.
+
+**Gap (medium): Responses event union.** The official OpenAI streaming event list (§14, internet
+finding 3) includes `response.content_part.added/.done`, `response.refusal.delta/.done`,
+`response.output_text.annotation.added` and the `response.file_search_call.*` /
+`response.code_interpreter_call.*` families, none of which OH emits. A strict client waiting for
+those events will see silence even when the turn succeeded.
+
+## 8. Credentials and authentication
 
 **OH.** `api-key | oauth | none` credentials, one `storedCredential()` for writer and reader
-(`Kernel/API/src/core/connections.ts:1682-1688,1752`), AES-256-GCM with scrypt, random salt/IV and
-atomic write (`:1369-1393`), generated 0600 master key (`:1412`). Gateway keys are `ohk_` + random
-bytes, SHA-256 stored and constant-time compared, with rpm/expiry at the gate
-(`Kernel/API/src/core/api-keys.ts:99-125,499,510-514`; `api-key-manager.ts:176-183`). Provider
-validation strategy is declared beside the factory — `credential`, `none` or `validateOnSave`
-(`service.ts:737-820`) — so a Check button cannot silently validate against a public `/models`
-endpoint. PKCE S256 is used for Codex, Claude Code, MiniMax, Qoder and Kiro
-(`Kernel/SDK/codex/adapter/index.ts:170-187`, `Kernel/SDK/claude-code/adapter/index.ts:430-474`,
-`Kernel/API/src/providers/codexOAuth.ts:161-179`). Guards asserted in this ask: no-secrets scans
-15 shapes over 1587 tracked files with 0 exemptions; browser storage allows only two non-secret
-keys and asserts sessionStorage/cookies/IndexedDB/Cache at zero.
+(`Kernel/API/src/core/connections.ts:678-694`), AES-256-GCM with scrypt, random salt/IV and atomic
+write (`:1371-1382`), 0600 master key. Gateway keys are `ohk_` + 43 random chars, SHA-256 stored and
+constant-time compared, with rpm/expiry at the gate (`Kernel/API/src/core/api-keys.ts:99-101,493,499,
+510-514`). PKCE S256 is used in Codex, Claude, Claude Code, MiniMax, Qoder and Kiro flows. Validation
+strategy is declared beside the factory so a Check button cannot silently validate against a public
+`/models` endpoint. The no-secrets, browser-storage and dashboard-honesty guards were green in this
+ask's repo suite.
 
-**9R.** Provider connections are stored as a plaintext `data TEXT` JSON column
-(`src/lib/db/schema.js:33-50`), and usage history has an `apiKey` column (`:120`). Dashboard auth is
-bcrypt + 24 h JWT cookies (`src/lib/auth/dashboardSession.js:1-2,61-70`) with a per-IP in-memory
-login limiter (`src/lib/auth/loginLimiter.js:1-51`), OIDC/SAML (`src/lib/auth/oidc.js`,
-`saml.js`), and HMAC-keyed API keys with model allow-lists (`src/shared/utils/apiKey.js`). SSRF
-guard exists but is applied per call site (`src/shared/utils/ssrfGuard.js` used in five places).
+**9R.** Provider connections are plaintext SQLite (`9router/src/lib/db/schema.js:43`), usage history
+has an `apiKey` column (`:120`). Dashboard auth is bcrypt + 24 h JWT cookies
+(`9router/src/lib/auth/dashboardSession.js`), per-IP progressive in-memory lockout
+(`9router/src/lib/auth/loginLimiter.js:1-8,23-27`), OIDC with PKCE S256 (`oidc.js:100-105`) and SAML,
+plus HMAC-keyed API keys with model allow-lists.
 
 **Gap (medium): sign-in surface.** OH has no dashboard login, lockout, OIDC/SAML or per-key model
-allow-list; `Workspaces` are metadata labels (`Kernel/API/src/core/workspaces.ts:6-28`), not
-isolated tenants. This is acceptable for a loopback single-user gateway but behind 9R on a shared
-host. RFC 9700 guidance is in §13.
+allow-list; workspaces are metadata labels. Acceptable for a loopback single-user gateway, behind 9R
+on a shared host. Do not copy 9R's plaintext credential column.
 
----
+## 9. Dashboard
 
-## 7. Provider onboarding, web sessions and free tiers
-
-Counted with:
-
-```
-# OH
-rg -o "id: '[a-z0-9-]+'" src/data/providers.ts | sed ... | sort -u | wc -l   -> 58
-# 9R
-find open-sse/providers/registry -maxdepth 1 -type f -name '*.js' | wc -l     -> 149
-LC_ALL=C comm -23 /tmp/9r_ids.txt /tmp/oh_ids.txt | wc -l                     -> 120
-LC_ALL=C comm -12 /tmp/9r_ids.txt /tmp/oh_ids.txt | wc -l                     -> 29
-```
-
-Shared ids include `anthropic`, `chatgpt-web`, `cline`, `clinepass`, `codex`, `deepseek`,
-`gemini`, `groq`, `kiro`, `nvidia`, `openai`, `openrouter`. 120 registry ids have no OH card,
-including `cursor`, `claude`, `gemini-cli`, `grok-cli`, `xai`, `glm`, `perplexity`, `together`,
-`fireworks`, `vertex`, `bedrock`, `synthetic`, `zed` and `windsurf`. OH has 29 ids 9R lacks,
-mostly OpenAI-compatible routers plus `zcode`, `qwen-web`, `opencode-console`, `duckduckgo-web`.
-Raw counts are not a claim that all 149 work; many are aliases or media/search providers.
-
-**OH free-tier depth exceeds 9R in one area.** OpenCode Console/Zen/Go is integrated with local
-service discovery, runtime install, `/proc`-based adoption of its own orphan, streamed
-`session.text.delta`/`session.reasoning.delta`, a deny-first read-only tool allow list and an
-explicitly documented read exposure
-(`Kernel/API/src/core/opencode-runtime.ts:281-315,345-410`,
-`Kernel/API/src/core/opencode-service.ts`, `docs/SPEC-SDK.md:1124-1498`). 9R has `opencode-zen`
-and `opencode` executors but no equivalent install/adopt/tool-scope story.
-
-**Web sessions.** OH descriptors carry provider-owned instructions and paste/check routes for
-ChatGPT, Qwen, DeepSeek, Gemini, Grok, Perplexity, Token Harbor, ZCode and DuckDuckGo
-(`src/lib/webSessionProviders.ts:9-80`, `Kernel/API/src/routes/oauth.ts:545-715`). 9R has web
-executors for `chatgpt-web`, `deepseek-web`, `gemini-web`, `muse-web`, `uc-web`, `veoaifree-web`.
-Neither tree can honestly claim a live web session works in this ask; the OH docs record measured
-session captures for several of them.
-
-**9R special-provider breadth.** 31 OAuth provider modules
-(`find src/lib/oauth -name '*.js' | wc -l` returns more because of duplicate layer files; modules
-include `cursor`, `antigravity`, `gemini-cli`, `xai`, `zed`, `windsurf`, `trae`, `iflow`) and
-executors for binary/subscription wires such as `cursor.js`, `commandcode.js`, `antigravity.js`,
-`mimo-free.js`, `zed.js`. OH reaches 9R's `zed`, `cursor`, `glm` families only via generic
-OpenAI-compatible routing or not at all. Improvement item 4 targets a small, high-value subset
-rather than all 120.
-
----
-
-## 8. Observability
-
-**OH.** Usage records have no field that can hold a prompt, response, header or credential
-(`Kernel/API/src/core/usage-store.ts:9-31`); a test scans record keys so a content field fails the
-suite. Every record carries a request id and an ordered attempt ledger with `dispatched`, outcome
-and error code (`:33-50`). The Logs page merges 24 h history with a 500-event live stream, 20-row
-paging, filters, attempt-ledger search and JSON export (`src/pages/LogsPage.tsx:5-63,121-179`).
-`/metrics`, `/v1/routing`, `/v1/logs/stream`, `/v1/events` and `/health` are the operational
-surfaces. Tool-contract telemetry (declared/forwarded/dropped/stripped) is now carried into the
-usage record (`144b73cb`).
-
-**9R.** SQLite request-detail capture stores payloads with a 5 KiB JSON cap and retention trim
-(`src/lib/db/repos/requestDetailsRepo.js:7,122-130`), plus a console-log buffer and MITM request
-views. That is genuinely more debuggable but stores content; the earlier OH decision deliberately
-refuses it.
-
-**Gap (low/medium):** OH has no redacted request-detail view, so an upstream 400 caused by a
-particular tool schema or message shape can only be diagnosed from an error code. Add a separate,
-bounded, redacted record — never widen `UsageRecord`.
-
----
-
-## 9. Dashboard and operator surfaces
-
-**OH.** One React Router app at `/dashboard` with Providers, Models (virtual-model combos),
-Routing, Keys, Usage, Logs, Settings, Token Saver, About and provider detail/usage
-(`src/dashboardApp.tsx:148-158`, `src/lib/routes.ts:6-60`). Card values may only come from measured
-state (`src/lib/providerCards.ts`; `tests/provider-card-merge.test.js`), success states set in timers
-fail `tests/dashboard-truthfulness.test.js`, and blur under sticky surfaces fails
+**OH.** One React Router app at `/dashboard` with Providers, Models, Routing, Keys, Usage, Logs,
+Settings, Token Saver, About, provider detail/usage, MITM, proxy pools, tunnels, skills and (in the
+uncommitted tree) a translators inspector (`src/dashboardApp.tsx:151,190`, `src/lib/routes.ts:40-41`).
+Card values may only come from measured state (`src/lib/providerCards.ts`), success states set in
+timers fail `tests/dashboard-truthfulness.test.js:43-84`, and blur under sticky surfaces fails
 `tests/ui-performance.test.js`. The page wrapper is deliberately not keyed on path.
 
-**9R.** 16 top-level dashboard sections and 24 `page.jsx`/`page.js` files under the dashboard app,
-including CLI-tool configurators for ~30 clients, combos with drag-and-drop, Monaco editors,
-translator inspector, media providers, proxy pools, MITM, tunnels, PXPIPE, console log, quota and
-skill marketplace (`find 'src/app/(dashboard)/dashboard' -mindepth 1 -maxdepth 1 -type d | wc -l`
-→ `16`). OH has gateway API routes for tunnels, MITM, proxy pools, skills and workspaces
-(`Kernel/API/src/server.ts:406`) but no dashboard pages for them.
+**9R.** 16 top-level dashboard sections and 24 `page.jsx`/`page.js` files, including CLI-tool
+configurators for ~30 clients, drag-and-drop combos, Monaco editors, translator inspector, media
+providers, proxy pools, MITM, tunnels, PXPIPE, console logs, quota and a skill marketplace.
 
-**Gap (medium):** operator breadth — no CLI-tool configurator, translator inspector or MITM/
-proxy-pool UI. Improvement item 7.
+**Gap (medium).** OH has no CLI-tool configurator, Monaco editors or combo drag-and-drop. The
+translator inspector is a read-only GET inventory, not 9R's request/response workbench.
+
+## 10. Observability
+
+**OH.** Usage records have no field that can hold a prompt, response, header or credential
+(`Kernel/API/src/core/usage-store.ts:9-31`); a test scans record keys. Each record carries a request
+id and an ordered attempt ledger with `dispatched` and error codes (`:33-50`). Redacted request
+details are opt-in and bounded to 200 records / 7 days / 512 KiB, storing only request id, model,
+provider, sanitised error line, tool names and schema byte counts
+(`Kernel/API/src/core/request-details.ts:6-45`, route at
+`Kernel/API/src/routes/observability.ts:34`). The Logs page merges 24 h history with a live stream.
+
+**9R.** SQLite request-detail capture stores payloads with a 5 KiB JSON cap and retention trim
+(`9router/src/lib/db/repos/requestDetailsRepo.js:7,122-130`) plus a console-log buffer and MITM views.
+More debuggable, but it stores content.
+
+**Gap (low).** OH's redacted view cannot diagnose an upstream 400 caused by a specific message shape;
+adding that content would break the type-level guarantee, so any such view must stay a separate,
+opt-in, bounded record.
+
+## 11. Security summary
+
+OH wins at rest and in the browser; 9R wins on sign-in breadth. The one OH-specific security risk
+found in this ask is not in the crypto but in the working tree: a compile error (§13) prevents the
+gateway from building at all, so none of the new routes can be shipped until it is fixed. Neither
+tree had a live credential used in this comparison. 9R's SSRF guard is applied per call site
+(`9router/src/shared/utils/ssrfGuard.js`); OH centralises origin checks in `server.ts:210-225`.
+
+## 12. Tests and CI
+
+**OH.** `pnpm verify` is the single canonical gate (`package.json:44`), run by CI with full history
+and tags and `persist-credentials: false` (`.github/workflows/verify.yml:20-44`). Playwright is a
+separate job; `release-audit.yml` is scheduled. In this ask the SDK suite was 982/982 green, the
+catalog guard 6/6 with an explicit root, the video route 7/7 green, but the repo suite 497/505 with
+two failures and the gateway suite did not compile. So the gate exists and runs, but is currently red.
+
+**9R.** 456 `*.test.js` files and Vitest config, but no root `test` script
+(`9router/package.json:9-21`), and none of the three workflows runs tests. `CLAUDE.md:43-49`
+documents ~938 pass / ~64 fail as the expected baseline and a manual regression script not wired
+into CI. OH's guard set is smaller but actually enforced.
+
+## 13. Release discipline — current red gates
+
+1. **Tag/version mismatch at HEAD.** `v3.96.0` resolves to `3e4088f9` (HEAD), whose `package.json`
+   says `3.98.0`. `node --test tests/release-trail.test.js` therefore fails: `v3.96.0: its package.json
+   says 3.98.0`. The repair commits `67fc9319` and `6a4484d4` fixed `v3.98.0` and `v3.97.0` but left
+   `v3.96.0`. The correct repair is to move `v3.96.0` to `bcd6222d` (which carries 3.96.0 and is on
+   `main`), not to downgrade any manifest.
+2. **Working-tree compile regression.** `pnpm --filter @omnihilbras/kernel-api test` and a direct
+   `tsc -p tsconfig.json` both stop at `src/core/service.ts(5030,23): error TS2304: Cannot find name
+   'noCandidateMessage'.` The uncommitted `runSystemOne()` uses the constant exported by
+   `Kernel/API/src/core/routing.ts:949` but never imports it; `request-executor.ts:2` does import it.
+   No gateway test ran.
+3. **Working-tree doc-count regression.** `tests/documentation-counts.test.js:266` fails because
+   `docs/architecture/README.md:73,78` states line counts (817, 5130) that the modified files no
+   longer have (949, 5237; also `inference.ts` 1758→1766 and `server.ts` 486→490).
+4. **npm gap.** `pnpm release:audit` exits 1 with `v3.98.0 has no npm version`; a GitHub release for
+   `v3.98.0` does exist (published 2026-11-23). `3.96.0` is a recorded, explained npm gap.
+
+`node scripts/check-version.mjs` passes because the working-tree manifests agree; it does not check
+tags. `pnpm verify` would currently fail at typecheck before reaching the repo suite.
 
 ---
 
-## 10. Tests, CI and release discipline
+## 14. Internet findings (facts the trees cannot supply)
 
-**OH.** `package.json:44` defines `verify` as version → brand → typecheck → test → SPEC guard →
-build → CLI smoke → bundle budget, and `.github/workflows/verify.yml:20-44` runs exactly that command
-with full history and tags. Playwright is a separate job (`e2e.yml`); release audit is scheduled
-(`release-audit.yml`). `pnpm version:check` passed here (`3.95.0`); 24 repo-guard assertions
-passed. `tests/9router-catalog.test.js` alone skips all four cases here because its registry path is
-hardcoded to `/home/gin/work/9router` (`tests/9router-catalog.test.js:34-40`,
-`scripts/build-9router-catalog.mjs:18-22`) — a skipped guard cannot detect that the committed
-catalog says **124** registry entries (`docs/architecture/9router-provider-catalog.md:9`) while the
-current 9R tree has **149**. Improvement item 10.
-
-**9R.** 456 `*.test.js` files under `tests/`, Vitest configured in `tests/vitest.config.js:1-20`,
-but the root manifest has no `test` script (`package.json:9-21`) and none of the three GitHub
-workflows runs tests. `CLAUDE.md:43-45` documents ~938 pass / ~64 fail as the expected baseline, with
-26 catalogued known failures and a manual comparison script `tests/__baseline__/verify-no-regression.mjs:1-21`
-that is not wired into CI. Release drift is live: `package.json:3` = 0.5.116, `cli/package.json:3` =
-0.5.119, `CHANGELOG.md:1` = 0.5.119, while `git tag --sort=-v:refname | head -1` → `v0.5.119`.
-
-**OH release trail.** 175 tags; `git tag --sort=-v:refname | head -10` starts at `v3.95.0`;
-`tests/release-trail.test.js:152-153` pins 22 early-era + 88 suspended-publishing exemptions;
-`scripts/audit-release-trail.mjs:20-35` explains why the online audit is separate from verify.
-Externally, registry and GitHub both confirm the current version (§13). **Not run here:** the
-networked `pnpm release:audit`; only its offline test half ran.
-
----
-
-## 11. Internet findings (not derivable from either tree)
-
-1. **MCP transport is now Streamable HTTP.** The current MCP specification
-   (`https://modelcontextprotocol.io/specification/2025-11-25/basic/transports`) says the protocol
-   defines stdio and Streamable HTTP, that the latter "replaces the HTTP+SSE transport" from
-   2024-11-05, that the server "MUST provide a single HTTP endpoint path … that supports both POST
-   and GET methods", that invalid `Origin` "MUST" get 403, and that clients "MUST" include
-   `MCP-Protocol-Version`. OH negotiates `2024-11-05` and only handles POST
-   (`Kernel/API/src/routes/mcp.ts:63-124`). The 2025-06-18 page
-   (`https://modelcontextprotocol.io/specification/2025-06-18/basic/transports`) says the same about
-   the replacement. This makes item 6 concrete and standards-backed.
-2. **OAuth security BCP.** RFC 9700 (January 2025),
-   `https://datatracker.ietf.org/doc/html/rfc9700`: §2.1 requires exact redirect-URI string matching
-   except for loopback ports; §2.1.1 requires PKCE for public clients with S256 and token-endpoint
-   enforcement; §2.2.2 requires public-client refresh tokens to be sender-constrained or rotated.
-   OH satisfies the first two for its code-flow providers (§8) but has no general refresh-token
-   rotation/replay-revocation module (`Kernel/API/src/core/token-renewal.ts:9-16`), so a future
-   provider that returns a long-lived refresh token is not covered by a stated policy.
-3. **Responses streaming event names.** OpenAI's "Streaming API responses" guide
-   (`https://developers.openai.com/api/docs/guides/streaming`) documents `response.created`,
-   `response.output_text.delta`, `response.completed`, `error` and a union including
-   `ResponseInProgressEvent`, `ResponseReasoning*`, `ResponseRefusal*`,
-   `ResponseFunctionCallArguments*` and `ResponseFailedEvent`. This corroborates the §5 event gap;
-   the guide explicitly points to the API reference for the full list, so the list here is not claimed
-   exhaustive.
-4. **OH's current release is externally real.** `https://registry.npmjs.org/@hilbras%2Fomnihilbras/latest`
-   returned `"version": "3.95.0"`; `https://api.github.com/repos/Hilbras/OmniHilbras/releases/tags/v3.95.0`
-   returned tag `v3.95.0`, published `2026-11-23T00:24:52Z`. These are facts neither tree can prove.
+1. **`3.98.0` is not on npm.** `https://registry.npmjs.org/@hilbras%2Fomnihilbras/latest` returned
+   `"version": "3.97.0"`; `https://registry.npmjs.org/@hilbras%2Fomnihilbras/3.98.0` returned HTTP
+   404, as did `/3.96.0`. Actionable: after repairing the tag and the working tree, publish from
+   `cli/` and poll `npm view @hilbras/omnihilbras@3.98.0 version`; do not bump to close a bookkeeping
+   gap.
+2. **The GitHub half of `v3.98.0` is complete.**
+   `https://api.github.com/repos/Hilbras/OmniHilbras/releases/tags/v3.98.0` returned a non-draft
+   release, `published_at: 2026-11-23T09:58:40Z`. So only npm is missing — this is a two-call audit
+   fact, not a missing release ceremony.
+3. **OpenAI's Responses streaming union is wider than OH's.**
+   `https://developers.openai.com/api/docs/guides/streaming-responses` names
+   `response.content_part.added`, `response.content_part.done`, `response.output_text.annotation.added`,
+   `response.refusal.delta`, `response.refusal.done`, `response.file_search_call.*` and
+   `response.code_interpreter_call.*` in addition to the lifecycle and text events OH emits. Action:
+   add the missing event families for a strict client (improvement item 5).
+4. **MCP `2025-11-25` is the current transport spec.**
+   `https://modelcontextprotocol.io/specification/2025-11-25/basic/transports` names Streamable HTTP
+   as current, requires `Accept: application/json, text/event-stream`, `Origin` validation, a
+   `MCP-Protocol-Version` header and 202 for notifications. OH implements these
+   (`Kernel/API/src/routes/mcp.ts:8-23,100-113`); no action needed.
+5. **Codex CLI pin is ahead of 9router.**
+   `https://registry.npmjs.org/@openai%2Fcodex/latest` returned `0.171.0`, matching OH's adapter pin;
+   9router pins `0.167.1` (`9router/open-sse/providers/registry/codex.js:5`). No action needed; no
+   live Codex turn was made.
 
 ---
 
-## 12. Ranked, concrete improvement plan
+## 15. Ranked, concrete improvement plan
 
-Ordering: closeness to the scorecard's four failing rows, then user-visible impact, then cost. Each
-item names files, the behavior to add, and a proving test. "Cost" flags a turn that spends money.
+Each item names files, the behavior to add and a proving test. Nothing in this plan was executed by
+this report; no source was edited, nothing was committed, tagged, published, or taken through
+`pnpm verify`.
 
-1. **Add `smart` and `fusion` virtual-model strategies — closes scorecard row 5 (high).**
-   Files: `Kernel/API/src/core/virtual-models.ts:11,97` (strategy union and parser),
-   `Kernel/API/src/core/service.ts:4214-4267` (planning), `src/pages/ModelsPage.tsx:160-186`
-   (editor), `docs/SPEC-SDK.md:413-420` (spec line; `tests/gateway-routes.test.js` guards it).
-   Behavior: `smart` calls a configured router model with the prompt, uses a confidence threshold
-   and a session-sticky choice, and falls back to declared target order on router error; `fusion`
-   fans one prompt out to enabled targets in parallel, anonymises answers as Source N, asks a judge
-   model for one synthesis, cancels outstanding members on client abort, and refuses to start when
-   no panel member is enabled. Both must spend real turns and say so in the UI, not simulate them.
-   Proving test: new `Kernel/API/test/virtual-smart-fusion.test.js` plus extensions to
-   `Kernel/API/test/virtual-models-routing.test.js`; scripted transports assert router selection,
-   judge prompt anonymisation, abort propagation, and that `UsageRecord` keys still contain no
-   prompt/response fields. Reference behavior: `9router/open-sse/services/combo.js:364-450,714-890`.
+1. **Make the working tree compile and the repo suite green before any further parity work (high).**
+   Files: `Kernel/API/src/core/service.ts:5030`, `Kernel/API/src/core/routing.ts:949`,
+   `docs/architecture/README.md:73,78`. Behavior: import `noCandidateMessage` from `./routing.js`
+   in `service.ts` (or use the existing helper that builds the no-candidate error) so `runSystemOne`
+   compiles; regenerate the architecture doc's measured-state table from the current files. Proving
+   test: `pnpm --filter @omnihilbras/kernel-api test` executes the gateway suite (currently it dies at
+   tsc), and `node --test tests/documentation-counts.test.js` passes. Both currently fail.
 
-2. **Complete the Responses SSE event contract — closes part of row 6 (high).**
-   Files: `Kernel/API/src/routes/inference.ts:628-727`, `Kernel/API/src/core/provider-responses-lane.ts`,
-   `docs/SPEC-SDK.md:355-370`. Behavior: emit `response.created` before work,
-   `response.in_progress`, `response.reasoning_summary_part.added` /
-   `response.reasoning_summary_text.delta` / `.done` / `response.reasoning_summary_part.done` when
-   reasoning is present, `response.output_text.done`, `response.output_item.done`,
-   `response.completed`, and a terminal `response.failed` on abort/stall with no fabricated success.
-   Proving test: extend `Kernel/API/test/responses-route.test.js` with a scripted reasoning + tool
-   stream that asserts exact event names/order and a failure case with no `response.completed`.
-   References: `9router/open-sse/translator/response/openai-responses.js:81-95,190-204`,
-   `open-sse/utils/responsesStreamHelpers.js:7-45`, internet finding 3.
+2. **Repair the release trail, then publish 3.98.0 (high).**
+   Files: tags `v3.96.0` and `v3.98.0`, `scripts/audit-release-trail.mjs`,
+   `.github/workflows/release-audit.yml`, `package.json:4`, `Kernel/API/package.json:3`,
+   `cli/package.json:3`. Behavior: move `v3.96.0` to `bcd6222d` (the commit that carries 3.96.0),
+   keep the manifests at 3.98.0, confirm `v3.98.0` points at that commit, publish from `cli/`, and
+   poll the registry. Add a pre-tag check that runs the release-trail assertion against the commit
+   being tagged so the third occurrence is caught before tagging. Proving test:
+   `node --test tests/release-trail.test.js` green, `pnpm release:audit` exit 0, and
+   `npm view @hilbras/omnihilbras@3.98.0 version` echoing 3.98.0. All three currently fail.
 
-3. **Add video generation and web fetch routes — closes the rest of row 6 (medium).**
-   Files: new `Kernel/API/src/routes/video.ts` and `fetch.ts` wired in
-   `Kernel/API/src/server.ts:406` and `Kernel/API/src/routes/inference.ts:1627-1632`, plus
-   `docs/SPEC-SDK.md:490`, `tests/gateway-routes.test.js`. Behavior: OpenAI-shaped endpoints that
-   route through the existing executor/ledger; a provider with no capability returns a named
-   `NOT_SUPPORTED`, never a placeholder URL or simulated body; fetch applies the existing
-   destination guard (`Kernel/API/src/core/url.ts`) so loopback/private URLs are refused.
-   Proving test: `Kernel/API/test/video-route.test.js` and `fetch-route.test.js` with scripted
-   transports, plus an SSRF case for `http://127.0.0.1`. References:
-   `9router/src/sse/handlers/videoGeneration.js:1-20`, `fetch.js:1-20`.
+3. **Commit the parity parcels that currently exist only as untracked files (high).**
+   Files: `Kernel/Tools/src/toolCloaking.ts`, `Kernel/Tools/test/toolCloaking.test.js`,
+   `Kernel/API/test/tool-cloaking.test.js`, `Kernel/API/src/routes/{systemone,translators}.ts`,
+   `Kernel/API/test/translators-route.test.js`, `src/pages/TranslatorPage.tsx`,
+   `tests/e2e/translators.spec.ts`. Behavior: after item 1, stage and commit these with their tests
+   and spec lines so the next checkout actually has the cloaking, System One and translators
+   surfaces; do not leave behavior living in an untracked file. Proving test: the gateway suite
+   (item 1) plus the translator Playwright spec (`tests/e2e/translators.spec.ts`) against a fake
+   gateway, and `tests/gateway-routes.test.js` green with the new spec lines.
 
-4. **Close the highest-value provider-coverage holes — row 1 (high).**
-   Files: new `Kernel/SDK/<id>/adapter/index.ts` packages, `Kernel/API/src/core/own-provider-adapters.ts`,
-   `Kernel/API/src/core/service.ts:737-820`, `src/data/providers.ts`, `Kernel/Tools/src/caps.ts`.
-   Behavior: first `cursor`, `claude`, `gemini-cli`, `xai`/`grok-cli`, `perplexity`, `glm`,
-   `together`, `fireworks`; card metadata with no measured claims (per `AGENTS.md`), validation
-   strategy declared beside the factory, and a real capability row. Do **not** copy 9R's
-   anti-bot or MITM spoofing; a refusal is reported, not forged. Proving test: one scripted
-   `Kernel/SDK/tests/<id>.test.js` per adapter plus additions to `tests/provider-cards.test.js`,
-   `tests/tools-caps.test.js` and `tests/provider-oauth-routes.test.js`; no live keys required.
-   Evidence: the 120-id diff in §7 and 9R's registry index at
-   `9router/open-sse/providers/registry/index.js:1-80`.
+4. **Close the highest-value provider ids (high).**
+   Files: new SDK packages, `Kernel/API/src/core/own-provider-adapters.ts:61-121`,
+   `Kernel/API/src/core/service.ts:737-865`, `src/data/providers.ts`, `Kernel/Tools/src/caps.ts`.
+   Behavior: in order, `cursor`, `gemini-cli`, `zed`, `commandcode`, `mimo-free` — cards with no
+   measured claims, declared validation strategies, and the real device/OAuth wires where 9R has
+   them (`9router/src/lib/oauth/`). Leave the browser-impersonation, anti-bot and MITM stack out.
+   Proving test: one scripted adapter test per id plus `tests/provider-cards.test.js`,
+   `tests/tools-caps.test.js` and `tests/provider-oauth-routes.test.js`.
 
-5. **Upgrade `/v1/mcp` to current Streamable HTTP — protocol/security (medium).**
-   Files: `Kernel/API/src/routes/mcp.ts:31-124`, `Kernel/API/test/mcp-route.test.js`,
-   `docs/SPEC-SDK.md`. Behavior: negotiate `2025-11-25` (with a documented 2024-11-05 fallback),
-   require `Accept: application/json, text/event-stream`, return 202 for notifications, support GET
-   as SSE or an explicit 405, validate `Origin` (403 on invalid), validate
-   `MCP-Protocol-Version`, and keep the existing gateway-key auth. Proving test: extend
-   `Kernel/API/test/mcp-route.test.js` with HTTP-level cases for each of those five behaviors.
-   References: MCP 2025-11-25 transport spec, internet finding 1.
+5. **Complete the Responses event union and add a capability adapter (medium).**
+   Files: `Kernel/API/src/routes/inference.ts:630-811`, `Kernel/API/src/core/routing.ts`,
+   `Kernel/API/src/core/routing-engine.ts`. Behavior: emit `response.content_part.added/.done`,
+   `response.refusal.delta/.done`, `response.output_text.annotation.added` and the file-search/code-
+   interpreter call events when the upstream stream carries them; add a routing step that, when a
+   requested model lacks a required capability and the caller allows it, selects a capable sibling
+   in the same combo (9R's capacity adapter at `9router/src/sse/handlers/chat.js:167-178`). Proving
+   test: extend `Kernel/API/test/responses-stream.test.js` with a scripted upstream asserting each
+   new event, and extend `Kernel/API/test/routing-engine.test.js` with a case where the first target
+   lacks vision and a sibling serves the turn.
 
-6. **Bring over Claude tool cloaking and an external MCP plugin bridge — row 4 breadth (medium).**
-   Files: new `Kernel/Tools/src/toolCloaking.ts`, `Kernel/API/src/core/service.ts:3775-3830`,
-   new `src/routes/mcpPlugins.ts`, `Kernel/API/src/server.ts:406`. Behavior: deterministic suffixed
-   names + decoys on the Claude wire and a restore map for both non-streaming and SSE tool names;
-   a supervised stdio→SSE bridge for user-installed plugins, with names/outputs bounded and no
-   shell tool exposed by default. Proving test: `Kernel/Tools/test/toolCloaking.test.js` plus a
-   gateway test that a client receives only names it declared and that a decoy call never reaches
-   the client. References: `9router/open-sse/utils/claudeCloaking.js:58-169`,
-   `src/lib/mcp/stdioSseBridge.js:1-8`.
+6. **Add the missing operator surfaces (medium).**
+   Files: new `src/pages/CliToolsPage.tsx`, `src/lib/routes.ts`, `src/dashboardApp.tsx:151,190`,
+   `docs/SPEC-SDK.md`, reusing the committed translator page. Behavior: a CLI-tool configurator that
+   reads only gateway-reported state, and a rebuild of the combos editor with drag-and-drop and
+   validation of the virtual-model strategy fields; no timer-set success states and no invented
+   values. Proving test: extend `tests/dashboard-wiring.test.js` and
+   `tests/dashboard-truthfulness.test.js`, plus one Playwright spec against a fake gateway.
 
-7. **Add the missing operator pages — row 9 (medium).**
-   Files: new `src/pages/CliToolsPage.tsx`, `src/pages/TranslatorPage.tsx`, `src/pages/MitmPage.tsx`,
-   `src/lib/routes.ts:6-60`, `src/dashboardApp.tsx:148-158`, `docs/SPEC-SDK.md`. Behavior: read
-   existing gateway routes (`/v1/tunnels`, `/v1/mitm`, `/v1/proxy-pools`, `/v1/skills`), show only
-   values the gateway returned, and make no state change on a timer. Proving test: extend
-   `tests/dashboard-wiring.test.js` and `tests/dashboard-truthfulness.test.js`, plus one Playwright
-   spec that loads each page against a fake gateway. References: 9R's 16 sections in §9.
+7. **Resolve the `xai`, `kimi` and `glm` id mismatches (medium).**
+   Files: `src/data/providers.ts:1003,1360,1535`, `Kernel/API/src/core/own-provider-adapters.ts:93,
+   108,115-121`, `Kernel/SDK/xai/adapter/index.ts`, `docs/SPEC-SDK.md`. Behavior: for each id, either
+   implement the missing 9R lanes or state in the card which lanes are not served, so a user does not
+   assume OAuth/video/coding transport that is absent. Proving test: extend `Kernel/SDK/tests/xai.test.js`,
+   `Kernel/SDK/tests/glm.test.js` and `tests/provider-cards.test.js` to assert endpoint/auth agreement
+   with each card.
 
-8. **Add bounded, redacted request details — observability (medium).**
-   Files: new `Kernel/API/src/core/request-details.ts` and route, `src/pages/LogsPage.tsx`,
-   `Kernel/API/src/routes/observability.ts`. Behavior: store only sanitised error text, tool names,
-   schema byte counts and a request id; never prompt/response/header/credential fields; bounded
-   file size and retention; opt-in. Proving test: `Kernel/API/test/request-details.test.js` scans
-   the record type and a written file for forbidden keys and oversized bodies. Reference:
-   `9router/src/lib/db/repos/requestDetailsRepo.js:7,122-130` — borrow the debug value, not the
-   plaintext content.
-
-9. **Add login lockout and SSO to the gateway — security parity (medium, larger scope).**
-   Files: new `Kernel/API/src/core/login-limiter.ts`, `Kernel/API/src/core/dashboard-session.ts`,
+8. **Add dashboard login lockout and SSO (medium, larger scope).**
+   Files: new `Kernel/API/src/core/login-limiter.ts`, `dashboard-session.ts`,
    `Kernel/API/src/routes/api-keys.ts`, `src/components/Login.tsx`, `docs/SPEC-SDK.md`. Behavior:
    per-IP progressive lockout, OIDC authorization-code + PKCE S256 with exact redirect matching,
-   scoped API keys with model allow-lists, and explicit loopback-only binding by default. Proving
-   test: `Kernel/API/test/login-limiter.test.js` and `oidc.test.js` with scripted discovery/token
-   endpoints, plus a case that a non-allowlisted redirect is refused. References:
-   `9router/src/lib/auth/{dashboardSession,loginLimiter,oidc}.js`, RFC 9700 internet finding 2.
+   scoped keys with model allow-lists, loopback binding by default. Proving test:
+   `Kernel/API/test/login-limiter.test.js` and `oidc.test.js` with scripted discovery/token
+   endpoints, including a case where a non-allowlisted redirect is refused. Do not copy 9R's
+   plaintext credential column.
 
-10. **Make the 9router catalog guard runnable against the current tree — doc honesty (low).**
-    Files: `scripts/build-9router-catalog.mjs:18-22`, `tests/9router-catalog.test.js:34-40`,
-    `docs/architecture/9router-provider-catalog.md:1-9`. Behavior: read the 9router root from
-    `NINEROUTER_ROOT` (or `--root`), default to the existing path, and fail the freshness test when
-    an explicit root is supplied and counts differ. Proving test: run
-    `NINEROUTER_ROOT=/mnt/sda3/work/projects.old/9router node --test tests/9router-catalog.test.js`
-    after regeneration; it must stop skipping and assert the current 149-entry count. Evidence:
-    the four skips from `node --test tests/9router-catalog.test.js` and the 124-vs-149 mismatch.
+9. **Keep candidate-key checks honest and family defaults bounded (low).**
+   Files: `Kernel/API/src/core/own-provider-adapters.ts:61-121`,
+   `Kernel/API/src/core/modelCapabilities.ts:8-28`, `tests/provider-validation.test.js`,
+   `Kernel/API/test/model-capabilities.test.js`. Behavior: declare `validation:'models'` only with an
+   evidence note about an authenticated catalog; otherwise keep `none` and say so in the UI. Add
+   family defaults only where upstream publishes them, never guess a context window. Proving test:
+   bogus-key cases and a `supports_tools:false` catalog case.
 
-**Explicitly not in the plan:** plaintext credential storage, a red-by-policy test baseline,
-version drift between manifests, killing foreign port holders, 9router's MITM/anti-bot stack, and
-any test that presents a scripted transport as a live provider request. The parity loop's own
-safety note (`tasks/parity-loop/README.md:19-21`) governs all ten items.
+**Explicitly not in the plan:** plaintext credential storage, public-catalog key validation, browser
+impersonation/MITM/anti-bot tooling, a red-by-policy test baseline, manifest version drift, killing a
+foreign port holder, and any test that presents a scripted transport as a live provider request. The
+parity loop's safety note (`tasks/parity-loop/README.md:19-21`) governs all nine items.

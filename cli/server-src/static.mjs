@@ -84,15 +84,16 @@ const CLEAN_ROUTES = {
 const DASHBOARD_TOKEN_FILE = 'dashboard-token';
 const maxTokenBytes = 256;
 
-export function dashboardTokenPath(env = process.env) {
+export function dashboardTokenPath(env = process.env, port = 20138) {
   const configHome = env.XDG_CONFIG_HOME?.trim();
-  return path.join(configHome || path.join(os.homedir(), '.config'), 'omnihilbras', DASHBOARD_TOKEN_FILE);
+  const name = port === 20138 ? DASHBOARD_TOKEN_FILE : `${DASHBOARD_TOKEN_FILE}-${port}`;
+  return path.join(configHome || path.join(os.homedir(), '.config'), 'omnihilbras', name);
 }
 
 /** The token the running gateway accepts, read fresh each request so a restarted gateway is picked up. */
-function readDashboardToken(env) {
+function readDashboardToken(env, port) {
   try {
-    const value = fs.readFileSync(dashboardTokenPath(env), 'utf8').trim();
+    const value = fs.readFileSync(dashboardTokenPath(env, port), 'utf8').trim();
     return value ? value.slice(0, maxTokenBytes) : undefined;
   } catch {
     return undefined;
@@ -149,7 +150,7 @@ function proxyToGateway(request, response, { gatewayHost, gatewayPort, env }) {
   }
   headers.host = `${gatewayHost}:${gatewayPort}`;
   if (request.headers['sec-fetch-site'] === 'same-origin') {
-    const token = readDashboardToken(env);
+    const token = readDashboardToken(env, gatewayPort);
     if (token) {
       headers.origin = `http://${request.headers.host ?? 'localhost'}`;
       headers['x-omnihilbras-dashboard-token'] = token;

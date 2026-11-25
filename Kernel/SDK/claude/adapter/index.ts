@@ -537,7 +537,7 @@ export function claudeCredentialExpired(credential: ProviderCredential | undefin
 
 function toAnthropicMessage(message: ChatMessage) {
   if (message.role === 'tool') {
-    return { role: 'user', content: [{ type: 'tool_result', tool_use_id: message.toolCallId ?? '', content: typeof message.content === 'string' ? message.content : '' }] };
+    return { role: 'user', content: [{ type: 'tool_result', tool_use_id: message.toolCallId ?? '', content: typeof message.content === 'string' ? message.content : '', ...(message.isError ? { is_error: true } : {}) }] };
   }
   if (message.role === 'assistant' && message.toolCalls?.length) {
     return {

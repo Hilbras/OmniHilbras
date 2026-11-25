@@ -16,7 +16,7 @@ import type { ChatChunk, ChatRequest, ChatResponse, FinishReason, Model, Provide
  * deployment can move it without a rebuild, and so the value in use is a setting rather than a
  * claim buried in code.
  */
-const CODEX_CLI_VERSION = '0.159.2';
+const CODEX_CLI_VERSION = '0.171.0';
 
 /** The catalog URL for a client version. Built per call so an override actually reaches it. */
 export function codexModelsUrl(clientVersion: string = CODEX_CLI_VERSION) {

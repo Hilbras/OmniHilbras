@@ -28,10 +28,12 @@ type ProviderTotals = {
   latencyCount: number;
   inputTokens: number;
   outputTokens: number;
+  estimatedInputTokens: number;
+  estimatedOutputTokens: number;
 };
 
 function emptyTotals(): ProviderTotals {
-  return { outcomes: {}, attempts: 0, latencySum: 0, latencyCount: 0, inputTokens: 0, outputTokens: 0 };
+  return { outcomes: {}, attempts: 0, latencySum: 0, latencyCount: 0, inputTokens: 0, outputTokens: 0, estimatedInputTokens: 0, estimatedOutputTokens: 0 };
 }
 
 export type MetricsInput = {
@@ -53,8 +55,13 @@ export function renderPrometheusMetrics({ records, version, now = Date.now() }: 
       totals.latencySum += record.latencyMs;
       totals.latencyCount += 1;
     }
-    if (typeof record.inputTokens === 'number') totals.inputTokens += record.inputTokens;
-    if (typeof record.outputTokens === 'number') totals.outputTokens += record.outputTokens;
+    if (record.tokensEstimated === true) {
+      if (typeof record.inputTokens === 'number') totals.estimatedInputTokens += record.inputTokens;
+      if (typeof record.outputTokens === 'number') totals.estimatedOutputTokens += record.outputTokens;
+    } else {
+      if (typeof record.inputTokens === 'number') totals.inputTokens += record.inputTokens;
+      if (typeof record.outputTokens === 'number') totals.outputTokens += record.outputTokens;
+    }
     byProvider.set(provider, totals);
   }
 
@@ -104,6 +111,15 @@ export function renderPrometheusMetrics({ records, version, now = Date.now() }: 
     const totals = byProvider.get(provider)!;
     if (totals.inputTokens > 0) lines.push(`omnihilbras_tokens_total{provider="${escapeLabel(provider)}",kind="input"} ${totals.inputTokens}`);
     if (totals.outputTokens > 0) lines.push(`omnihilbras_tokens_total{provider="${escapeLabel(provider)}",kind="output"} ${totals.outputTokens}`);
+  }
+
+  // Estimated counts are a different measurement. Mixing them into `tokens_total` let a dashboard
+  // compare provider-reported usage with bytes/4 arithmetic under one label.
+  help('omnihilbras_tokens_estimated_total', 'counter', 'Tokens estimated from text, not reported by the provider.');
+  for (const provider of providers) {
+    const totals = byProvider.get(provider)!;
+    if (totals.estimatedInputTokens > 0) lines.push(`omnihilbras_tokens_estimated_total{provider="${escapeLabel(provider)}",kind="input"} ${totals.estimatedInputTokens}`);
+    if (totals.estimatedOutputTokens > 0) lines.push(`omnihilbras_tokens_estimated_total{provider="${escapeLabel(provider)}",kind="output"} ${totals.estimatedOutputTokens}`);
   }
 
   // A trailing newline is part of the format, not decoration: a scraper reads the body line by line.

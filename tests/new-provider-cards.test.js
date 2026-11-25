@@ -132,7 +132,10 @@ test('a new provider id is one edit away from a web-session id, and stays distin
   // only by a suffix is the easiest possible typo, and the consequence is a card that connects to the web
   // session instead of the API key.
   const ids = providerCatalog.map((card) => card.id);
-  const pairs = ids.flatMap((id) => ids.filter((other) => other !== id && id.startsWith(other) && other.length > 3).map((other) => [other, id]));
+  // The minimum base length is 3, not 4: `glm` is exactly three characters and cycle 6's `glm-cn`
+  // is a real near-miss against it (a separate BigModel key, not the Z.ai account). A `> 3` threshold
+  // made the guard blind to that pair — measured, lowering it adds only `glm`/`glm-cn` and no others.
+  const pairs = ids.flatMap((id) => ids.filter((other) => other !== id && id.startsWith(other) && other.length >= 3).map((other) => [other, id]));
   // Both halves of each near-miss pair are registered adapters with their own cards —
   // `opencode`/`opencode-console`, `qwen`/`qwen-web`, `deepseek`/`deepseek-web` — so neither "the base
   // is registered" nor "the derived is registered" is the risk. I asserted each in turn and both failed on
@@ -213,7 +216,9 @@ test('a new provider id is one edit away from a web-session id, and stays distin
     [...new Set(pairs.map(([, derived]) => derived))].sort(),
     // `perplexity-web` joins this list in cycle 4: the new keyed `perplexity` card is its base id, and
     // the derived card is a browser session with a pasted cookie, so it still satisfies the property.
-    ['claude-code', 'clinepass', 'deepseek-web', 'deepseek-web-v2', 'gemini-web', 'grok-web', 'kimi-code', 'minimax-code-global', 'opencode-console', 'opencode-go', 'perplexity-web', 'qwen-token-plan', 'qwen-web', 'tokenharbor-web'],
+    // `glm-cn` joins in cycle 6: it extends `glm` but is a separate API-key plan on a different host
+    // (open.bigmodel.cn vs api.z.ai) with no connectionProviderId, so it satisfies clause 4 above.
+    ['claude-code', 'clinepass', 'deepseek-web', 'deepseek-web-v2', 'gemini-web', 'glm-cn', 'grok-web', 'kimi-code', 'minimax-code-global', 'opencode-console', 'opencode-go', 'perplexity-web', 'qwen-token-plan', 'qwen-web', 'tokenharbor-web'],
     'the near-miss ids are exactly the ones expected, so this stays a measurement and not a tautology',
   );
 });

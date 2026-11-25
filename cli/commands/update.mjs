@@ -18,11 +18,11 @@ export const update = {
   summary: 'Check for a newer release, or install it',
   usage: 'omnihilbras update [--check] [--json]',
   flags: ['--check'],
-  async run({ out, flags }) {
+async run({ out, flags }) {
     const result = await checkForUpdate(version);
-    out.data(result);
 
     if (flags.check) {
+      out.data(result);
       if (out.json) return 0;
       if (result.updateAvailable) out.line(out.warn(`A newer version is available: ${result.current} → ${result.latest}. Run \`omnihilbras update\` to install it.`));
       else out.line(out.muted(result.latest ? `Up to date (${result.current}).` : 'Could not reach the registry to check for updates.'));
@@ -30,17 +30,43 @@ export const update = {
     }
 
     if (!result.updateAvailable) {
+      out.data({ ...result, installed: result.current });
+      if (out.json) return 0;
       out.line(out.muted(result.latest ? `Already up to date (${result.current}).` : 'Could not reach the registry; nothing to do.'));
       return 0;
     }
 
-    out.line(`Updating ${result.current} → ${result.latest}…`);
+    if (!out.json) out.line(`Updating ${result.current} → ${result.latest}...`);
     try {
-      execFileSync('npm', ['i', '-g', `${PACKAGE_NAME}@latest`], { stdio: 'inherit', timeout: 180000 });
+      // `--json` must remain one document. npm's progress output is human-oriented, so it is captured
+      // and discarded rather than inherited into a machine-readable answer.
+      execFileSync('npm', ['i', '-g', `${PACKAGE_NAME}@latest`], {
+        stdio: out.json ? 'pipe' : 'inherit',
+        timeout: 180000,
+        shell: process.platform === 'win32',
+      });
     } catch (error) {
       throw new CliError('The update did not complete.', { hint: `Run \`${updateCommand()}\` manually. ${error.message}` });
     }
-    out.title(`Updated to ${result.latest}. Restart any running servers with \`omnihilbras restart\`.`);
+    let installed = result.latest;
+    try {
+      const listing = execFileSync('npm', ['ls', '-g', '--depth=0', '--json', PACKAGE_NAME], {
+        encoding: 'utf8',
+        timeout: 15_000,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        shell: process.platform === 'win32',
+      });
+      const parsed = JSON.parse(listing);
+      installed = parsed?.dependencies?.[PACKAGE_NAME]?.version ?? installed;
+    } catch {
+      // The install command succeeded but the post-check could not run. Say that rather than claiming
+      // the requested version is what is now on disk.
+    }
+    out.data({ ...result, installed });
+    if (out.json) return 0;
+    out.title(installed === result.latest
+      ? `Updated to ${installed}. Restart any running servers with \`omnihilbras restart\`.`
+      : `The installer finished, but the installed version is ${installed}, not ${result.latest}.`);
     return 0;
   },
 };

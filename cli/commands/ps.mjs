@@ -8,13 +8,14 @@
  */
 
 import { readBundledRecord, isPidAlive, commandLineForPid, looksLikeOurServer } from '../lib/bundled-state.mjs';
+import { createClient } from '../lib/client.mjs';
 
 export const ps = {
   name: 'ps',
   summary: 'Show the bundled run: pids, ports, uptime, ownership',
   usage: 'omnihilbras ps [--json]',
   flags: [],
-  async run({ client, out }) {
+  async run({ out, flags }) {
     const record = readBundledRecord();
     if (!record) {
       out.data({ running: false, processes: [] });
@@ -27,18 +28,23 @@ export const ps = {
       const command = alive ? commandLineForPid(pid) : '';
       return { role, pid, alive, owned: alive ? looksLikeOurServer(command) : false, command };
     });
-    const running = processes.some((entry) => entry.alive && entry.owned);
+    const ours = processes.filter((entry) => entry.alive && entry.owned).length;
+    const alive = processes.filter((entry) => entry.alive).length;
+    const running = ours > 0;
+    const state = ours === processes.length ? 'running' : alive > 0 ? 'degraded' : 'stopped';
     const uptimeSeconds = record.startedAt ? Math.max(0, Math.round((Date.now() - Date.parse(record.startedAt)) / 1000)) : undefined;
 
     let gateway = null;
     try {
-      const health = await client.request('/health');
+      // The run record owns the ports; the globally configured gateway may be a different process.
+      const runClient = createClient({ ...flags, gateway: `http://127.0.0.1:${record.gatewayPort}` });
+      const health = await runClient.request('/health');
       gateway = { status: health.status, version: health.build?.version };
     } catch {
       gateway = null;
     }
 
-    out.data({ running, dashboardPort: record.dashboardPort, gatewayPort: record.gatewayPort, startedAt: record.startedAt, uptimeSeconds, processes, gateway });
+    out.data({ running, state, dashboardPort: record.dashboardPort, gatewayPort: record.gatewayPort, startedAt: record.startedAt, uptimeSeconds, processes, gateway });
     if (out.json) return 0;
 
     out.title(running ? 'Bundled servers running' : 'Bundled servers not running');

@@ -34,7 +34,7 @@ import { createQoderAdapter } from '@omnihilbras/sdk-qoder';
 import { probeQwenWeb } from '@omnihilbras/sdk-qwen-web';
 import { TokenHarborWebAdapter, tokenHarborWebCredential, tokenHarborWebProviderId } from '@omnihilbras/sdk-tokenharbor-web';
 import { parseApiKeyState, type ApiKeyRecord, type ApiKeyStore } from './api-keys.js';
-import { parseConnectionsBackupState, type ConnectionInput, type ConnectionRecord, type ConnectionStore, type ConnectionsBackupState, type ResilienceSettings } from './connections.js';
+import { defaultResilienceSettings, parseConnectionsBackupState, type ConnectionInput, type ConnectionRecord, type ConnectionStore, type ConnectionsBackupState, type ResilienceSettings } from './connections.js';
 import type { GatewayConfig } from './config.js';
 import { ClineSessionStore, beginClineAuthorization, clineCallbackPathFor, createClineAdapter, exchangeClineCode, providerSaid, toClineCredential } from './oauth.js';
 import { KimiCodeSessionStore, kimiCodeProviderId, type KimiCodeSessionStatus } from '../providers/kimiCode.js';
@@ -62,7 +62,7 @@ import { KiroSessionStore, importKiroRefreshToken, pollKiroSignInWithClaim, star
 import { createChatGptWebDriver } from '../providers/chatgptWeb.js';
 import { createGeminiWebDriver } from '../providers/geminiWeb.js';
 import { createDuckDuckGoWebDriver } from '../providers/duckduckgoWeb.js';
-import { SlidingWindowRateLimiter, bareModelFor, type RouteCandidate, type RouteDecision } from './routing.js';
+import { SlidingWindowRateLimiter, bareModelFor, modelCapacityCapabilities, noCandidateMessage, requiredCapabilitiesFromRequest, type CapacityAdapterConfig, type RouteCandidate, type RouteDecision } from './routing.js';
 import { HealthManager } from './health.js';
 import { ConnectionLatencyLedger } from './connection-latency.js';
 import { ResponseCache } from './response-cache.js';
@@ -307,6 +307,13 @@ export type GatewayServiceOptions = {
   breaker?: BreakerConfig;
   /** Virtual models, when this gateway is wired with persistence. Absent means concrete routing only. */
   virtualModels?: VirtualModelStore;
+  /**
+   * Explicit fallback pools for hard input capabilities. Absent means no substitution: a request that
+   * needs a capability no planned model declares is refused rather than sent to a guessed one.
+   */
+  capacityAdapter?: CapacityAdapterConfig;
+  /** Explicit System One endpoints by connection id (or provider id as a fallback). */
+  systemOne?: { endpoints: Record<string, string>; headers?: Record<string, string> };
   /** Workspaces, when wired. */
   workspaces?: WorkspaceStore;
   /** Tunnels, when wired. */
@@ -725,6 +732,10 @@ export class GatewayService {
         if (Date.now() > entry.until) { this.stickyConnections.delete(model); return undefined; }
         return entry.connectionId;
       },
+      ...(this.options.capacityAdapter ? { capacityAdapter: this.options.capacityAdapter } : {}),
+      // The catalog is the only source of per-model capability facts; the engine asks rather than
+      // reading the connection store itself, so it stays a pureRouting decision over given records.
+      capabilitiesFor: (connection, modelId) => modelCapacityCapabilities(connection, modelId),
     });
     this.models = new ModelCatalog({
       connections: this.connections,
@@ -872,6 +883,9 @@ export class GatewayService {
     // Cycle 6 adds the mainland sibling: a second keyed router, not a second name for glm's Z.ai key.
     // The `none` decision is read from OWN_PROVIDER_ADAPTERS beside the BigModel factory.
     resolver = resolver.onDemand('glm-cn', own('glm-cn').factory, { validation: own('glm-cn').validation });
+    // Cycle 7's keyed router: its chat path is the published endpoint itself, and the `none`
+    // validation decision is read from OWN_PROVIDER_ADAPTERS beside the mimo-free factory.
+    resolver = resolver.onDemand('mimo-free', own('mimo-free').factory, { validation: own('mimo-free').validation });
     // xAI is its own connection, not a second name for Grok's saved key. Its chat surface is the
     // OpenAI wire; video generation is a real adapter on the v1 video routes, not a simulated lane.
     // ("v1 video routes" is spelled out rather than as a path ending in slash-star: a source-text guard
@@ -1169,6 +1183,15 @@ export class GatewayService {
     return {
       failureThreshold: this.healthManager.getFailureThreshold(),
       strategies,
+      // The explicit pools, as configured. No models are invented here: an operator sees exactly the
+      // ids that routing would substitute, and an unconfigured capability is simply absent.
+      ...(this.options.capacityAdapter
+        ? { capacityAdapter: Object.fromEntries(Object.entries(this.options.capacityAdapter).map(([capability, pool]) => [capability, {
+          ...(pool.enabled === false ? { enabled: false } : {}),
+          ...(pool.roundRobin === true ? { roundRobin: true } : {}),
+          models: [...pool.models],
+        }])) }
+        : {}),
       connections: connections.map((connection) => ({
         connectionId: connection.id,
         providerId: connection.providerId,
@@ -4064,7 +4087,7 @@ export class GatewayService {
           const result = parsed
             ? await executeLocalTool(parsed, this.localToolRoots)
             : { content: 'Invalid local tool call.', isError: true };
-          messages.push({ role: 'tool', content: result.content, toolCallId: call.id });
+          messages.push({ role: 'tool', content: result.content, toolCallId: call.id, ...(result.isError ? { isError: true } : {}) });
         }
         continue;
       }
@@ -4448,6 +4471,10 @@ export class GatewayService {
       model,
       ...(explicitProviderId === undefined ? {} : { explicitProviderId }),
       ...(explicitConnectionId === undefined ? {} : { explicitConnectionId }),
+      // Derived from the request, not from the model: a vision-capable model is only needed when the
+      // turn actually carries an image. The scope still names what the client asked for, so the wire
+      // substitution below never changes the usage label.
+      ...(context?.request ? { requiredCapabilities: requiredCapabilitiesFromRequest(context.request) } : {}),
     });
   }
 
@@ -4763,6 +4790,71 @@ export class GatewayService {
     this.routing.enforceRateLimit(candidate);
   }
 
+  /**
+   * Runs one direct provider operation through the same account controls chat uses.
+   *
+   * System One and video used to reach the transport themselves. They authenticated and applied
+   * their own timeout, but nothing spent the account's RPM, consulted its breaker or fed the health
+   * sweep — so a connection could be disabled, exhausted or already open and still be called.
+   */
+  private async runConnectionOperation<T>(input: {
+    providerId: string;
+    connection?: ConnectionRecord;
+    model: string;
+    signal?: AbortSignal;
+    run: (deadline: AbortSignal | undefined) => Promise<T>;
+  }): Promise<T> {
+    const connection = input.connection;
+    if (!connection) return input.run(input.signal);
+    if (!connection.enabled) {
+      throw new ProviderError('INVALID_REQUEST', `Connection "${connection.id}" is disabled.`, {
+        providerId: input.providerId,
+        retryable: false,
+        publicMessage: `Connection "${connection.id}" is paused. Enable it before sending a request.`,
+      });
+    }
+    const candidate: RouteCandidate = {
+      providerId: input.providerId,
+      connectionId: connection.id,
+      priority: connection.priority,
+      resilience: connection.resilience,
+    };
+    if (!this.breakers.allows(connection.id)) {
+      throw new ProviderError('PROVIDER_UNAVAILABLE', 'The connection is cooling down after repeated failures.', {
+        providerId: input.providerId,
+        retryable: false,
+        publicMessage: 'This connection is cooling down after repeated failures. Try another account or wait for it to recover.',
+      });
+    }
+    try {
+      this.enforceRateLimit(candidate);
+    } catch (error) {
+      this.breakers.recordAbandoned(connection.id);
+      throw error;
+    }
+    this.rateLimiter.record(connection.id);
+    const startedAt = Date.now();
+    try {
+      const result = await this.withDeadline(input.signal, connection.resilience.timeoutMs, input.providerId, input.run);
+      const latencyMs = Date.now() - startedAt;
+      this.healthManager.recordSuccess(input.providerId, latencyMs, new Date().toISOString(), connection.id);
+      this.connectionLatency.record(connection.id, latencyMs);
+      this.breakers.recordSuccess(connection.id);
+      if (!connection.id.startsWith('unmanaged:')) void this.connectionStore?.recordUsage(connection.id).catch(() => undefined);
+      return result;
+    } catch (error) {
+      const code = isProviderError(error) ? error.code : 'PROVIDER_REQUEST_FAILED';
+      const callerFault = code === 'CANCELLED' || code === 'INVALID_REQUEST' || code === 'NOT_SUPPORTED';
+      if (!callerFault) {
+        this.healthManager.recordFailure(input.providerId, code, error instanceof Error ? error.message : 'The provider request failed.', connection.id);
+        this.breakers.recordFailure(connection.id);
+      } else {
+        this.breakers.recordAbandoned(connection.id);
+      }
+      throw error;
+    }
+  }
+
 
   /**
    * Applies a per-connection deadline without leaking timers: the timeout aborts
@@ -4994,6 +5086,92 @@ export class GatewayService {
   }
 
   /**
+   * The System One endpoint declared for one saved account, by connection id first.
+   *
+   * A provider-wide entry is the fallback because several accounts of one vendor share a wire. An
+   * entry keyed by connection id is the more specific declaration and wins. Neither is guessed from
+   * the connection's generic chat endpoint: a decision model's native JSON wire is a different lane.
+   */
+  systemOneEndpointFor(providerId: string, connectionId: string | undefined): string | undefined {
+    const endpoints = this.options.systemOne?.endpoints;
+    if (!endpoints) return undefined;
+    return (connectionId ? endpoints[connectionId] : undefined) ?? endpoints[providerId];
+  }
+
+  /**
+   * One System One turn: native JSON in, native JSON out.
+   *
+   * The request body is forwarded untouched apart from the model, which is replaced by the catalog's
+   * stated upstream id when one exists. No client session header, no `public` access token and no
+   translated chat body are invented: those would impersonate a vendor's own client. Failover uses the
+   * same route candidates chat uses, and success or failure is recorded against the account that was
+   * actually called. A connection with no declared endpoint is refused by name as `NOT_SUPPORTED`.
+   */
+  async runSystemOne(input: {
+    model: string;
+    body: Record<string, unknown>;
+    connectionId?: string;
+    explicitProviderId?: string;
+    signal?: AbortSignal;
+  }): Promise<{ body: unknown; providerId: string; connectionId?: string; wireModel: string; attempts: number }> {
+    const decision = await this.planRoute(input.model, input.explicitProviderId, input.connectionId);
+    if (decision.candidates.length === 0) {
+      const message = noCandidateMessage;
+      throw new ProviderError('PROVIDER_UNAVAILABLE', message, { retryable: false, publicMessage: message });
+    }
+    const connections = await this.listConnections();
+    const withoutEndpoint: string[] = [];
+    const failures: string[] = [];
+    let attempts = 0;
+    for (const candidate of decision.candidates) {
+      const connection = connections.find((entry) => entry.id === candidate.connectionId);
+      if (!connection) continue;
+      const endpoint = this.systemOneEndpointFor(connection.providerId, connection.id);
+      if (!endpoint) {
+        withoutEndpoint.push(connection.providerId);
+        continue;
+      }
+      const wireModel = await this.upstreamModelFor(connection.providerId, connection.id, candidate.model ?? input.model);
+      const context = await this.contextForRequest(connection.providerId, connection.id, input.signal);
+      const credential = context.credential;
+      const token = credential && credential.type !== 'none' ? credential.value : undefined;
+      const headers: Record<string, string> = {
+        'content-type': 'application/json',
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+        ...(this.options.systemOne?.headers ?? {}),
+      };
+      const body = JSON.stringify({ ...input.body, model: wireModel });
+      attempts += 1;
+      try {
+        const response = await this.runConnectionOperation({
+          providerId: connection.providerId,
+          connection,
+          model: candidate.model ?? input.model,
+          signal: input.signal,
+          run: (deadline) => this.transport.request<unknown>({
+            method: 'POST',
+            url: endpoint,
+            providerId: connection.providerId,
+            headers,
+            body,
+            ...(deadline ? { signal: deadline } : {}),
+          }),
+        });
+        return { body: response.data, providerId: connection.providerId, connectionId: connection.id, wireModel, attempts };
+      } catch (error) {
+        failures.push(error instanceof Error ? error.message : 'the endpoint refused the request');
+      }
+    }
+    if (withoutEndpoint.length > 0 && failures.length === 0) {
+      const names = [...new Set(withoutEndpoint)].join(', ');
+      const message = `Provider "${names}" declares no System One endpoint; no native decision turn was sent.`;
+      throw new ProviderError('NOT_SUPPORTED', message, { retryable: false, publicMessage: message, details: { attempts } });
+    }
+    const message = `No System One route answered. ${[...new Set(failures)].join('; ')}`;
+    throw new ProviderError('PROVIDER_UNAVAILABLE', message, { retryable: false, publicMessage: message, details: { attempts } });
+  }
+
+  /**
    * The one video round-trip, resolved against the pinned connection.
    *
    * The adapter is resolved with the connection id so a saved endpoint override reaches the same
@@ -5034,7 +5212,14 @@ export class GatewayService {
       return refuse(`Provider "${providerId}" declares video generation, but no generation handler is wired; no video job was created and no job URL was invented.`);
     }
     const context = await this.contextForRequest(providerId, connectionId, signal);
-    return adapter.video.call(adapter, request, context);
+    const connection = connectionId ? await this.connections.get(connectionId) : undefined;
+    return this.runConnectionOperation({
+      providerId,
+      ...(connection ? { connection } : {}),
+      model: request.kind === 'create' && typeof request.body.model === 'string' ? request.body.model : 'video-generation',
+      signal,
+      run: () => adapter.video!.call(adapter, request, context),
+    });
   }
 
   /** The virtual-model catalog, or `undefined` when this build has no persisted store. */
