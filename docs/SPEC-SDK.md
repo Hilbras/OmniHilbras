@@ -1,6 +1,6 @@
 # Spec: OmniHilbras Gateway and Provider SDK
 
-**Status:** Current — release 3.100.2
+**Status:** Current — release 4.0.0-alpha.1
 
 This document is the contract behind the gateway and its provider packages. It is intentionally more
 specific than the [README](../README.md): a route, an error code or a provider boundary written here is
@@ -15,7 +15,8 @@ shape rather than the pre-restructure `sdk-core` plan.
 | Module | Responsibility | Depends on |
 | --- | --- | --- |
 | `Kernel/API` | Local HTTP gateway, route dispatch, routing, health, retries, usage, vault, API keys, token-saver integration | `Kernel/SDK/*`, `Kernel/TokenSaver` |
-| `Kernel/SDK/<provider>` | One provider package: adapter, vendored runtime types and transport | — |
+| `Kernel/SDK/<provider>` | One provider package: its adapter, local wire types and provider-specific helpers | `Kernel/SDK/_shared` |
+| `Kernel/SDK/_shared` | Canonical adapter machinery: errors, URL safety, SSE, bounded map, catalog normalization and shared types | — |
 | `Kernel/TokenSaver` | Standalone reversible compressor, RTK filters, history trimming, CCR store | — |
 | `src` | React dashboard and marketing pages | `Kernel/API` HTTP surface |
 | `site` | Static HTML entries for Home, Download, Docs and legal pages | Vite |
@@ -40,7 +41,7 @@ and a registration, not an edit to routing or request execution.
 
 | Capability | Where it lives |
 | --- | --- |
-| Normalized request, response and stream types | each `Kernel/SDK/<provider>/lib/` package |
+| Normalized request, response and stream types | `Kernel/SDK/_shared` and each provider's local `lib/types.ts` |
 | Provider contract, registry and transport | `Kernel/API` core + provider adapters |
 | Routing, health, retries and hedging | `Kernel/API/src/core/` |
 | OpenAI-compatible HTTP surface | `Kernel/API/src/routes/inference.ts` |
@@ -66,7 +67,7 @@ and a registration, not an edit to routing or request execution.
 ### Where a provider URL is allowed to point
 
 A connection's `endpoint` is operator-supplied, so it is the one string in the system that decides where a
-request carrying a credential actually goes. `assertSafeProviderRequestUrl` (`Kernel/SDK/*/lib/url.ts`)
+request carrying a credential actually goes. `assertSafeProviderRequestUrl` (`Kernel/SDK/_shared/src/url.ts`)
 is the single decision point, and it is called in two places: on save, in `routes/connections.ts`, and again
 at the transport, in `transport.ts`. Both matter — a connection written before a rule tightened, or a
 resolved base URL that drifted, must not bypass the check that admission applied.
@@ -429,7 +430,7 @@ account" means. Returns `{ authorizeUrl, flowId, expiresAt, pollIntervalSec }`; 
 - `POST /v1/images/generations` — generate images, OpenAI shape `{model, prompt, n?, size?, quality?, response_format?, user?}`; returns `{created, data:[{url?, b64_json?, revised_prompt?}], provider, gateway}`. Authenticated like the LLM surface.
 - `POST /v1/videos/generations` — create a video job (billable surface). Body `{model, prompt, ...}`; `model` may carry a `provider/` prefix, and `x-omnihilbras-connection` pins the account. `POST /v1/videos/edits` and `POST /v1/videos/extensions` are the same job-creation surface. A job that reaches a video-capable adapter returns `{id, connectionId?, status?}` where `id` is the upstream `request_id` verbatim — creation never invents a URL — and the response echoes `x-omnihilbras-connection` so the client can poll the same account. A create may carry `Idempotency-Key`: the first successful response is stored for 24 hours under the caller plus key and replayed with `idempotency-replayed: true`; reusing that key with a different body is `409 CONFLICT`, and no second upstream job is dispatched.
 - `GET /v1/videos/:id` — poll a video job. The creating connection is named by `x-omnihilbras-connection` (or `?connection=`); `?provider=` is a fallback only, and a poll naming neither is refused — the gateway keeps no global job table. A successful poll returns the upstream `status` verbatim and `video.url` **only** when the upstream itself reports completion and published a URL; a pending answer has no URL at all.
-  `xai` is the one bundled adapter that declares `video`; it POSTs `videos/<action>` and GETs `videos/<id>` through the gateway transport with the pinned connection's credential, and strips only its own `xai/` model prefix before forwarding. Every other provider answers `NOT_SUPPORTED` by name with the one planned attempt in `details.attempts`. Refusals, successes and client aborts are all written to the usage ledger; no path fabricates a job id or a completion URL. A new provider opts in from its own SDK package, never from a changed capability list in 54 vendored copies.
+  `xai` is the one bundled adapter that declares `video`; it POSTs `videos/<action>` and GETs `videos/<id>` through the gateway transport with the pinned connection's credential, and strips only its own `xai/` model prefix before forwarding. Every other provider answers `NOT_SUPPORTED` by name with the one planned attempt in `details.attempts`. Refusals, successes and client aborts are all written to the usage ledger; no path fabricates a job id or a completion URL. A new provider opts in from its own SDK package, never from a changed capability list in the shared source.
 - `GET /v1/virtual-models` — every persisted virtual model, enabled or disabled. A virtual model id must
   start with `oh/`; a target names a saved connection and an upstream model that connection lists.
 - `POST /v1/virtual-models` — create. Body `{id, name?, enabled?, strategy?, targets[], routerModel?, confidenceThreshold?, sessionSticky?, judgeModel?, quorum?, graceMs?, hardTimeoutMs?}`; `strategy` is
@@ -622,7 +623,7 @@ The dashboard reads these four stores read-only on `/dashboard/mitm`, `/dashboar
   Nous chat URL carries three attribution tags (`product=`, `client=`, `user=`); without a `user=` tag the
   inference host answers `400 missing user tag`. A requested reasoning effort is sent as Nous's nested
   `reasoning: { enabled, effort }`, not the generic top-level `reasoning_effort`. Both rewrites live in the
-  Nous adapter and are asserted by `Kernel/SDK/tests/nous.test.js`, so the shared vendored
+  Nous adapter and are asserted by `Kernel/SDK/tests/nous.test.js`, so the shared
   `openai-compatible.ts` stays identical across providers. A Nous stream's `reasoning_content` (or nested
   `reasoning`) delta is now **meaningful and forwarded** in `delta.reasoning`: a reasoning-only ending used
   to be reported as `INVALID_RESPONSE` and lose the thinking — the actual cause of agent turns on free
@@ -2856,7 +2857,7 @@ the lane silently stop working; a body that names only one of the two endpoints 
 before, at every status. If the Responses attempt also fails, that failure is the one reported, with
 the original refusal attached as its cause.
 
-The translation is `Kernel/SDK/openai/lib/responses-lane.ts`, vendored from Zen's Responses lane
+The translation is `Kernel/SDK/openai/lib/responses-lane.ts`, carried from Zen's Responses lane
 (which selects by a published per-family table rather than by refusal), and the table of providers
 that have a second lane is `Kernel/API/src/core/provider-responses-lane.ts`, whose only entry is
 AgentRouter. A provider absent from it carries no `responsesPath` and therefore no second lane at
@@ -3647,7 +3648,7 @@ measurement, and `Kernel/API/test/spec-success-criteria.mjs` fails if any stops 
       `build` script; every `Kernel/SDK/<provider>/package.json` declares no React dependency.
 - [x] The SDK exposes stable normalized types and a provider registry. — `ProviderRegistry` is exported,
       and the adapter contract suite runs against it.
-- [x] Core adapters are implemented: OpenAI, Anthropic, Gemini, and OpenAI-compatible, with a real OpenRouter adapter for authenticated connection management. — **301 files** in `Kernel/SDK/` — 56 provider folders, each self-contained: its own `adapter/index.ts` plus the `lib/` copies of `types`, `transport`, `streaming`, `errors`, `url`, `bounded-map` and — for the OpenAI-shaped providers — `model-normalize` that it needs. The duplication is deliberate — a provider must be removable without touching the others — so this count is the price, stated rather than hidden. `openai-compatible` is no longer a provider: it was inlined into the four providers that extended it. The helpers (`deepseek-pow`, `zen-free-tier`, `responses-lane`, `responses-tools`, `qoder/constants`, `qoder/encoding`) and `qwen-web` are not protocol adapters, which is why the capture guard counts 55: it measures providers, this counts files.
+- [x] Core adapters are implemented: OpenAI, Anthropic, Gemini, and OpenAI-compatible, with a real OpenRouter adapter for authenticated connection management. — **160 files** in `Kernel/SDK/` — 56 provider folders, each with its own `adapter/index.ts` and local `lib/types.ts`, plus one shared `_shared` package for `errors`, `url`, `streaming`, `bounded-map`, `model-normalize` and the canonical types. The shared code is a dependency, not a copy: a provider is still removable without touching the rest, and a fix lands once. `openai-compatible` is no longer a provider: it was inlined into the four providers that extended it. The helpers (`deepseek-pow`, `zen-free-tier`, `responses-lane`, `responses-tools`, `qoder/constants`, `qoder/encoding`) and `qwen-web` are not protocol adapters, which is why the capture guard counts 55: it measures providers, this counts files.
 - [x] A provider with a different protocol can be added through a capability-specific adapter without
       modifying the gateway core. — **10 registrations in `service.ts`, 0 provider-id conditionals in
       `routing.ts` or `service.ts`.** Proved by 1.43.0, which added nine providers as catalog entries and

@@ -1,4 +1,4 @@
-import { ProviderError } from '../lib/errors.js';
+import { ProviderError } from '@omnihilbras/sdk-shared/errors';
 import type { Model } from '../lib/types.js';
 import type { HttpTransport } from '../lib/transport.js';
 

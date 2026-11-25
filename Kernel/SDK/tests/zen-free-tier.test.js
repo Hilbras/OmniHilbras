@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ProviderError } from '../opencode-zen/dist/lib/errors.js';
+import { ProviderError } from '../_shared/dist/errors.js';
 import { ZenAdapter } from '../opencode-zen/dist/adapter/index.js';
 import { zenSessionId, zenFreeTierHeaders, zenContractSatisfied, satisfiesZenUserAgentContract } from '../opencode-zen/dist/lib/zen-free-tier.js';
 

@@ -1,4 +1,4 @@
-import { ProviderError, isProviderError } from './errors.js';
+import { ProviderError, isProviderError } from '@omnihilbras/sdk-shared/errors';
 import type { ChatMessage, ChatRequest, ChatResponse, FinishReason, TokenUsage, ToolCallDelta } from './types.js';
 
 /**

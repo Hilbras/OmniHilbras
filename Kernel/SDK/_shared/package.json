@@ -1,0 +1,45 @@
+{
+  "name": "@omnihilbras/sdk-shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./errors": {
+      "types": "./dist/errors.d.ts",
+      "default": "./dist/errors.js"
+    },
+    "./url": {
+      "types": "./dist/url.d.ts",
+      "default": "./dist/url.js"
+    },
+    "./streaming": {
+      "types": "./dist/streaming.d.ts",
+      "default": "./dist/streaming.js"
+    },
+    "./bounded-map": {
+      "types": "./dist/bounded-map.d.ts",
+      "default": "./dist/bounded-map.js"
+    },
+    "./model-normalize": {
+      "types": "./dist/model-normalize.d.ts",
+      "default": "./dist/model-normalize.js"
+    },
+    "./types": {
+      "types": "./dist/types.d.ts",
+      "default": "./dist/types.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { KimiCodeAdapter, KIMI_CODE, kimiCodeCredentialExpired, kimiCodeProviderId } from '../kimi-code/dist/adapter/index.js';
-import { ProviderError } from '../kimi-code/dist/lib/errors.js';
+import { ProviderError } from '../_shared/dist/errors.js';
 import { OWN_PROVIDER_ADAPTERS } from '../../API/dist/src/core/own-provider-adapters.js';
 import { scriptedTransport } from './harness/scripted-transport.js';
 

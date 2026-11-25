@@ -1,5 +1,5 @@
-import { isProviderError, ProviderError, type ProviderErrorCode } from './errors.js';
-import { assertSafeProviderRequestUrl, isLoopbackHostname } from './url.js';
+import { isProviderError, ProviderError, type ProviderErrorCode } from '@omnihilbras/sdk-shared/errors';
+import { assertSafeProviderRequestUrl, isLoopbackHostname } from '@omnihilbras/sdk-shared/url';
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 

@@ -432,7 +432,7 @@ test('a health check is a real free read, and a failure keeps the reason', async
   assert.match(healthy.calls[0].url, /\/models/, 'the check is the free catalog read, not a guess');
 
   const broken = transportFor();
-  broken.request = async function (input) { this.calls.push(input); throw new (await import('../codex/dist/lib/errors.js')).ProviderError('AUTHENTICATION_FAILED', 'the session expired', { providerId: 'codex' }); };
+  broken.request = async function (input) { this.calls.push(input); throw new (await import('../_shared/dist/errors.js')).ProviderError('AUTHENTICATION_FAILED', 'the session expired', { providerId: 'codex' }); };
   const bad = await new CodexAdapter({ transport: broken }).healthCheck({ credential: { type: 'oauth', value: 'access' } });
   assert.equal(bad.status, 'unavailable');
   assert.equal(bad.verified, 'credential');

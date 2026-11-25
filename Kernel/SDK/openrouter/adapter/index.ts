@@ -1,7 +1,7 @@
-import { ProviderError } from '../lib/errors.js';
-import { normalizeCatalogModel } from '../lib/model-normalize.js';
+import { ProviderError } from '@omnihilbras/sdk-shared/errors';
+import { normalizeCatalogModel } from '@omnihilbras/sdk-shared/model-normalize';
 import { FetchHttpTransport, type HttpResponse, type HttpTransport } from '../lib/transport.js';
-import { assertSafeProviderHeaderValue, assertSafeProviderRequestUrl, normalizeProviderBaseUrl, resolveProviderUrl } from '../lib/url.js';
+import { assertSafeProviderHeaderValue, assertSafeProviderRequestUrl, normalizeProviderBaseUrl, resolveProviderUrl } from '@omnihilbras/sdk-shared/url';
 import { OpenAICompatibleAdapter, type OpenAICompatibleAdapterConfig } from '../lib/openai-compatible.js';
 import type { CredentialValidation, Model, ModelImportOptions, ProviderCredential, ProviderHealth, ProviderRequestContext } from '../lib/types.js';
 

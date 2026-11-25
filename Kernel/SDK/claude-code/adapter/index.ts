@@ -1,8 +1,8 @@
-import { ProviderError } from '../lib/errors.js';
-import { parseSseJson, parseSseStream } from '../lib/streaming.js';
+import { ProviderError } from '@omnihilbras/sdk-shared/errors';
+import { parseSseJson, parseSseStream } from '@omnihilbras/sdk-shared/streaming';
 import { FetchHttpTransport, type HttpTransport } from '../lib/transport.js';
-import { assertSafeProviderHeaderValue, normalizeProviderBaseUrl, resolveProviderUrl, sanitizeProviderHeaders } from '../lib/url.js';
-import { boundedMap } from '../lib/bounded-map.js';
+import { assertSafeProviderHeaderValue, normalizeProviderBaseUrl, resolveProviderUrl, sanitizeProviderHeaders } from '@omnihilbras/sdk-shared/url';
+import { boundedMap } from '@omnihilbras/sdk-shared/bounded-map';
 
 /** Renewed credentials kept per adapter, enough for every token a live gateway has recently renewed. */
 const maxRenewalMemoEntries = 64;

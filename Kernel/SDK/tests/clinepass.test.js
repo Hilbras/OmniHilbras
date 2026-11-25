@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { CLINE_PASS_MODEL_PREFIX, ClinePassAdapter } from '../clinepass/dist/adapter/index.js';
 import { ClineAdapter } from '../cline/dist/adapter/index.js';
-import { ProviderError } from '../clinepass/dist/lib/errors.js';
+import { ProviderError } from '../_shared/dist/errors.js';
 
 /**
  * A transport that records what was sent and answers from a routing table.

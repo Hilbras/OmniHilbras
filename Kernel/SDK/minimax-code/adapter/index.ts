@@ -1,7 +1,7 @@
-import { ProviderError } from '../lib/errors.js';
-import { parseSseJson, parseSseStream } from '../lib/streaming.js';
+import { ProviderError } from '@omnihilbras/sdk-shared/errors';
+import { parseSseJson, parseSseStream } from '@omnihilbras/sdk-shared/streaming';
 import { FetchHttpTransport, type HttpTransport } from '../lib/transport.js';
-import { boundedMap } from '../lib/bounded-map.js';
+import { boundedMap } from '@omnihilbras/sdk-shared/bounded-map';
 
 import type {
   ChatChunk,

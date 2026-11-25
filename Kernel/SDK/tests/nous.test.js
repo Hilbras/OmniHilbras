@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { NousAdapter, NOUS_BASE_URL, NOUS_FALLBACK_VALIDATION_MODEL, nousProviderId } from '../nous/dist/adapter/index.js';
-import { ProviderError } from '../nous/dist/lib/errors.js';
+import { ProviderError } from '../_shared/dist/errors.js';
 
 /**
  * Nous Research — the two facts the reference project measured about this provider, and the adapter

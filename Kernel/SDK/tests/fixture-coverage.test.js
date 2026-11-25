@@ -52,7 +52,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 
 const FIXTURES = new URL('./fixtures/', import.meta.url);
 
-const SCAFFOLDING = new Set(['dist', 'node_modules', 'test', 'tests', 'log', 'docs']);
+const SCAFFOLDING = new Set(['dist', 'node_modules', 'test', 'tests', 'log', 'docs', '_shared']);
 
 const ADAPTERS = readdirSync(new URL('../', import.meta.url), { withFileTypes: true })
   .filter((entry) => entry.isDirectory())

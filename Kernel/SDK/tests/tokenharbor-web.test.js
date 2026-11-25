@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { TokenHarborWebAdapter, decodeTokenHarborStream, flattenMessages, parseTokenHarborCookieHeader, sessionExpiresAt, tokenHarborWebCredential } from '../tokenharbor-web/dist/adapter/index.js';
-import { ProviderError } from '../tokenharbor-web/dist/lib/errors.js';
+import { ProviderError } from '../_shared/dist/errors.js';
 import { scriptedTokenHarborFetch } from './harness/scripted-tokenharbor-fetch.js';
 
 /** `assert.throws` returns nothing, so the error is captured explicitly to assert its code. */

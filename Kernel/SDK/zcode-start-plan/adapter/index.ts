@@ -1,7 +1,7 @@
-import { ProviderError } from '../lib/errors.js';
-import { parseSseJson, parseSseStream } from '../lib/streaming.js';
+import { ProviderError } from '@omnihilbras/sdk-shared/errors';
+import { parseSseJson, parseSseStream } from '@omnihilbras/sdk-shared/streaming';
 import { FetchHttpTransport, type HttpTransport } from '../lib/transport.js';
-import { assertSafeProviderHeaderValue, resolveProviderUrl } from '../lib/url.js';
+import { assertSafeProviderHeaderValue, resolveProviderUrl } from '@omnihilbras/sdk-shared/url';
 import { START_PLAN_TEMPLATE } from '../lib/startPlanTemplate.js';
 import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, CredentialValidation, FinishReason, MessageContent, Model, ProviderAdapter, ProviderCapabilities, ProviderCredential, ProviderHealth, ProviderId, ProviderQuota, ProviderRequestContext, TokenUsage, ToolCall, ToolDefinition } from '../lib/types.js';
 

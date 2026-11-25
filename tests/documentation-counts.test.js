@@ -33,7 +33,7 @@ const read = (file) => readFileSync(new URL(file, ROOT), 'utf8');
  * count by five the first time this ran. The list here is "every directory that is not scaffolding", so a
  * new provider still appears without editing it.
  */
-const SDK_SCAFFOLDING = new Set(['core', 'dist', 'node_modules', 'test', 'tests', 'brand', 'docs']);
+const SDK_SCAFFOLDING = new Set(['core', 'dist', 'node_modules', 'test', 'tests', 'brand', 'docs', '_shared']);
 function adapterDirs() {
   return readdirSync(new URL('Kernel/SDK/', ROOT), { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && !SDK_SCAFFOLDING.has(entry.name))

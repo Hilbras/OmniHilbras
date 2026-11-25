@@ -1,12 +1,12 @@
-import { ProviderError } from '../lib/errors.js';
+import { ProviderError } from '@omnihilbras/sdk-shared/errors';
 import { FetchHttpTransport } from '../lib/transport.js';
 import type { HttpTransport } from '../lib/transport.js';
-import { normalizeCatalogModel } from '../lib/model-normalize.js';
+import { normalizeCatalogModel } from '@omnihilbras/sdk-shared/model-normalize';
 import { AnthropicAdapter } from '../lib/anthropic.js';
 import { OpenAICompatibleAdapter } from '../lib/openai-compatible.js';
 import { zenConversationSeed, zenContractSatisfied, isZenFreeTierRefusalError, zenFreeTierRefusal, zenSessionId, zenGatedToolChoice, zenUserAgent } from '../lib/zen-free-tier.js';
 import { declaredTools } from '../lib/zen-adapter.js';
-import { parseSseStream } from '../lib/streaming.js';
+import { parseSseStream } from '@omnihilbras/sdk-shared/streaming';
 import type { ChatChunk, ChatRequest, ChatResponse, CredentialValidation, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderRequestContext, ToolCall } from '../lib/types.js';
 
 /**

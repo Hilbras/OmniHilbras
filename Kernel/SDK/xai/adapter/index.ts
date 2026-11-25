@@ -4,7 +4,7 @@ import {
   resolveProviderUrl,
   type OpenAICompatibleAdapterOptions,
 } from '@omnihilbras/sdk-openai';
-import { ProviderError } from '../lib/errors.js';
+import { ProviderError } from '@omnihilbras/sdk-shared/errors';
 import type { ProviderCapabilities, ProviderRequestContext } from '../lib/types.js';
 
 /**

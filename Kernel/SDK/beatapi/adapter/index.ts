@@ -1,4 +1,4 @@
-import { ProviderError } from '../lib/errors.js';
+import { ProviderError } from '@omnihilbras/sdk-shared/errors';
 import { OpenAICompatibleAdapter, type OpenAICompatibleAdapterOptions } from '../lib/openai-compatible.js';
 import { FetchHttpTransport, type HttpTransport } from '../lib/transport.js';
 import type { ProviderQuota, ProviderRequestContext, ProviderResourceQuota } from '../lib/types.js';

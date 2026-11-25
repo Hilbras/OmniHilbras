@@ -25,6 +25,8 @@ const read = (relative) => readFileSync(join(root, relative), 'utf8');
 const write = (relative, contents) => writeFileSync(join(root, relative), contents, 'utf8');
 
 const version = JSON.parse(read('package.json')).version;
+/** Semver with an optional prerelease suffix, so 4.0.0-alpha.1 is a version this check can hold. */
+const versionShape = String.raw`\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?`;
 const problems = [];
 const fixed = [];
 
@@ -60,7 +62,7 @@ for (const manifest of ['Kernel/API/package.json', 'cli/package.json']) {
  * worse failure than the one being fixed.
  */
 const readme = read('README.md');
-const readmePattern = /\*\*Current version: (\d+\.\d+\.\d+)\*\*/;
+const readmePattern = new RegExp(`\\*\\*Current version: (${versionShape})\\*\\*`);
 const readmeMatch = readmePattern.exec(readme);
 if (!readmeMatch) {
   problems.push('README.md has no "**Current version: x.y.z**" line to check');
@@ -78,7 +80,7 @@ if (!readmeMatch) {
  * It is checked and fixed here for the same reason as the README line.
  */
 const spec = read('docs/SPEC-SDK.md');
-const specPattern = /\*\*Status:\*\* Current — release (\d+\.\d+\.\d+)/;
+const specPattern = new RegExp(`\\*\\*Status:\\*\\* Current — release (${versionShape})`);
 const specMatch = specPattern.exec(spec);
 if (!specMatch) {
   problems.push('docs/SPEC-SDK.md has no "**Status:** Current — release x.y.z" line to check');
@@ -94,7 +96,7 @@ if (!specMatch) {
 /** The version the Cline adapters report as their client version. Both copies, because both send it. */
 for (const file of ['Kernel/SDK/cline/adapter/index.ts', 'Kernel/SDK/clinepass/lib/cline.ts']) {
   const source = read(file);
-  const pattern = /const omnihilbrasVersion = '(\d+\.\d+\.\d+)';/;
+  const pattern = new RegExp(`const omnihilbrasVersion = '(${versionShape})';`);
   const match = pattern.exec(source);
   if (!match) {
     problems.push(`${file} has no omnihilbrasVersion constant to check`);
@@ -128,8 +130,10 @@ try {
     const latest = tags[0].replace(/^v/, '');
     // The tag at or below the current version is fine while a release is being prepared, so
     // only a tag that is *ahead* is an error: that means the tree is behind its own history.
-    const [major, minor, patch] = latest.split('.').map(Number);
-    const [myMajor, myMinor, myPatch] = version.split('.').map(Number);
+    // Prerelease suffixes are compared by their numeric base; ordering among alphas is not this
+    // check's job, only catching a tag that names a future release.
+    const [major, minor, patch] = latest.split('-')[0].split('.').map(Number);
+    const [myMajor, myMinor, myPatch] = version.split('-')[0].split('.').map(Number);
     const tagIsAhead =
       major > myMajor ||
       (major === myMajor && minor > myMinor) ||

@@ -1,8 +1,8 @@
-import { ProviderError } from './errors.js';
-import { normalizeCatalogModel } from './model-normalize.js';
-import { parseSseJson, parseSseStream } from './streaming.js';
+import { ProviderError } from '@omnihilbras/sdk-shared/errors';
+import { normalizeCatalogModel } from '@omnihilbras/sdk-shared/model-normalize';
+import { parseSseJson, parseSseStream } from '@omnihilbras/sdk-shared/streaming';
 import { FetchHttpTransport, type HttpTransport } from './transport.js';
-import { assertSafeProviderHeaderName, assertSafeProviderHeaderValue, normalizeProviderBaseUrl, resolveProviderUrl, sanitizeProviderHeaders } from './url.js';
+import { assertSafeProviderHeaderName, assertSafeProviderHeaderValue, normalizeProviderBaseUrl, resolveProviderUrl, sanitizeProviderHeaders } from '@omnihilbras/sdk-shared/url';
 import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, EmbeddingRequest, EmbeddingResponse, FinishReason, MessageContent, Model, ProviderAdapter, ProviderCapabilities, ProviderCredential, ProviderHealth, ProviderRequestContext, TokenUsage, ToolCall, ToolDefinition } from './types.js';
 
 export type OpenAICompatibleAuth = {

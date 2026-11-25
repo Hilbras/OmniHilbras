@@ -24,7 +24,7 @@
   <a href="./CONTRIBUTING.md">Contributing</a>
 </p>
 
-**Current version: 3.100.2**
+**Current version: 4.0.0-alpha.1**
 
 OmniHilbras sits between your application and the model providers you already use. It gives every client one
 OpenAI-compatible endpoint, keeps credentials on your machine, and decides which saved connection serves each
@@ -167,15 +167,16 @@ Installing, the first-run check and removing every version from a machine: [`doc
 ```
 
 The important boundary: **the gateway core does not speak provider wire formats.** A provider is an adapter
-plus a registration, and the shared machinery each adapter needs is vendored into that package's `lib/`, so
-there is no shared SDK core to drift away from them.
+plus a registration. Shared machinery — errors, URL safety, SSE parsing, the OpenAI-compatible base — lives
+once in `Kernel/SDK/_shared`, and each provider package keeps only its wire format and local types.
 
 ### Repository map
 
 | Path | Responsibility |
 | --- | --- |
 | `Kernel/API/` | Gateway: routes, routing, health, usage, vault, token-saver integration |
-| `Kernel/SDK/<provider>/` | Provider adapter and vendored runtime types, one package per provider |
+| `Kernel/SDK/<provider>/` | Provider adapter and its local wire types, one package per provider |
+| `Kernel/SDK/_shared/` | Shared adapter machinery: errors, URL safety, SSE, transport primitives, canonical types |
 | `Kernel/TokenSaver/` | Standalone, reversible context compressor and saver telemetry |
 | `src/` | React dashboard and marketing pages |
 | `site/` | Static entry files for Home, Download, Docs and legal pages |

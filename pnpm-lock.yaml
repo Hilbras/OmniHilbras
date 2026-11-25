@@ -450,6 +450,15 @@ importers:
       '@omnihilbras/sdk-openai':
         specifier: workspace:*
         version: link:../openai
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  Kernel/SDK/_shared:
     devDependencies:
       typescript:
         specifier: ^5.9.3
@@ -460,6 +469,9 @@ importers:
       '@omnihilbras/sdk-openai':
         specifier: workspace:*
         version: link:../openai
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
@@ -470,6 +482,9 @@ importers:
       '@omnihilbras/sdk-openai':
         specifier: workspace:*
         version: link:../openai
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
@@ -480,12 +495,19 @@ importers:
       '@omnihilbras/sdk-openai':
         specifier: workspace:*
         version: link:../openai
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
 
   Kernel/SDK/anthropic:
+    dependencies:
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
@@ -496,6 +518,9 @@ importers:
       '@omnihilbras/sdk-openai':
         specifier: workspace:*
         version: link:../openai
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
@@ -506,48 +531,79 @@ importers:
       '@omnihilbras/sdk-openai':
         specifier: workspace:*
         version: link:../openai
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
 
   Kernel/SDK/apmix:
+    dependencies:
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
 
   Kernel/SDK/beatapi:
+    dependencies:
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
 
   Kernel/SDK/chatgpt-web:
+    dependencies:
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
 
   Kernel/SDK/claude:
+    dependencies:
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
 
   Kernel/SDK/claude-code:
+    dependencies:
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
 
   Kernel/SDK/cline:
+    dependencies:
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
 
   Kernel/SDK/clinepass:
+    dependencies:
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
@@ -558,18 +614,29 @@ importers:
       '@omnihilbras/sdk-openai':
         specifier: workspace:*
         version: link:../openai
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
 
   Kernel/SDK/codebuddy:
+    dependencies:
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
 
   Kernel/SDK/codex:
+    dependencies:
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
@@ -580,30 +647,49 @@ importers:
       '@omnihilbras/sdk-openai':
         specifier: workspace:*
         version: link:../openai
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
 
   Kernel/SDK/deepseek-web:
+    dependencies:
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
 
   Kernel/SDK/duckduckgo-web:
+    dependencies:
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
 
   Kernel/SDK/gemini:
+    dependencies:
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
 
   Kernel/SDK/gemini-web:
+    dependencies:
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
@@ -614,12 +700,19 @@ importers:
       '@omnihilbras/sdk-openai':
         specifier: workspace:*
         version: link:../openai
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
 
   Kernel/SDK/grok-web:
+    dependencies:
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
@@ -630,12 +723,19 @@ importers:
       '@omnihilbras/sdk-openai':
         specifier: workspace:*
         version: link:../openai
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
 
   Kernel/SDK/kilocode:
+    dependencies:
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
@@ -646,12 +746,19 @@ importers:
       '@omnihilbras/sdk-openai':
         specifier: workspace:*
         version: link:../openai
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
 
   Kernel/SDK/kimi-code:
+    dependencies:
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
@@ -662,18 +769,29 @@ importers:
       '@omnihilbras/sdk-openai':
         specifier: workspace:*
         version: link:../openai
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
 
   Kernel/SDK/kiro:
+    dependencies:
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
 
   Kernel/SDK/minimax-code:
+    dependencies:
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
@@ -684,6 +802,9 @@ importers:
       '@omnihilbras/sdk-openai':
         specifier: workspace:*
         version: link:../openai
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
@@ -694,12 +815,19 @@ importers:
       '@omnihilbras/sdk-openai':
         specifier: workspace:*
         version: link:../openai
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
 
   Kernel/SDK/nous:
+    dependencies:
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
@@ -710,6 +838,9 @@ importers:
       '@omnihilbras/sdk-openai':
         specifier: workspace:*
         version: link:../openai
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
@@ -720,6 +851,9 @@ importers:
       '@omnihilbras/sdk-openai':
         specifier: workspace:*
         version: link:../openai
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
@@ -730,48 +864,79 @@ importers:
       '@omnihilbras/sdk-openai':
         specifier: workspace:*
         version: link:../openai
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
 
   Kernel/SDK/openai:
+    dependencies:
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
 
   Kernel/SDK/opencode-console:
+    dependencies:
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
 
   Kernel/SDK/opencode-go:
+    dependencies:
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
 
   Kernel/SDK/opencode-zen:
+    dependencies:
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
 
   Kernel/SDK/openrouter:
+    dependencies:
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
 
   Kernel/SDK/perplexity-web:
+    dependencies:
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
 
   Kernel/SDK/qoder:
+    dependencies:
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
@@ -782,6 +947,9 @@ importers:
       '@omnihilbras/sdk-openai':
         specifier: workspace:*
         version: link:../openai
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
@@ -792,12 +960,19 @@ importers:
       '@omnihilbras/sdk-openai':
         specifier: workspace:*
         version: link:../openai
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
 
   Kernel/SDK/qwen-web:
+    dependencies:
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
@@ -808,6 +983,9 @@ importers:
       '@omnihilbras/sdk-openai':
         specifier: workspace:*
         version: link:../openai
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
@@ -818,12 +996,19 @@ importers:
       '@omnihilbras/sdk-openai':
         specifier: workspace:*
         version: link:../openai
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
 
   Kernel/SDK/tokenharbor-web:
+    dependencies:
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
@@ -834,6 +1019,9 @@ importers:
       '@omnihilbras/sdk-openai':
         specifier: workspace:*
         version: link:../openai
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
@@ -844,6 +1032,9 @@ importers:
       '@omnihilbras/sdk-openai':
         specifier: workspace:*
         version: link:../openai
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
@@ -854,6 +1045,9 @@ importers:
       '@omnihilbras/sdk-openai':
         specifier: workspace:*
         version: link:../openai
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
@@ -864,12 +1058,19 @@ importers:
       '@omnihilbras/sdk-openai':
         specifier: workspace:*
         version: link:../openai
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
 
   Kernel/SDK/zcode-start-plan:
+    dependencies:
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3
@@ -880,6 +1081,9 @@ importers:
       '@omnihilbras/sdk-openai':
         specifier: workspace:*
         version: link:../openai
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3

@@ -1,8 +1,8 @@
-import { ProviderError } from '../lib/errors.js';
-import { boundedMap } from '../lib/bounded-map.js';
-import { parseSseJson, parseSseStream } from '../lib/streaming.js';
+import { ProviderError } from '@omnihilbras/sdk-shared/errors';
+import { boundedMap } from '@omnihilbras/sdk-shared/bounded-map';
+import { parseSseJson, parseSseStream } from '@omnihilbras/sdk-shared/streaming';
 import { FetchHttpTransport, type HttpTransport } from '../lib/transport.js';
-import { normalizeProviderBaseUrl, resolveProviderUrl, sanitizeProviderHeaders } from '../lib/url.js';
+import { normalizeProviderBaseUrl, resolveProviderUrl, sanitizeProviderHeaders } from '@omnihilbras/sdk-shared/url';
 
 import type {
   ChatChunk,

@@ -136,13 +136,16 @@ that is not on `main`.
 
 ## Boundaries
 
-- Provider-specific wire formats stay inside `Kernel/SDK/<name>/adapter/`; the shared machinery each
-  package needs is vendored into `Kernel/SDK/<name>/lib/` — the Kernel restructure dissolved the shared
-  `src/core/` into the per-provider packages, so a fix to a vendored file is a fix to every copy or it
-  is drift. The gateway service must stay provider-neutral. **This line named `src/adapters/` for
-  releases after that directory was renamed, and `Kernel/SDK/src/` for releases after that tree was
-  dissolved**, so a contributor following it wrote into a path that does not exist — which is what a
-  path written in prose does when nothing reads it.
+- Provider-specific wire formats stay inside `Kernel/SDK/<name>/adapter/`; shared adapter machinery
+  lives once in `Kernel/SDK/_shared/`. The Kernel restructure first dissolved the shared `src/core/`
+  into per-provider `lib/` copies, and that produced 245 tracked vendored files with 56 copies of
+  `types.ts` and `errors.ts`; V4 reintroduced one shared package for the modules that have no reason
+  to vary. A provider may keep a local `lib/types.ts` and its provider-specific helpers, but a copy of
+  `errors`, `url`, `streaming`, `bounded-map` or `model-normalize` under any provider is drift and
+  `tests/vendored-lib-drift.test.js` fails on it. The gateway service must stay provider-neutral.
+  **This line named `src/adapters/` for releases after that directory was renamed, and
+  `Kernel/SDK/src/` for releases after that tree was dissolved**, so a contributor following it wrote
+  into a path that does not exist — which is what a path written in prose does when nothing reads it.
 - Real requests only. A test, health check, or simulated result must not be presented as a live one.
   A new provider request costs money, so say so. **Asserted where it is easiest to get wrong:**
   `tests/dashboard-truthfulness.test.js` fails if a success state in `src/` is set inside a timer

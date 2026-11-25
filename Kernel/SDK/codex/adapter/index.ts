@@ -1,8 +1,8 @@
-import { ProviderError } from '../lib/errors.js';
-import { parseSseJson, parseSseStream } from '../lib/streaming.js';
+import { ProviderError } from '@omnihilbras/sdk-shared/errors';
+import { parseSseJson, parseSseStream } from '@omnihilbras/sdk-shared/streaming';
 import { FetchHttpTransport, type HttpTransport } from '../lib/transport.js';
-import { assertSafeProviderHeaderValue } from '../lib/url.js';
-import { boundedMap } from '../lib/bounded-map.js';
+import { assertSafeProviderHeaderValue } from '@omnihilbras/sdk-shared/url';
+import { boundedMap } from '@omnihilbras/sdk-shared/bounded-map';
 import { codexToolDelta, toCodexInput, toCodexTools } from '../lib/responses-tools.js';
 import type { ChatChunk, ChatRequest, ChatResponse, FinishReason, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderQuota, ProviderRequestContext, ProviderResourceQuota, TokenUsage } from '../lib/types.js';
 

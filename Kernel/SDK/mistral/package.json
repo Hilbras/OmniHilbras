@@ -10,7 +10,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@omnihilbras/sdk-openai": "workspace:*"
+    "@omnihilbras/sdk-openai": "workspace:*",
+    "@omnihilbras/sdk-shared": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.9.3"

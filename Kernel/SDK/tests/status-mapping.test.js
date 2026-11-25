@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { FetchHttpTransport } from '../codebuddy/dist/lib/transport.js';
-import { ProviderError } from '../codebuddy/dist/lib/errors.js';
+import { ProviderError } from '../_shared/dist/errors.js';
 
 /**
  * How a provider's HTTP status is classified decides two things a user feels: the words

@@ -211,11 +211,11 @@ Kernel/API/src/
     routing.ts        Provider-agnostic selection, ejection and recovery. Zero provider ids.
 
 Kernel/SDK/
-  (one directory per provider: openai/, anthropic/, codebuddy/, kiro/, … and nothing else — there is
-   no shared core, because each provider carries the machinery it needs so it can be removed alone.
-   Every provider folder has the same shape: adapter/index.ts holds its logic, lib/ holds its own
-   types, transport, streaming, errors, url and bounded-map, and it owns its package.json and log/.
-   Deleting any one folder leaves the other twenty-one able to build.)
+  _shared/         The canonical adapter machinery: errors, url, streaming, bounded-map,
+                   model-normalize, types, and (from alpha.2) transport and the OpenAI base.
+  openai/          One provider package, and the shape every sibling has: adapter/index.ts holds the
+                   wire format; lib/types.ts and provider-specific helpers stay local; package.json
+                   and log/ are owned per provider. Deleting one folder leaves the others able to build.
 
 src/                 Dashboard. Presentation and gateway management only.
 ```
@@ -402,10 +402,13 @@ Three things in this repository have earned their keep and should be protected:
 
 ## Deliberate non-goals
 
-- **Splitting the SDK into per-provider packages.** — **Done, and this line used to say the
-  opposite.** The Kernel restructure dissolved the shared SDK into one private package per provider
-  under `Kernel/SDK/`; the reason was ownership and per-provider release/build isolation, and the
-  cost is vendored copies of shared files, which drift unless every copy is changed together.
+- **Splitting the SDK into per-provider packages.** — **Done, then partially undone on purpose.**
+  The Kernel restructure dissolved the shared SDK into one private package per provider under
+  `Kernel/SDK/`; the reason was ownership and per-provider release/build isolation, and the cost was
+  245 tracked vendored files with 56 copies of `types.ts` and `errors.ts`. V4's Phase A keeps the
+  per-provider packages but moves the modules that have no reason to vary into
+  `Kernel/SDK/_shared`. The split is still real — ownership and build isolation remain — but a
+  shared fix now lands once, and a reinstated copy fails `tests/vendored-lib-drift.test.js`.
 - **A rewrite.** The provider-specific surface of the Core is a registration list and two route
   modules, not a scattered set of conditionals — so a rewrite has nothing to collect. Doing it
   incrementally keeps the whole suite green throughout.

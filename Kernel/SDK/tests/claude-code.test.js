@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { CLAUDE_CODE, ClaudeCodeAdapter, claudeCodeAuthorizeUrl, claudeCodeCredentialExpired, claudeCodeProviderId, exchangeClaudeCodeCode, splitCallbackFragment } from '../claude-code/dist/adapter/index.js';
-import { ProviderError } from '../claude-code/dist/lib/errors.js';
-import { boundedMap } from '../claude-code/dist/lib/bounded-map.js';
+import { ProviderError } from '../_shared/dist/errors.js';
+import { boundedMap } from '../_shared/dist/bounded-map.js';
 
 /**
  * The Claude Code adapter.

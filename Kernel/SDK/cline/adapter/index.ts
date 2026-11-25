@@ -1,4 +1,4 @@
-import { ProviderError } from '../lib/errors.js';
+import { ProviderError } from '@omnihilbras/sdk-shared/errors';
 import { providerErrorDetail } from '../lib/transport.js';
 import { FetchHttpTransport } from '../lib/transport.js';
 import { OpenAICompatibleAdapter, type OpenAIResponse } from '../lib/openai-compatible.js';
@@ -87,7 +87,7 @@ const inFlightRefreshesRegistry = globalThis as unknown as Record<symbol, Map<st
 const inFlightRefreshes = (inFlightRefreshesRegistry[inFlightRefreshesKey] ??= new Map());
 
 /** Reported to Cline as this client's version. */
-const omnihilbrasVersion = '3.100.2';
+const omnihilbrasVersion = '4.0.0-alpha.1';
 
 /** Cline only accepts WorkOS JWTs with an explicit prefix. */
 export function toClineAccessToken(token: string) {

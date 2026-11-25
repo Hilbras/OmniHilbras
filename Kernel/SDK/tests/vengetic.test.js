@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { VengeticAdapter } from '../vengetic/dist/adapter/index.js';
-import { ProviderError } from '../vengetic/dist/lib/errors.js';
+import { ProviderError } from '../_shared/dist/errors.js';
 
 /**
  * Vengetic is a thin OpenAI-wire adapter with two provider-specific facts worth pinning: its model

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { NvidiaAdapter } from '../nvidia/dist/adapter/index.js';
-import { ProviderError } from '../nvidia/dist/lib/errors.js';
+import { ProviderError } from '../_shared/dist/errors.js';
 
 /**
  * NVIDIA is OpenAI-shaped on the wire, but its catalog is public and its reasoning control is a
@@ -93,7 +93,7 @@ test('only the NVIDIA provider option is accepted', async () => {
 });
 
 test('the shared normalizer carries NVIDIA capability flags', async () => {
-  const { normalizeCatalogModel } = await import('../openai/dist/lib/model-normalize.js');
+  const { normalizeCatalogModel } = await import('../_shared/dist/model-normalize.js');
   const model = normalizeCatalogModel({
     id: 'moonshotai/kimi-k3.1-pro', context_window: 1048576, model_type: 'vlm',
     supports_tools: true, supports_thinking: true,

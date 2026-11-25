@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { FetchHttpTransport } from '../codebuddy/dist/lib/transport.js';
-import { ProviderError } from '../codebuddy/dist/lib/errors.js';
+import { ProviderError } from '../_shared/dist/errors.js';
 // The registry lives in the gateway and throws the gateway's own ProviderError class — a different
 // copy from the vendored one above, so `instanceof` cannot reach across. `isProviderError` is the
 // cross-copy-aware check the gateway ships for exactly this.
 import { isProviderError } from '../../API/dist/src/core/index.js';
 import { ProviderRegistry } from '../../API/dist/src/core/registry.js';
-import { parseSseJson, parseSseStream } from '../codebuddy/dist/lib/streaming.js';
-import { normalizeProviderBaseUrl, resolveProviderUrl, sanitizeProviderHeaders } from '../codebuddy/dist/lib/url.js';
+import { parseSseJson, parseSseStream } from '../_shared/dist/streaming.js';
+import { normalizeProviderBaseUrl, resolveProviderUrl, sanitizeProviderHeaders } from '../_shared/dist/url.js';
 
 test('FetchHttpTransport parses JSON responses', async () => {
   const transport = new FetchHttpTransport({

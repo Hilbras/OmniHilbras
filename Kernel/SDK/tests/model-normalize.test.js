@@ -1,9 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { normalizeCatalogModel } from '../openai/dist/lib/model-normalize.js';
-import { createRequire } from 'node:module';
-const require = createRequire(import.meta.url);
+import { readFileSync } from 'node:fs';
+import { normalizeCatalogModel } from '../_shared/dist/model-normalize.js';
 
 /**
  * The one catalog mapper every OpenAI-shaped provider now uses. It is deliberately honest: a field is set
@@ -85,22 +84,14 @@ test('an explicit false survives normalization and can therefore narrow a provid
   assert.deepEqual(model.capabilities, { tools: false, reasoning: false });
 });
 
-test('all ten vendored copies preserve an explicit false, so a one-copy edit cannot drift quietly', () => {
-  // The first version of this suite imported only openai/dist. A change to one source copy then
-  // passed here while nine adapters kept dropping the false, which is the drift this guard exists for.
-  const { readFileSync } = require('node:fs');
-  const { join } = require('node:path');
-  const { fileURLToPath } = require('node:url');
-  const root = fileURLToPath(new URL('../../../', import.meta.url));
-  const ids = ['apmix', 'beatapi', 'cline', 'clinepass', 'nous', 'openai', 'opencode-console', 'opencode-go', 'opencode-zen', 'openrouter'];
-  const expected = [
+test('the one shared mapper preserves an explicit false', () => {
+  // There used to be ten vendored copies and this test read all of them. They are now one module, so
+  // the behavior assertion above is the whole guard: a change that drops the branch fails it.
+  const source = readFileSync(new URL('../_shared/src/model-normalize.ts', import.meta.url), 'utf8');
+  for (const line of [
     'raw.supports_tools === false ? { tools: false }',
     'raw.supports_thinking === false ? { reasoning: false }',
-  ];
-  for (const id of ids) {
-    const source = readFileSync(join(root, 'Kernel', 'SDK', id, 'lib', 'model-normalize.ts'), 'utf8');
-    for (const line of expected) {
-      assert.ok(source.includes(line), `${id}/lib/model-normalize.ts dropped the false-preservation branch (${line})`);
-    }
+  ]) {
+    assert.ok(source.includes(line), `the shared mapper dropped the false-preservation branch (${line})`);
   }
 });

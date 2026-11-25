@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { deepSeekHashV1 } from '../deepseek-web/dist/lib/deepseek-pow.js';
 import { DEEPSEEK_WEB, DeepSeekWebAdapter, allDeepSeekWebModels, decodeDeepSeekAnswer, flattenToPrompt, parseDeepSeekUserToken } from '../deepseek-web/dist/adapter/index.js';
-import { ProviderError } from '../deepseek-web/dist/lib/errors.js';
+import { ProviderError } from '../_shared/dist/errors.js';
 
 /**
  * DeepSeek Web, without a network.

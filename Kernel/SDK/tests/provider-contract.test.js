@@ -9,7 +9,7 @@ import { framesFor, scriptedTransport } from './harness/scripted-transport.js';
 import { OpenAIAdapter } from '../openai/dist/adapter/index.js';
 import { VengeticAdapter } from '../vengetic/dist/adapter/index.js';
 import { NvidiaAdapter } from '../nvidia/dist/adapter/index.js';
-import { ProviderError } from '../openai/dist/lib/errors.js';
+import { ProviderError } from '../_shared/dist/errors.js';
 import { OpenRouterAdapter } from '../openrouter/dist/adapter/index.js';
 import { OpenAICompatibleAdapter } from '../openai/dist/adapter/index.js';
 import { AnthropicAdapter } from '../anthropic/dist/adapter/index.js';
@@ -459,7 +459,7 @@ test('every adapter in the SDK is either contracted or listed as not', () => {
   const files = readdirSync(new URL('../', import.meta.url), { withFileTypes: true })
     // Providers are directories at the SDK root, beside the scaffolding (`node_modules`, `log`, `tests`)
     // and the test harness. Only the provider folders are adapters.
-    .filter((entry) => entry.isDirectory() && !['node_modules', 'log', 'tests', 'dist'].includes(entry.name))
+    .filter((entry) => entry.isDirectory() && !['node_modules', 'log', 'tests', 'dist', '_shared'].includes(entry.name))
     .map((entry) => entry.name)
     // Not adapters: `deepseek-pow` is a proof-of-work solver, `chatgpt-first-party` is the
     // first-party client behind the ChatGPT Web driver, `qwen-web` is a probe, and `zen-free-tier`

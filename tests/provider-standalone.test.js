@@ -25,7 +25,7 @@ import { join } from 'node:path';
  */
 
 const SDK = new URL('../Kernel/SDK/', import.meta.url).pathname;
-const SCAFFOLDING = new Set(['dist', 'node_modules', 'log', 'tests', 'adapter', 'lib']);
+const SCAFFOLDING = new Set(['dist', 'node_modules', 'log', 'tests', 'adapter', 'lib', '_shared']);
 
 function providerFolders() {
   return readdirSync(SDK, { withFileTypes: true })
@@ -89,20 +89,17 @@ test('no provider imports another provider, by path or by package name', () => {
   assert.deepEqual(offenders, [], `a provider depends on another, so neither is standalone:\n  ${offenders.join('\n  ')}`);
 });
 
-test('every provider carries its own machinery, so it can be removed without touching the rest', () => {
-  // The five modules the old SDK kept in `core/`. A provider that lacks one is importing a copy from
-  // somewhere else, which is the dependency this whole layout exists to forbid.
-  // The modules a provider must own. `types` and `errors` are universal; the rest are needed only by
-  // a provider that actually makes requests or parses a stream, so they are checked where they exist
-  // rather than demanded of every folder — a DOM-driving provider has no SSE parser to own.
-  const universal = ['lib/types.ts', 'lib/errors.ts'];
+test('every provider keeps its own types and depends on the one shared core', () => {
+  // V4 moved `errors`, `url`, `streaming`, `bounded-map` and `model-normalize` into
+  // `@omnihilbras/sdk-shared`. `types` stays local because its variants still differ; alpha.2
+  // reconciles them. What must not come back is a local shared module.
   const missing = [];
   for (const folder of providerFolders()) {
-    for (const file of universal) {
-      if (!existsSync(join(SDK, folder, file))) missing.push(`${folder}/${file}`);
-    }
+    if (!existsSync(join(SDK, folder, 'lib', 'types.ts'))) missing.push(`${folder}/lib/types.ts`);
+    const manifest = JSON.parse(readFileSync(join(SDK, folder, 'package.json'), 'utf8'));
+    if (manifest.dependencies?.['@omnihilbras/sdk-shared'] !== 'workspace:*') missing.push(`${folder}/package.json -> @omnihilbras/sdk-shared`);
   }
-  assert.deepEqual(missing, [], `providers with no copy of their own machinery:\n  ${missing.join('\n  ')}`);
+  assert.deepEqual(missing, [], `providers with no types or no shared-core dependency:\n  ${missing.join('\n  ')}`);
 });
 
 test('every provider has its own package.json, tsconfig and installed dependencies', () => {

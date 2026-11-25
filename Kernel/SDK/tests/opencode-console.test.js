@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { OPENCODE_CONSOLE, OpencodeConsoleAdapter, opencodeConsoleCredentialExpired, opencodeConsoleProviderId, refreshOpencodeConsoleCredential } from '../opencode-console/dist/adapter/index.js';
-import { ProviderError } from '../opencode-console/dist/lib/errors.js';
+import { ProviderError } from '../_shared/dist/errors.js';
 
 // The gateway's declaration, as the SDK sees it after Kernel/API applies Kernel/Tools. Kept local so an SDK
 // test does not depend on another package's build order; the catalog itself is pinned by Kernel/Tools' own tests.

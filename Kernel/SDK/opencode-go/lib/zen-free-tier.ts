@@ -1,4 +1,4 @@
-import { ProviderError } from './errors.js';
+import { ProviderError } from '@omnihilbras/sdk-shared/errors';
 import type { ChatRequest } from './types.js';
 
 /**

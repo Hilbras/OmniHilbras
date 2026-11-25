@@ -1,7 +1,7 @@
-import { ProviderError } from '../lib/errors.js';
+import { ProviderError } from '@omnihilbras/sdk-shared/errors';
 import { OpenAICompatibleAdapter, type OpenAICompatibleAdapterOptions } from '../lib/openai-compatible.js';
-import { normalizeCatalogModel } from '../lib/model-normalize.js';
-import { parseSseJson, parseSseStream } from '../lib/streaming.js';
+import { normalizeCatalogModel } from '@omnihilbras/sdk-shared/model-normalize';
+import { parseSseJson, parseSseStream } from '@omnihilbras/sdk-shared/streaming';
 import { FetchHttpTransport, type HttpTransport } from '../lib/transport.js';
 import type {
   ChatChunk,

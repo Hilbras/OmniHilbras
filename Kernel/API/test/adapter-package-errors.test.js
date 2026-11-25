@@ -4,7 +4,7 @@ import { ProviderError as CoreProviderError, ProviderRegistry } from '../dist/sr
 import { GatewayService, InMemoryApiKeyStore, InMemoryConnectionStore } from '../dist/src/index.js';
 // The adapter's **own** copy of the class, which is the point of this file: an adapter lives in its own
 // package with its own `ProviderError`, and `instanceof` is false across that boundary.
-import { ProviderError as SdkProviderError } from '@omnihilbras/sdk-zcode-start-plan/dist/lib/errors.js';
+import { ProviderError as SdkProviderError } from '../../SDK/_shared/dist/errors.js';
 
 /**
  * An error from an adapter package must be recognised as a provider error.

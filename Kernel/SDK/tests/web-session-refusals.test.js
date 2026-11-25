@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { DeepSeekWebAdapter, DEEPSEEK_WEB } from '../deepseek-web/dist/adapter/index.js';
-import { ProviderError } from '../deepseek-web/dist/lib/errors.js';
+import { ProviderError } from '../_shared/dist/errors.js';
 import { TokenHarborWebAdapter, tokenHarborWebCredential } from '../tokenharbor-web/dist/adapter/index.js';
 
 /**

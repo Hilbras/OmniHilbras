@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { OpenRouterAdapter } from '../openrouter/dist/adapter/index.js';
-import { ProviderError } from '../openrouter/dist/lib/errors.js';
+import { ProviderError } from '../_shared/dist/errors.js';
 
 function createTransport(data) {
   const calls = [];

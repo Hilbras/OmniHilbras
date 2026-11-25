@@ -1,8 +1,8 @@
-import { ProviderError } from '../lib/errors.js';
+import { ProviderError } from '@omnihilbras/sdk-shared/errors';
 import { FetchHttpTransport } from '../lib/transport.js';
 import type { HttpTransport } from '../lib/transport.js';
 import { OpenAICompatibleAdapter } from '../lib/openai-compatible.js';
-import { parseSseJson, parseSseStream } from '../lib/streaming.js';
+import { parseSseJson, parseSseStream } from '@omnihilbras/sdk-shared/streaming';
 import { isZenFreeTierRefusal, zenFreeTierHeaders, zenSessionId, zenContractSatisfied, zenConversationSeed, zenFreeTierRefusal, zenGatedToolChoice } from '../lib/zen-free-tier.js';
 import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, CredentialValidation, FinishReason, Model, ProviderQuota, ProviderResourceQuota, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderRequestContext, TokenUsage, ToolDefinition } from '../lib/types.js';
 

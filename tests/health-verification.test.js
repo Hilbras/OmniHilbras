@@ -43,7 +43,7 @@ import { mergeGatewayConnections } from '../src/lib/providerCards.ts';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const ADAPTERS = join(ROOT, 'Kernel/SDK');
 /** Directories under Kernel/SDK that hold no adapter. */
-const SDK_SCAFFOLDING = new Set(['core', 'dist', 'node_modules', 'test', 'tests', 'brand', 'docs']);
+const SDK_SCAFFOLDING = new Set(['core', 'dist', 'node_modules', 'test', 'tests', 'brand', 'docs', '_shared']);
 
 /** Strips comments, because a doc comment naming `verified` is not a verdict using it. */
 const code = (source) => source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');

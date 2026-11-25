@@ -79,7 +79,7 @@ test('the plan\'s adapter counts agree with the fixture guard that measures them
   // `openai-compatible` is the shared base that providers extend, not a provider, so it is not counted.
   // The SDK is one folder per provider at its root, beside the scaffolding. Counting every directory
   // counted `dist`, `test` and `brand` as adapters the first time this ran after the move.
-  const SCAFFOLDING = new Set(['core', 'dist', 'node_modules', 'test', 'tests', 'brand', 'docs']);
+  const SCAFFOLDING = new Set(['core', 'dist', 'node_modules', 'test', 'tests', 'brand', 'docs', '_shared']);
   const adapters = readdirSync(adapterDir, { withFileTypes: true })
     .filter((e) => e.isDirectory() && !SCAFFOLDING.has(e.name) && e.name !== 'openai-compatible')
     .map((e) => e.name)
@@ -121,7 +121,7 @@ test('no document advertises a version other than the one in package.json', () =
   const manifest = JSON.parse(doc('package.json'));
   const version = manifest.version;
   for (const name of ['README.md']) {
-    const stated = doc(name).match(/\*\*Current version: (\d+\.\d+\.\d+)\*\*/);
+    const stated = doc(name).match(/\*\*Current version: (\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\*\*/);
     assert.ok(stated, `${name} must state its version`);
     assert.equal(stated[1], version, `${name} says ${stated[1]} but package.json is ${version}`);
   }

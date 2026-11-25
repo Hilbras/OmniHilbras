@@ -1,4 +1,4 @@
-import { ProviderError } from '../lib/errors.js';
+import { ProviderError } from '@omnihilbras/sdk-shared/errors';
 import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, CredentialValidation, FinishReason, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderId, ProviderRequestContext, ToolCall, ToolCallDelta, ToolDefinition } from '../lib/types.js';
 import { MAX_DEEPSEEK_POW_DIFFICULTY, findDeepSeekPowNonce } from '../lib/deepseek-pow.js';
 

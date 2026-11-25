@@ -1,64 +1,91 @@
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createHash } from 'node:crypto';
 import test from 'node:test';
 
 /**
- * Vendored-lib drift guard (Phase 2 of the full-system upgrade).
+ * The shared provider core is one package, not 56 copies.
  *
- * AGENTS.md names the boundary: "the shared machinery each package needs is vendored into
- * `Kernel/SDK/<name>/lib/` — a fix to a vendored file is a fix to every copy or it is drift." Some vendored
- * files are *meant* to differ per provider (`types.ts` has 7 shapes, `transport.ts` has 3) — a guard that
- * demanded those be identical would be wrong and would get disabled. This pins only the files that are
- * byte-identical today and have no reason to vary: `errors.ts` (one error vocabulary) and `url.ts` (one
- * loopback/private-destination check). A fix to one that misses the others now fails in two seconds, in
- * `pnpm test:repo`, before a build.
+ * Phase A of the V4 platform plan moved `errors`, `url`, `streaming`, `bounded-map`, `model-normalize`
+ * and the dead `index` re-export out of every `Kernel/SDK/<provider>/lib/` and into
+ * `Kernel/SDK/_shared`. This guard is the replacement for the old "every copy is identical" test: a
+ * copy that comes back is the drift, whether or not it happens to be byte-identical today.
  *
- * The Cline/ClinePass adapter twins have their own, implementation-level guard (`cline-twin-drift.test.js`).
+ * `types.ts`, `transport.ts` and `openai-compatible.ts` intentionally remain local until alpha.2,
+ * where their variants are reconciled into one superset. This test names them so a reader does not
+ * mistake their absence from the list for an oversight.
  */
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SDK = join(ROOT, 'Kernel', 'SDK');
+const SHARED = join(SDK, '_shared');
 
 const sdkDirs = readdirSync(SDK, { withFileTypes: true })
   .filter((entry) => entry.isDirectory() && !entry.name.startsWith('_'))
   .map((entry) => join(SDK, entry.name));
 
-function copies(fileName) {
-  const found = [];
+const moved = ['errors', 'url', 'streaming', 'bounded-map', 'model-normalize', 'index'];
+
+test('no SDK package vendors a module the shared core owns', () => {
+  const offenders = [];
   for (const dir of sdkDirs) {
-    const path = join(dir, 'lib', fileName);
-    try {
-      found.push({ path: relative(ROOT, path), digest: createHash('sha256').update(readFileSync(path)).digest('hex') });
-    } catch {
-      // Not every SDK vendors every file; absence is fine.
+    for (const name of moved) {
+      const path = join(dir, 'lib', `${name}.ts`);
+      if (existsSync(path)) offenders.push(relative(ROOT, path));
     }
   }
-  return found;
-}
+  assert.deepEqual(offenders, [], `these packages reintroduced a shared module instead of importing @omnihilbras/sdk-shared:\n${offenders.join('\n')}`);
+});
 
-for (const fileName of ['errors.ts', 'url.ts']) {
-  test(`every vendored ${fileName} copy is identical (one shared definition)`, () => {
-    const files = copies(fileName);
-    assert.ok(files.length >= 20, `expected the shared ${fileName} to be vendored widely, found ${files.length} copies`);
-    const byDigest = new Map();
-    for (const file of files) {
-      if (!byDigest.has(file.digest)) byDigest.set(file.digest, []);
-      byDigest.get(file.digest).push(file.path);
+test('the shared package carries the canonical modules and exports them', () => {
+  const manifest = JSON.parse(readFileSync(join(SHARED, 'package.json'), 'utf8'));
+  assert.equal(manifest.name, '@omnihilbras/sdk-shared');
+  for (const name of ['errors', 'url', 'streaming', 'bounded-map', 'model-normalize', 'types', 'index']) {
+    assert.ok(existsSync(join(SHARED, 'src', `${name}.ts`)), `the canonical ${name}.ts is missing`);
+  }
+  for (const name of ['errors', 'url', 'streaming', 'bounded-map', 'model-normalize', 'types']) {
+    assert.ok(manifest.exports?.[`./${name}`], `package.json does not export ./${name}`);
+  }
+});
+
+test('every provider package depends on the shared core', () => {
+  const missing = [];
+  for (const dir of sdkDirs) {
+    const manifestPath = join(dir, 'package.json');
+    if (!existsSync(manifestPath)) continue;
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    if (manifest.dependencies?.['@omnihilbras/sdk-shared'] !== 'workspace:*') missing.push(relative(ROOT, manifestPath));
+  }
+  assert.deepEqual(missing, [], `these packages do not depend on @omnihilbras/sdk-shared:\n${missing.join('\n')}`);
+});
+
+test('no source imports a removed local shared module', () => {
+  const offenders = [];
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name !== 'node_modules' && entry.name !== 'dist') walk(path);
+        continue;
+      }
+      if (!entry.name.endsWith('.ts')) continue;
+      const text = readFileSync(path, 'utf8');
+      for (const name of moved) {
+        if (new RegExp(`from '(?:\\.\\.?/)+lib/${name}\\.js'`).test(text) || new RegExp(`from '\\./${name}\\.js'`).test(text)) {
+          offenders.push(`${relative(ROOT, path)} -> ${name}`);
+        }
+      }
     }
-    assert.equal(byDigest.size, 1, `${fileName} has drifted into ${byDigest.size} versions:\n${[...byDigest.values()].map((paths) => paths.join(', ')).join('\n---\n')}`);
-  });
-}
+  };
+  for (const dir of sdkDirs) walk(dir);
+  assert.deepEqual(offenders, [], `these imports still point at a deleted vendored module:\n${offenders.join('\n')}`);
+});
 
-test('the guard names the intentionally-varying files it does NOT pin', () => {
-  // A future reader must see that types.ts/transport.ts varying is deliberate, not an oversight in this guard.
-  const types = copies('types.ts');
-  const transport = copies('transport.ts');
-  assert.ok(types.length > 0 && transport.length > 0, 'the varying files are still vendored');
-  const variants = (files) => new Set(files.map((file) => file.digest)).size;
-  // Document the current shape without asserting an exact count (providers come and go). More than one digest
-  // is expected and acceptable; pinning them would be the mistake this test records.
-  assert.ok(variants(types) >= 1 && variants(transport) >= 1);
+test('the variant-prone modules are still local, and are named as the next slice', () => {
+  // This is documentation with a failing-if-wrong body: when alpha.2 lands, these assertions move.
+  for (const name of ['types', 'transport']) {
+    const copies = sdkDirs.filter((dir) => existsSync(join(dir, 'lib', `${name}.ts`)));
+    assert.ok(copies.length > 0, `${name} is expected to remain local until the variant reconciliation`);
+  }
 });

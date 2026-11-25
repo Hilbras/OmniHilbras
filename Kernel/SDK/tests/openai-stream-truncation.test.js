@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { OpenAIAdapter } from '../openai/dist/adapter/index.js';
-import { ProviderError } from '../openai/dist/lib/errors.js';
+import { ProviderError } from '../_shared/dist/errors.js';
 
 /**
  * A stream that ends before `[DONE]` is a truncated answer, and must be refused rather than shown as complete.
