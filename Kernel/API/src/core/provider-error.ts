@@ -2,6 +2,7 @@ export type ProviderErrorCode =
   | 'NOT_SUPPORTED'
   | 'NOT_FOUND'
   | 'INVALID_REQUEST'
+  | 'CONFLICT'
   | 'AUTHENTICATION_FAILED'
   | 'RATE_LIMITED'
   | 'PROVIDER_REQUEST_FAILED'
@@ -74,6 +75,7 @@ export function publicProviderMessage(code: ProviderErrorCode) {
     case 'NOT_SUPPORTED': return 'This provider does not support the requested capability.';
     case 'NOT_FOUND': return 'The requested resource was not found.';
     case 'INVALID_REQUEST': return 'The request is invalid.';
+    case 'CONFLICT': return 'The request conflicts with an earlier one.';
     case 'CONFIGURATION_ERROR': return 'The provider is not configured correctly.';
     case 'PROVIDER_REQUEST_FAILED':
     default: return 'The provider request failed.';

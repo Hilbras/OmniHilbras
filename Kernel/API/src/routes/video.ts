@@ -11,7 +11,10 @@
  * poll naming neither is an invalid request, never a guess at one account.
  */
 
+import { createHash } from 'node:crypto';
+import { join } from 'node:path';
 import type { RouteContext } from './route-context.js';
+import { IdempotencyStore } from '../core/idempotency.js';
 import { type GatewayFailoverAttempt } from '../core/request-executor.js';
 import { invalidRequest, isRecord, maxInferenceBodyBytes, readJsonBody, requestIdOf, sendJson } from '../core/http.js';
 import { ProviderError, isProviderError } from '../core/provider-error.js';
@@ -21,6 +24,23 @@ import {
 import { isTrustedDashboard } from '../core/runtime.js';
 
 const VIDEO_ACTIONS = new Set(['generations', 'edits', 'extensions']);
+const replayStores = new WeakMap<object, IdempotencyStore>();
+
+function replayStore(service: RouteContext['service']): IdempotencyStore {
+  const existing = replayStores.get(service);
+  if (existing) return existing;
+  const store = new IdempotencyStore(join(service.deployment().dataDir, 'idempotency.json'));
+  replayStores.set(service, store);
+  return store;
+}
+
+function callerKey(request: RouteContext['request']): string {
+  const presented = request.headers.authorization
+    ?? request.headers['x-api-key']
+    ?? request.headers['x-goog-api-key']
+    ?? 'local';
+  return createHash('sha256').update(String(presented)).digest('hex').slice(0, 32);
+}
 
 function cancelled(): ProviderError {
   return new ProviderError('CANCELLED', 'The video request was aborted before it was answered.', {
@@ -63,6 +83,8 @@ export async function handleVideoRoute(ctx: RouteContext): Promise<boolean> {
     let action: string | undefined;
     let body: Record<string, unknown> | undefined;
     let id: string | undefined;
+    let replayKey: string | undefined;
+    let replayHash: string | undefined;
 
     if (creating) {
       const parsed = await readJsonBody(request, options.maxBodyBytes ?? maxInferenceBodyBytes);
@@ -76,6 +98,23 @@ export async function handleVideoRoute(ctx: RouteContext): Promise<boolean> {
       const explicit = getExplicitProviderId(request, body);
       const slash = model.indexOf('/');
       providerId = explicit ?? (slash > 0 ? model.slice(0, slash) : undefined);
+      const supplied = request.headers['idempotency-key'];
+      if (typeof supplied === 'string' && supplied.trim()) {
+        replayHash = createHash('sha256').update(JSON.stringify({ action, body })).digest('hex');
+        replayKey = `${callerKey(request)}:${supplied.trim()}`;
+        const hit = await replayStore(service).lookup(replayKey);
+        if (hit) {
+          if (hit.hash !== replayHash) {
+            throw new ProviderError('CONFLICT', 'This Idempotency-Key was already used with a different request body.', {
+              retryable: false,
+              publicMessage: 'This Idempotency-Key was already used with a different request body.',
+            });
+          }
+          response.setHeader('idempotency-replayed', 'true');
+          sendJson(response, 200, hit.value, origin);
+          return true;
+        }
+      }
     } else {
       id = url.pathname.slice(VIDEO_POLL_PREFIX.length).trim();
       if (!id) throw invalidRequest('Missing video request id.');
@@ -137,14 +176,18 @@ export async function handleVideoRoute(ctx: RouteContext): Promise<boolean> {
     attempts = attempts.map((attempt) => ({ ...attempt, ok: true, errorCode: undefined }));
     if (connectionId) response.setHeader('x-omnihilbras-connection', connectionId);
     recordUsage('success');
-    sendJson(response, 200, {
+    const payload = {
       id: job.id,
       ...(job.status !== undefined ? { status: job.status } : {}),
       // The URL is the upstream's own, forwarded only on its own completion signal. The gateway
       // never derives, guesses or repairs one.
       ...(job.videoUrl !== undefined ? { video: { url: job.videoUrl } } : {}),
       ...(connectionId !== undefined ? { connectionId } : {}),
-    }, origin);
+    };
+    if (replayKey && replayHash) {
+      await replayStore(service).commit(replayKey, replayHash, payload).catch(() => undefined);
+    }
+    sendJson(response, 200, payload, origin);
     return true;
   } catch (error) {
     const wasCancelled = signal.aborted || (isProviderError(error) && error.code === 'CANCELLED');

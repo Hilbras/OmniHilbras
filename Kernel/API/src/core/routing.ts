@@ -634,7 +634,7 @@ export function shouldRotateAccount(error: unknown): boolean {
 export function isRetryableFailure(error: unknown) {
   if (!isProviderError(error)) return false;
   if (error.code === 'CANCELLED') return false;
-  if (error.code === 'INVALID_REQUEST' || error.code === 'AUTHENTICATION_FAILED' || error.code === 'NOT_SUPPORTED' || error.code === 'NOT_FOUND') return false;
+  if (error.code === 'INVALID_REQUEST' || error.code === 'CONFLICT' || error.code === 'AUTHENTICATION_FAILED' || error.code === 'NOT_SUPPORTED' || error.code === 'NOT_FOUND') return false;
   /**
    * `INVALID_RESPONSE` is about the *answer*, not the request, and that distinction is the whole
    * reason it is here.

@@ -1,6 +1,6 @@
 # Spec: OmniHilbras Gateway and Provider SDK
 
-**Status:** Current — release 3.99.2
+**Status:** Current — release 3.100.0
 
 This document is the contract behind the gateway and its provider packages. It is intentionally more
 specific than the [README](../README.md): a route, an error code or a provider boundary written here is
@@ -427,7 +427,7 @@ account" means. Returns `{ authorizeUrl, flowId, expiresAt, pollIntervalSec }`; 
   missing confirmation is a 400; a wrong passphrase or a damaged envelope is refused before anything is
   changed. Management route.
 - `POST /v1/images/generations` — generate images, OpenAI shape `{model, prompt, n?, size?, quality?, response_format?, user?}`; returns `{created, data:[{url?, b64_json?, revised_prompt?}], provider, gateway}`. Authenticated like the LLM surface.
-- `POST /v1/videos/generations` — create a video job (billable surface). Body `{model, prompt, ...}`; `model` may carry a `provider/` prefix, and `x-omnihilbras-connection` pins the account. `POST /v1/videos/edits` and `POST /v1/videos/extensions` are the same job-creation surface. A job that reaches a video-capable adapter returns `{id, connectionId?, status?}` where `id` is the upstream `request_id` verbatim — creation never invents a URL — and the response echoes `x-omnihilbras-connection` so the client can poll the same account.
+- `POST /v1/videos/generations` — create a video job (billable surface). Body `{model, prompt, ...}`; `model` may carry a `provider/` prefix, and `x-omnihilbras-connection` pins the account. `POST /v1/videos/edits` and `POST /v1/videos/extensions` are the same job-creation surface. A job that reaches a video-capable adapter returns `{id, connectionId?, status?}` where `id` is the upstream `request_id` verbatim — creation never invents a URL — and the response echoes `x-omnihilbras-connection` so the client can poll the same account. A create may carry `Idempotency-Key`: the first successful response is stored for 24 hours under the caller plus key and replayed with `idempotency-replayed: true`; reusing that key with a different body is `409 CONFLICT`, and no second upstream job is dispatched.
 - `GET /v1/videos/:id` — poll a video job. The creating connection is named by `x-omnihilbras-connection` (or `?connection=`); `?provider=` is a fallback only, and a poll naming neither is refused — the gateway keeps no global job table. A successful poll returns the upstream `status` verbatim and `video.url` **only** when the upstream itself reports completion and published a URL; a pending answer has no URL at all.
   `xai` is the one bundled adapter that declares `video`; it POSTs `videos/<action>` and GETs `videos/<id>` through the gateway transport with the pinned connection's credential, and strips only its own `xai/` model prefix before forwarding. Every other provider answers `NOT_SUPPORTED` by name with the one planned attempt in `details.attempts`. Refusals, successes and client aborts are all written to the usage ledger; no path fabricates a job id or a completion URL. A new provider opts in from its own SDK package, never from a changed capability list in 54 vendored copies.
 - `GET /v1/virtual-models` — every persisted virtual model, enabled or disabled. A virtual model id must
