@@ -312,7 +312,7 @@ export async function startGatewayServer(options: {
   // The documented first-run escape hatch. A container with no mounted key store otherwise has no
   // authenticated way to mint its first key; `0` deliberately opens management and inference while
   // the operator bootstraps one, and is never the default.
-  if (options.env?.OMNIHILBRAS_REQUIRE_API_KEY?.trim() === '0') await service.setRequireApiKey(false);
+  if ((options.env ?? process.env).OMNIHILBRAS_REQUIRE_API_KEY?.trim() === '0') await service.setRequireApiKey(false);
   service.setHealthInterval(options.healthIntervalMs ?? config.healthIntervalMs);
   service.startTokenRenewal();
   /**
