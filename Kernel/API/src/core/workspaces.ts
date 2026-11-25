@@ -1,6 +1,4 @@
-import { join } from 'node:path';
-import { readFile } from 'node:fs/promises';
-import { atomicWrite, defaultStateDirectory } from './secure-store.js';
+import { createStateDocument, type StateDocument } from './state-document.js';
 
 export type Workspace = {
   id: string;
@@ -101,19 +99,20 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
 type WorkspacesFile = { version: 1; workspaces: Workspace[] };
 
 export class LocalWorkspaceStore implements WorkspaceStore {
-  private readonly path: string;
+  private readonly document: StateDocument;
   private items = new Map<string, Workspace>();
   private loaded = false;
   private mutationQueue: Promise<void> = Promise.resolve();
 
   constructor(options: { directory?: string; path?: string } = {}) {
-    this.path = options.path ?? join(options.directory ?? defaultStateDirectory(), 'workspaces.json');
+    this.document = createStateDocument({ directory: options.directory, name: 'workspaces', ...(options.path ? { path: options.path } : {}) });
   }
 
   private async ensureLoaded() {
     if (this.loaded) return;
     try {
-      const raw: unknown = JSON.parse(await readFile(this.path, 'utf8'));
+      const text = await this.document.read();
+      const raw: unknown = text ? JSON.parse(text) : undefined;
       if (raw && typeof raw === 'object' && Array.isArray((raw as { workspaces?: unknown }).workspaces)) {
         for (const candidate of (raw as { workspaces: unknown[] }).workspaces) {
           try {
@@ -127,7 +126,7 @@ export class LocalWorkspaceStore implements WorkspaceStore {
   }
 
   private persist() {
-    return atomicWrite(this.path, `${JSON.stringify({ version: 1, workspaces: [...this.items.values()] } satisfies WorkspacesFile, null, 2)}\n`);
+    return this.document.write(`${JSON.stringify({ version: 1, workspaces: [...this.items.values()] } satisfies WorkspacesFile, null, 2)}\n`);
   }
 
   private withMutation<T>(operation: () => Promise<T>): Promise<T> {

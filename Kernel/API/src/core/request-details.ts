@@ -1,6 +1,4 @@
-import { join } from 'node:path';
-import { readFile } from 'node:fs/promises';
-import { atomicWrite, defaultStateDirectory } from './secure-store.js';
+import { createStateDocument, type StateDocument } from './state-document.js';
 
 /**
  * An **optional** request-detail store, deliberately separate from `UsageRecord`.
@@ -151,7 +149,7 @@ export class InMemoryRequestDetailStore implements RequestDetailStore {
 
 /** Durable, opt-in store. Writes are serialised; the file is bounded on every write. */
 export class LocalRequestDetailStore implements RequestDetailStore {
-  private readonly path: string;
+  private readonly document: StateDocument;
   private details: RequestDetail[] = [];
   private loaded = false;
   private queue: Promise<void> = Promise.resolve();
@@ -160,7 +158,7 @@ export class LocalRequestDetailStore implements RequestDetailStore {
   private readonly maxFileBytes: number;
 
   constructor(options: { directory?: string; path?: string; maxRecords?: number; retentionMs?: number; maxFileBytes?: number } = {}) {
-    this.path = options.path ?? join(options.directory ?? defaultStateDirectory(), 'request-details.json');
+    this.document = createStateDocument({ directory: options.directory, name: 'request-details', ...(options.path ? { path: options.path } : {}) });
     this.maxRecords = options.maxRecords ?? defaultMaxRecords;
     this.retentionMs = options.retentionMs ?? defaultRetentionMs;
     this.maxFileBytes = options.maxFileBytes ?? defaultMaxFileBytes;
@@ -169,7 +167,8 @@ export class LocalRequestDetailStore implements RequestDetailStore {
   private async ensureLoaded() {
     if (this.loaded) return;
     try {
-      const raw: unknown = JSON.parse(await readFile(this.path, 'utf8'));
+      const text = await this.document.read();
+      const raw: unknown = text ? JSON.parse(text) : undefined;
       if (raw && typeof raw === 'object' && Array.isArray((raw as { details?: unknown }).details)) {
         this.details = bounded(
           (raw as { details: RequestDetail[] }).details.map((entry) => normalizeRequestDetail(entry, entry)),
@@ -183,7 +182,7 @@ export class LocalRequestDetailStore implements RequestDetailStore {
   }
 
   private persist() {
-    return atomicWrite(this.path, `${JSON.stringify({ version: 1, details: this.details } satisfies RequestDetailsBackupState, null, 2)}\n`);
+    return this.document.write(`${JSON.stringify({ version: 1, details: this.details } satisfies RequestDetailsBackupState, null, 2)}\n`);
   }
 
   private withMutation<T>(operation: () => Promise<T>): Promise<T> {

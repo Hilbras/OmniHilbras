@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { executeLocalTool, localToolRootsFromEnv } from './local-tool-executor.js';
+import { readStateEventsSince } from './state-document.js';
 import { OWN_PROVIDER_ADAPTERS } from './own-provider-adapters.js';
 import { ApmixAdapter } from '@omnihilbras/sdk-apmix';
 import { BeatApiAdapter } from '@omnihilbras/sdk-beatapi';
@@ -3211,6 +3212,19 @@ export class GatewayService {
    * and deliberately includes no credential, endpoint secret or usage content. Sorting by id makes map order
    * irrelevant, so two identical states always produce the same string.
    */
+  /**
+   * Durable change events after a sequence, for an SSE client reconnecting with `Last-Event-ID`.
+   *
+   * Only the SQLite state backend journals writes; the JSON backend returns nothing and the live
+   * fingerprint still delivers the next change. The payload is a document name, size and digest — never
+   * a document's bytes, and never a credential.
+   */
+  stateEventsSince(afterSeq: number, limit = 100) {
+    const dataDir = this.config()?.dataDir;
+    if (!dataDir) return [];
+    return readStateEventsSince(dataDir, afterSeq, limit);
+  }
+
   async stateFingerprint(): Promise<string> {
     const connections = (await this.connections.list())
       .map((connection) => [

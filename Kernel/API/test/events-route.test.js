@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { GatewayService, InMemoryApiKeyStore, InMemoryConnectionStore, createGatewayServer } from '../dist/src/index.js';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { GatewayService, InMemoryApiKeyStore, InMemoryConnectionStore, LocalConnectionStore, createGatewayServer } from '../dist/src/index.js';
+import { closeStateDatabases } from '../dist/src/core/state-document.js';
 import { InMemorySecretStore, ProviderRegistry } from '../dist/src/core/index.js';
 
 // The events channel is a change notification, not a data feed. These assert the two properties that matter:
@@ -98,4 +102,41 @@ test('the fingerprint is secret-free and stable', async (t) => {
   await saveFake(service);
   const changed = await service.stateFingerprint();
   assert.notEqual(changed, first, 'a connection change changes the fingerprint');
+});
+
+
+test('a reconnecting client receives the journal events it missed', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'omni-events-replay-'));
+  const previous = process.env.OMNIHILBRAS_STATE_BACKEND;
+  process.env.OMNIHILBRAS_STATE_BACKEND = 'sqlite';
+  t.after(async () => {
+    closeStateDatabases();
+    if (previous === undefined) delete process.env.OMNIHILBRAS_STATE_BACKEND;
+    else process.env.OMNIHILBRAS_STATE_BACKEND = previous;
+    await rm(directory, { recursive: true, force: true });
+  });
+
+  const apiKeys = new InMemoryApiKeyStore();
+  const key = (await apiKeys.create('replay')).key;
+  const connections = new LocalConnectionStore({ directory });
+  const service = new GatewayService(new ProviderRegistry(), new InMemorySecretStore({}), connections, apiKeys, { config: { dataDir: directory } });
+  await connections.save(
+    { id: 'replay', providerId: 'replay', name: 'Replay', endpoint: 'http://127.0.0.1:9', priority: 1, proxyPool: 'none', modelPolicy: 'all', credential: { type: 'none' } },
+    { type: 'none' },
+  );
+  // The save wrote the encrypted secrets row (seq 1) and the metadata row (seq 2).
+  const events = service.stateEventsSince(1);
+  assert.ok(events.length >= 1, 'the write left a journal event');
+
+  const server = createGatewayServer(service, { corsOrigin: 'http://localhost:5173' });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => { server.closeAllConnections?.(); server.close(resolve); }));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const controller = new AbortController();
+  t.after(() => controller.abort());
+  const response = await fetch(`${base}/v1/events`, { headers: { authorization: `Bearer ${key}`, 'last-event-id': '1' }, signal: controller.signal });
+  const text = await until(response, (value) => /"replay":true/.test(value));
+  assert.match(text, /id: \d+/, 'the replayed frame carries an id for the next reconnect');
+  assert.match(text, /"type":"state"/);
+  assert.doesNotMatch(text, /"name"|credential|apiKey/, 'the journal frame carries no document content');
 });

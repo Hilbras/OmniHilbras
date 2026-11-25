@@ -2,7 +2,8 @@ import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, 
 import { chmod, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { assertSafeProviderRequestUrl, type ModelImportPolicy, type ProviderCapabilities, type ProviderCredential, type ProviderId } from './index.js';;
-import { atomicWrite, defaultStateDirectory, ensureSecureDirectory, fileStamp, isNodeError, readOptionalFile, readOptionalText, withFileLock } from './secure-store.js';
+import { defaultStateDirectory, ensureSecureDirectory, isNodeError, readOptionalFile, withFileLock } from './secure-store.js';
+import { createStateDocument, type StateDocument } from './state-document.js';
 import { DEFAULT_TIMEOUT_MS } from './timeout-policy.js';
 import type { ConnectionSecretStore } from './runtime.js';
 /** The SDK's provider-keyed, read-only store. Aliased so the two are never confused at a call site. */
@@ -813,8 +814,8 @@ function buildRecord(input: ConnectionInput, existing: ConnectionRecord | undefi
 
 export class LocalConnectionStore implements ConnectionStore, ConnectionSecretStore {
   private readonly directory: string;
-  private readonly metadataPath: string;
-  private readonly secretsPath: string;
+  private readonly metadataDocument: StateDocument;
+  private readonly secretsDocument: StateDocument;
   private readonly keyPath: string;
   private readonly lockPath: string;
   private readonly fallback?: ProviderSecretStore;
@@ -845,8 +846,8 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
 
   constructor(options: LocalConnectionStoreOptions = {}) {
     this.directory = options.directory ?? defaultConnectionDirectory();
-    this.metadataPath = join(this.directory, 'connections.json');
-    this.secretsPath = join(this.directory, 'secrets.enc.json');
+    this.metadataDocument = createStateDocument({ directory: this.directory, name: 'connections' });
+    this.secretsDocument = createStateDocument({ directory: this.directory, name: 'secrets.enc' });
     this.keyPath = join(this.directory, 'secrets.key');
     this.lockPath = join(this.directory, 'vault.lock');
     this.fallback = options.fallback;
@@ -1330,7 +1331,7 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
   }
 
   private async diskState() {
-    return `${await fileStamp(this.metadataPath)}|${await fileStamp(this.secretsPath)}`;
+    return `${await this.metadataDocument.stamp()}|${await this.secretsDocument.stamp()}`;
   }
 
   /**
@@ -1371,8 +1372,8 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
   private async load() {
     await ensureSecureDirectory(this.directory);
     const [metadataText, secretText] = await Promise.all([
-      readOptionalText(this.metadataPath, this.maxMetadataBytes),
-      readOptionalText(this.secretsPath, maxSecretEnvelopeBytes),
+      this.metadataDocument.read(this.maxMetadataBytes),
+      this.secretsDocument.read(maxSecretEnvelopeBytes),
     ]);
     const parsedMetadata = parseMetadata(metadataText);
     this.connections = parsedMetadata.connections;
@@ -1414,7 +1415,7 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
         `The connection metadata exceeds its size limit: ${kib(bytes)} of the ${kib(this.maxMetadataBytes)} allowed. Remove a connection, or raise OMNIHILBRAS_MAX_METADATA_BYTES.`,
       );
     }
-    await atomicWrite(this.metadataPath, payload);
+    await this.metadataDocument.write(payload);
     this.diskStamp = await this.diskState();
   }
 
@@ -1433,7 +1434,7 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
       authTag: cipher.getAuthTag().toString('base64'),
       ciphertext: ciphertext.toString('base64'),
     };
-    await atomicWrite(this.secretsPath, JSON.stringify(envelope) + '\n');
+    await this.secretsDocument.write(JSON.stringify(envelope) + '\n');
     this.diskStamp = await this.diskState();
   }
 

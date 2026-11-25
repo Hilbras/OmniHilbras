@@ -1,6 +1,4 @@
-import { join } from 'node:path';
-import { readFile } from 'node:fs/promises';
-import { atomicWrite, defaultStateDirectory } from './secure-store.js';
+import { createStateDocument, type StateDocument } from './state-document.js';
 
 /**
  * A virtual model is one public ID mapped to one or more saved account/upstream-model pairs.
@@ -226,19 +224,20 @@ type VirtualModelsFile = { version: 1; models: VirtualModel[] };
 
 /** Durable store; mutations are serialised so two saves cannot overwrite each other. */
 export class LocalVirtualModelStore implements VirtualModelStore {
-  private readonly path: string;
+  private readonly document: StateDocument;
   private models = new Map<string, VirtualModel>();
   private loaded = false;
   private mutationQueue: Promise<void> = Promise.resolve();
 
   constructor(options: { directory?: string; path?: string } = {}) {
-    this.path = options.path ?? join(options.directory ?? defaultStateDirectory(), 'virtual-models.json');
+    this.document = createStateDocument({ directory: options.directory, name: 'virtual-models', ...(options.path ? { path: options.path } : {}) });
   }
 
   private async ensureLoaded() {
     if (this.loaded) return;
     try {
-      const raw: unknown = JSON.parse(await readFile(this.path, 'utf8'));
+      const text = await this.document.read();
+      const raw: unknown = text ? JSON.parse(text) : undefined;
       if (raw && typeof raw === 'object' && Array.isArray((raw as { models?: unknown }).models)) {
         for (const candidate of (raw as { models: unknown[] }).models) {
           try {
@@ -256,7 +255,7 @@ export class LocalVirtualModelStore implements VirtualModelStore {
   }
 
   private persist() {
-    return atomicWrite(this.path, `${JSON.stringify({ version: 1, models: [...this.models.values()] } satisfies VirtualModelsFile, null, 2)}\n`);
+    return this.document.write(`${JSON.stringify({ version: 1, models: [...this.models.values()] } satisfies VirtualModelsFile, null, 2)}\n`);
   }
 
   private withMutation<T>(operation: () => Promise<T>): Promise<T> {

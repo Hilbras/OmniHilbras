@@ -1,6 +1,4 @@
-import { join } from 'node:path';
-import { readFile } from 'node:fs/promises';
-import { atomicWrite, defaultStateDirectory } from './secure-store.js';
+import { createStateDocument, type StateDocument } from './state-document.js';
 
 export type Skill = {
   id: string;
@@ -108,19 +106,20 @@ export class InMemorySkillStore implements SkillStore {
 type SkillsFile = { version: 1; skills: Skill[] };
 
 export class LocalSkillStore implements SkillStore {
-  private readonly path: string;
+  private readonly document: StateDocument;
   private skills = new Map<string, Skill>();
   private loaded = false;
   private mutationQueue: Promise<void> = Promise.resolve();
 
   constructor(options: { directory?: string; path?: string } = {}) {
-    this.path = options.path ?? join(options.directory ?? defaultStateDirectory(), 'skills.json');
+    this.document = createStateDocument({ directory: options.directory, name: 'skills', ...(options.path ? { path: options.path } : {}) });
   }
 
   private async ensureLoaded() {
     if (this.loaded) return;
     try {
-      const raw: unknown = JSON.parse(await readFile(this.path, 'utf8'));
+      const text = await this.document.read();
+      const raw: unknown = text ? JSON.parse(text) : undefined;
       if (raw && typeof raw === 'object' && Array.isArray((raw as { skills?: unknown }).skills)) {
         for (const candidate of (raw as { skills: unknown[] }).skills) {
           try {
@@ -134,7 +133,7 @@ export class LocalSkillStore implements SkillStore {
   }
 
   private persist() {
-    return atomicWrite(this.path, `${JSON.stringify({ version: 1, skills: [...this.skills.values()] } satisfies SkillsFile, null, 2)}\n`);
+    return this.document.write(`${JSON.stringify({ version: 1, skills: [...this.skills.values()] } satisfies SkillsFile, null, 2)}\n`);
   }
 
   private withMutation<T>(operation: () => Promise<T>): Promise<T> {

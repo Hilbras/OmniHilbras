@@ -1,6 +1,6 @@
 # V4 platform plan
 
-**Goal:** [v4-goal.md](./v4-goal.md) · **Baseline:** `3.100.2` (2026-11-25) · **Status:** Phase A complete in `4.0.0-alpha.2`; Phase B next
+**Goal:** [v4-goal.md](./v4-goal.md) · **Baseline:** `3.100.2` (2026-11-25) · **Status:** Phase A complete in `4.0.0-alpha.2`; Phase B state seam complete in `4.0.0-alpha.3` (SQLite opt-in; default flip in beta)
 
 ## Why 4.0
 
@@ -44,7 +44,7 @@ Each phase ships as a prerelease with the normal ceremony (`verify` → version 
 
 **Exit criteria:** all 985 SDK tests and 1278 gateway tests pass; `pnpm build` and the CLI bundle succeed; `git ls-files 'Kernel/SDK/*/lib/*'` is empty or only provider-specific files; the drift guard fails on a planted copy.
 
-### Phase B — State engine (`4.0.0-alpha.3`)
+### Phase B — State engine (`4.0.0-alpha.3`) — seam done; default flip pending
 
 - Introduce `Kernel/API/src/core/state/` with a SQLite driver built on `node:sqlite` (WAL, prepared statements, busy timeout), a migration runner and a JSON fallback adapter.
 - Move every store behind the same interface contract: connections/credentials, usage, API keys, workspaces, virtual models, tunnels, MITM, proxy pools, provider nodes, skills, request details.

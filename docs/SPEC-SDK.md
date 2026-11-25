@@ -1,6 +1,6 @@
 # Spec: OmniHilbras Gateway and Provider SDK
 
-**Status:** Current — release 4.0.0-alpha.2
+**Status:** Current — release 4.0.0-alpha.3
 
 This document is the contract behind the gateway and its provider packages. It is intentionally more
 specific than the [README](../README.md): a route, an error code or a provider boundary written here is
@@ -367,6 +367,14 @@ The first local gateway exposes:
   to start. Both backends are bounded by `maxRecords`, share the same query/summary/normalisation helpers, and
   answer identically (`Kernel/API/test/usage-store-contract.test.js` runs one contract against both). An existing
   `usage.json` is imported into the database once, on first run. JSON remains the default; the database is opt-in.
+  **State backend (4.0.0-alpha.3):** every other local store now writes through one `StateDocument` seam
+  (`Kernel/API/src/core/state-document.ts`). `OMNIHILBRAS_STATE_BACKEND=sqlite` stores each document in
+  `<dataDir>/state.db` with WAL, a `documents` row per store and an append-only `events` journal carrying the
+  collection name, byte count and SHA-256 — never the payload. An existing JSON file is imported once on first
+  read, and a row that already exists wins over a stale file. An explicit `path` always means a JSON file, so
+  fixtures and callers that name a file keep that file. JSON remains the default for the alpha line; the
+  default flips after the migration has been exercised against every store. `GET /v1/events` accepts
+  `Last-Event-ID` and replays the journal before resuming live notifications.
 - `POST /v1/oauth/cline/start` — begin a sign-in; returns the sign-in URL, a session id, and a single-use `state`.
 - `GET /v1/oauth/cline/authorize` — build the Cline sign-in URL for a loopback callback.
 - `GET /v1/oauth/cline/callback` — where the provider redirects the browser; completes the exchange and reports the outcome.

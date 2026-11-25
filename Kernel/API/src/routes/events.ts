@@ -35,19 +35,31 @@ export async function handleEventsRoute(context: RouteContext): Promise<boolean>
 
   let writable = true;
   response.on('drain', () => { writable = true; });
-  const send = (payload: Record<string, unknown>) => {
+  const send = (payload: Record<string, unknown>, id?: number) => {
     if (!writable || response.writableEnded) return;
-    writable = response.write(`data: ${JSON.stringify(payload)}\n\n`);
+    const frame = `${id === undefined ? '' : `id: ${id}\n`}data: ${JSON.stringify(payload)}\n\n`;
+    writable = response.write(frame);
   };
 
   let last: string | undefined;
+  let lastSeq = 0;
   let inFlight = false;
   const check = async () => {
     if (inFlight) return;
     inFlight = true;
     try {
       const next = await service.stateFingerprint();
-      if (last !== undefined && next !== last) send({ type: 'state', at: new Date().toISOString() });
+      if (last !== undefined && next !== last) {
+        const events = service.stateEventsSince(lastSeq);
+        if (events.length > 0) {
+          for (const event of events) {
+            lastSeq = event.seq;
+            send({ type: 'state', at: event.at, seq: event.seq, replay: false }, event.seq);
+          }
+        } else {
+          send({ type: 'state', at: new Date().toISOString() });
+        }
+      }
       last = next;
     } catch {
       // A store read failing must not kill a live stream; the next tick retries.
@@ -55,6 +67,17 @@ export async function handleEventsRoute(context: RouteContext): Promise<boolean>
       inFlight = false;
     }
   };
+
+  // A reconnecting EventSource sends the last id it saw. Replay the durable journal first, so a change
+  // that landed while the tab was closed is not lost; the JSON backend has no journal and falls through
+  // to the ordinary fingerprint check.
+  const requested = Number(request.headers['last-event-id'] ?? url.searchParams.get('lastEventId'));
+  if (Number.isSafeInteger(requested) && requested > 0) {
+    for (const event of service.stateEventsSince(requested)) {
+      lastSeq = event.seq;
+      send({ type: 'state', at: event.at, seq: event.seq, replay: true }, event.seq);
+    }
+  }
 
   // Send the initial fingerprint without a notification (the client has just loaded its data).
   await check();

@@ -1,6 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import { join } from 'node:path';
-import { atomicWrite, defaultStateDirectory, ensureSecureDirectory, readOptionalText } from './secure-store.js';
+import { createStateDocument, type StateDocument } from './state-document.js';
+import { defaultStateDirectory } from './secure-store.js';
 
 /** Public metadata for a gateway key. The secret itself is never stored or returned again. */
 export type ApiKeyRecord = {
@@ -198,8 +198,7 @@ export class InMemoryApiKeyStore implements ApiKeyStore {
 }
 
 export class LocalApiKeyStore implements ApiKeyStore {
-  private readonly directory: string;
-  private readonly filePath: string;
+  private readonly document: StateDocument;
   private readonly lastUsedFlushIntervalMs: number;
   private keys = new Map<string, StoredApiKey>();
   private enforced = true;
@@ -208,8 +207,7 @@ export class LocalApiKeyStore implements ApiKeyStore {
   private lastUsedFlushAt = 0;
 
   constructor(options: LocalApiKeyStoreOptions = {}) {
-    this.directory = options.directory ?? defaultStateDirectory();
-    this.filePath = join(this.directory, 'api-keys.json');
+    this.document = createStateDocument({ directory: options.directory ?? defaultStateDirectory(), name: 'api-keys' });
     this.lastUsedFlushIntervalMs = options.lastUsedFlushIntervalMs ?? defaultLastUsedFlushIntervalMs;
   }
 
@@ -465,7 +463,7 @@ export class LocalApiKeyStore implements ApiKeyStore {
   }
 
   private async load() {
-    const text = await readOptionalText(this.filePath, maxFileBytes);
+    const text = await this.document.read(maxFileBytes);
     const parsed = parseApiKeyFile(text);
     this.keys = parsed.keys;
     this.enforced = parsed.requireApiKey;
@@ -474,8 +472,7 @@ export class LocalApiKeyStore implements ApiKeyStore {
   private async persist() {
     const payload = JSON.stringify({ version: fileVersion, requireApiKey: this.enforced, keys: [...this.keys.values()] } satisfies ApiKeyFile, null, 2) + '\n';
     if (Buffer.byteLength(payload, 'utf8') > maxFileBytes) throw new ApiKeyLimitError('The local API key store exceeds the size limit.');
-    await ensureSecureDirectory(this.directory);
-    await atomicWrite(this.filePath, payload);
+    await this.document.write(payload);
   }
 }
 

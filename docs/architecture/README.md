@@ -68,6 +68,18 @@ file was already safe by `wx`: two first runs race, one creates it, the other re
 Usage counters are accumulated as deltas and folded in after the reload, so a concurrent save cannot
 discard a count that arrived while the flush was waiting.
 
+## State engine
+
+Every local store now writes through one `StateDocument` seam. Its JSON shape is unchanged, so a vault, a
+backup and a hand-edited file still mean what they meant; what moved is the durable container. With
+`OMNIHILBRAS_STATE_BACKEND=sqlite`, each document is a row in `<dataDir>/state.db` (WAL, `busy_timeout`) and
+each write appends an `events` row with the collection, byte count and SHA-256 — never the payload. A first
+read imports the existing JSON file once; a row that exists wins, so a stale file cannot roll a store back.
+The connections vault keeps its process lock and reload-on-change behavior: the stamp is now the document's
+`updated_at:digest` rather than a file `stat`. `GET /v1/events` replays the journal for a reconnecting
+`Last-Event-ID` and then resumes the live fingerprint; the JSON backend has no journal and delivers the next
+change live. Usage keeps its own SQLite backend and is the one store with SQL-side queries.
+
 ## Virtual models
 
 A virtual model is one public `oh/` id with one or more account/upstream-model targets. `GatewayService.planRoute`
@@ -100,7 +112,7 @@ that holds is one a machine re-derives.
 | `Kernel/API/src/core/circuit-breaker.ts` | 192 | **0** | per-connection closed → open → half-open; counts what it refused |
 | `Kernel/API/src/core/request-executor.ts` | 1049 | **0** | the failover loop, the attempt ledger, the ordering |
 | `Kernel/API/src/core/connection-manager.ts` | 383 | **0** | one error mapper, one catalog merge, one lock scope |
-| `Kernel/API/src/core/service.ts` | 5336 | 54 | every `.onDemand()` registration, in one constructor |
+| `Kernel/API/src/core/service.ts` | 5350 | 54 | every `.onDemand()` registration, in one constructor |
 | `Kernel/API/src/core/http.ts` | 358 | **0** | the vocabulary every route shares |
 | `Kernel/API/src/routes/oauth.ts` | 967 | 14 | the module a provider split would help most |
 | `Kernel/API/src/routes/connections.ts` | 410 | 1 | one OpenRouter save shortcut, the generic quota route, the build stamp, and the route that forgets an added model |
