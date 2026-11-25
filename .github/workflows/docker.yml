@@ -48,7 +48,8 @@ jobs:
         run: |
           set -euo pipefail
           docker run -d --name omnihilbras-smoke -p 20138:20138 \
-            -e OMNIHILBRAS_REQUESTS_PER_MINUTE=0 omnihilbras:smoke
+            -e OMNIHILBRAS_REQUESTS_PER_MINUTE=0 \
+            -e OMNIHILBRAS_REQUIRE_API_KEY=0 omnihilbras:smoke
           trap 'docker rm -f omnihilbras-smoke >/dev/null 2>&1 || true' EXIT
           for i in $(seq 1 60); do
             if curl -fsS http://127.0.0.1:20138/health >/dev/null; then break; fi
