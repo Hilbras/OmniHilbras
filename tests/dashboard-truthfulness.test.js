@@ -133,7 +133,7 @@ test('every provider the client names in a path is a real card, on a route the g
   // and needs its own check — that is what the device-flow test below is for.
   const client = stripComments(readFileSync(join(DASHBOARD, 'lib', 'gatewayClient.ts'), 'utf8'));
   const cards = new Set(
-    [...stripComments(readFileSync(join(DASHBOARD, 'data', 'providers.ts'), 'utf8')).matchAll(/^\s{4}id: '([\w-]+)'/gm)].map((match) => match[1]),
+    [...stripComments(readFileSync(join(ROOT, 'Kernel/SDK/_shared/src/provider-manifests.ts'), 'utf8')).matchAll(/"id":"([\w-]+)","catalog":true/g)].map((match) => match[1]),
   );
   const gateway = join(ROOT, 'Kernel', 'API', 'src');
   const served = new Set();

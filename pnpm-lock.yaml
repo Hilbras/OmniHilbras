@@ -178,6 +178,9 @@ importers:
       '@omnihilbras/kernel-api':
         specifier: workspace:*
         version: link:Kernel/API
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:Kernel/SDK/_shared
       '@xyflow/react':
         specifier: ^12.12.0
         version: 12.12.0(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(immer@11.1.21)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -401,6 +404,9 @@ importers:
       '@omnihilbras/sdk-qwen-web':
         specifier: workspace:*
         version: link:../SDK/qwen-web
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../SDK/_shared
       '@omnihilbras/sdk-tiarina':
         specifier: workspace:*
         version: link:../SDK/tiarina
@@ -1096,6 +1102,10 @@ importers:
         version: 5.9.3
 
   Kernel/Tools:
+    dependencies:
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../SDK/_shared
     devDependencies:
       typescript:
         specifier: ^5.9.3

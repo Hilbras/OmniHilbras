@@ -46,3 +46,6 @@ export type { ConnectionRecord, ConnectionInput, ModelMeta, ModelMetaMap } from 
  * user which cookie to copy, and the dashboard must name the same one.
  */
 export const CHATGPT_WEB_SESSION_COOKIE = '__Secure-next-auth.session-token';
+
+/** The one provider description, shared with the dashboard catalogue and the tool capability table. */
+export { PROVIDER_MANIFESTS, type ProviderManifest } from '@omnihilbras/sdk-shared/provider-manifests';

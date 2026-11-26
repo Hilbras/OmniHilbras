@@ -1,6 +1,6 @@
 {
   "name": "@omnihilbras/kernel-api",
-  "version": "4.0.0-alpha.7",
+  "version": "4.0.0-alpha.8",
   "private": true,
   "type": "module",
   "scripts": {
@@ -11,10 +11,10 @@
     "test": "tsc -p tsconfig.json && node --test test/*.test.js"
   },
   "dependencies": {
+    "@omnihilbras/sdk-100milionseek": "workspace:*",
     "@omnihilbras/sdk-agentrouter": "workspace:*",
     "@omnihilbras/sdk-agnes-ai": "workspace:*",
     "@omnihilbras/sdk-aion-labs": "workspace:*",
-    "@omnihilbras/sdk-100milionseek": "workspace:*",
     "@omnihilbras/sdk-anthropic": "workspace:*",
     "@omnihilbras/sdk-anyrouter": "workspace:*",
     "@omnihilbras/sdk-apinex": "workspace:*",
@@ -58,6 +58,7 @@
     "@omnihilbras/sdk-qwen": "workspace:*",
     "@omnihilbras/sdk-qwen-token-plan": "workspace:*",
     "@omnihilbras/sdk-qwen-web": "workspace:*",
+    "@omnihilbras/sdk-shared": "workspace:*",
     "@omnihilbras/sdk-tiarina": "workspace:*",
     "@omnihilbras/sdk-tokenharbor": "workspace:*",
     "@omnihilbras/sdk-tokenharbor-web": "workspace:*",

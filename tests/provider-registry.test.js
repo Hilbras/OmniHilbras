@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { PROVIDER_REGISTRY } from '../Kernel/Tools/dist/index.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const cards = () => [...readFileSync(join(ROOT, 'src/data/providers.ts'), 'utf8').matchAll(/^\s{4}id: '([^']+)'/gm)].map((match) => match[1]);
+const cards = () => [...readFileSync(join(ROOT, 'Kernel/SDK/_shared/src/provider-manifests.ts'), 'utf8').matchAll(/"id":"([^"]+)","catalog":true/g)].map((match) => match[1]);
 
 test('every catalog provider id owns a registry row, and every row names a card', () => {
   const ids = cards();

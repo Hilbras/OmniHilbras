@@ -70,8 +70,9 @@ const withoutCard: ProviderOption[] = [];
 const eligibleGroups = new Set(['api-key', 'free-tier', 'local', 'custom']);
 
 /** One list of providers, derived rather than re-declared. */
-export const providerOptions: ProviderOption[] = [
-  ...providerCatalog.filter((card) => eligibleGroups.has(card.group)).map((card) => ({
+const derivedOptions: ProviderOption[] = providerCatalog
+  .filter((card) => eligibleGroups.has(card.group))
+  .map((card) => ({
     id: card.id,
     name: card.name,
     description: card.description,
@@ -80,8 +81,20 @@ export const providerOptions: ProviderOption[] = [
     initial: card.initial,
     logo: card.logo,
     defaultEndpoint: card.endpoint,
-  })),
+  }));
+
+/**
+ * The neutral option is last regardless of manifest order.
+ *
+ * The manifest is alphabetical, which is a better list to scan but moved `custom` away from the end.
+ * The UI no longer relies on position — `customOption()` looks it up by id — but the property that it
+ * is last is still worth keeping: it is the one entry that is not a vendor, and a future caller that
+ * does index the list should not find a vendor where the fallback used to be.
+ */
+export const providerOptions: ProviderOption[] = [
+  ...derivedOptions.filter((option) => option.id !== 'custom'),
   ...withoutCard,
+  ...derivedOptions.filter((option) => option.id === 'custom'),
 ];
 
 /**

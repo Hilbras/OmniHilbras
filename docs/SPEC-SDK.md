@@ -1,6 +1,6 @@
 # Spec: OmniHilbras Gateway and Provider SDK
 
-**Status:** Current — release 4.0.0-alpha.7
+**Status:** Current — release 4.0.0-alpha.8
 
 This document is the contract behind the gateway and its provider packages. It is intentionally more
 specific than the [README](../README.md): a route, an error code or a provider boundary written here is
@@ -17,6 +17,7 @@ shape rather than the pre-restructure `sdk-core` plan.
 | `Kernel/API` | Local HTTP gateway, route dispatch, routing, health, retries, usage, vault, API keys, token-saver integration | `Kernel/SDK/*`, `Kernel/TokenSaver` |
 | `Kernel/SDK/<provider>` | One provider package: its adapter, local wire types and provider-specific helpers | `Kernel/SDK/_shared` |
 | `Kernel/SDK/_shared` | Canonical adapter machinery: errors, URL safety, SSE, bounded map, catalog normalization and shared types | — |
+| `Kernel/SDK/_shared` (manifests) | One provider description: card fields, tool capability row and registry row, projected by the dashboard, `Kernel/Tools` and the gateway | `Kernel/Tools`, `src` |
 | `Kernel/TokenSaver` | Standalone reversible compressor, RTK filters, history trimming, CCR store | — |
 | `src` | React dashboard and marketing pages | `Kernel/API` HTTP surface |
 | `site` | Static HTML entries for Home, Download, Docs and legal pages | Vite |

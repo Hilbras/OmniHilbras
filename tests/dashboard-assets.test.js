@@ -64,7 +64,7 @@ import { dirname, join } from 'node:path';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DIRECTORY = join(ROOT, 'public', 'providers');
-const CATALOG = join(ROOT, 'src', 'data', 'providers.ts');
+const CATALOG = join(ROOT, 'Kernel', 'SDK', '_shared', 'src', 'provider-manifests.ts');
 const POLARITY = join(ROOT, 'src', 'lib', 'logoPolarity.generated.ts');
 
 /**
@@ -108,7 +108,7 @@ function trackedPaths() {
 }
 
 test('every rendered mark is polarity-classified, including the two former webp marks', () => {
-  const cards = readFileSync(join(ROOT, 'src/data/providers.ts'), 'utf8');
+  const cards = readFileSync(CATALOG, 'utf8');
   assert.doesNotMatch(cards, /\/providers\/[^'"]+\.webp/, 'a webp mark bypasses the polarity plugin');
   const generated = readFileSync(join(ROOT, 'src/lib/logoPolarity.generated.ts'), 'utf8');
   for (const name of ['beatapi.png', 'Tirina.png']) {

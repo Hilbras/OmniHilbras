@@ -203,8 +203,13 @@ provisioner instead of branching on the adapter method, so a lifecycle provider 
 contract without teaching the Core another branch; `create` remains the sign-in routes, because
 creating a credential is a flow with a browser, not a method call. `CredentialLifecycle` keeps its
 separate job: the pre-check that avoids launching a browser to learn a token's written expiry.
-Provider manifests are the remaining D item: the catalogue card, capability table and registry are
-still three descriptions, and a generated manifest is the next step.
+**Provider manifests are now one description.** `Kernel/SDK/_shared/src/provider-manifests.ts` holds
+every provider's card fields, tool capability row and registry row (base URL, model URL, auth mode,
+wire formats, usage URL). `src/data/providers.ts`, `Kernel/Tools/src/caps.ts` and
+`Kernel/Tools/src/providerRegistry.ts` are projections, not tables.
+`tests/provider-manifest.test.js` asserts each projection field-for-field and fails if a consumer
+carries a second literal list. The manifest is generated once during the V4 migration and is the source
+from here on; a provider is added by adding one manifest entry and its adapter.
 
 ---
 

@@ -45,6 +45,10 @@
     "./responses-lane": {
       "types": "./dist/responses-lane.d.ts",
       "default": "./dist/responses-lane.js"
+    },
+    "./provider-manifests": {
+      "types": "./dist/provider-manifests.d.ts",
+      "default": "./dist/provider-manifests.js"
     }
   },
   "scripts": {

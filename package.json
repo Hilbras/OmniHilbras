@@ -1,7 +1,7 @@
 {
   "name": "omnihilbras-site",
   "private": true,
-  "version": "4.0.0-alpha.7",
+  "version": "4.0.0-alpha.8",
   "description": "Provider-neutral local gateway and desktop dashboard",
   "author": {
     "name": "Hilbras",
@@ -61,6 +61,7 @@
     "@capacitor/android": "^8.6.0",
     "@capacitor/core": "^8.6.0",
     "@omnihilbras/kernel-api": "workspace:*",
+    "@omnihilbras/sdk-shared": "workspace:*",
     "@xyflow/react": "^12.12.0",
     "electron-updater": "^6.8.11",
     "lucide-react": "^1.47.0",

@@ -37,8 +37,8 @@ function gatewayIds() {
 }
 
 function catalogIds() {
-  const source = readFileSync(join(ROOT, 'src/data/providers.ts'), 'utf8');
-  return [...source.matchAll(/^\s{4}id: '([^']+)'/gm)].map((match) => match[1]);
+  const source = readFileSync(join(ROOT, 'Kernel/SDK/_shared/src/provider-manifests.ts'), 'utf8');
+  return [...source.matchAll(/"id":"([^"]+)","catalog":true/g)].map((match) => match[1]);
 }
 
 test('every catalogue and gateway provider has a row in the tool table', () => {
