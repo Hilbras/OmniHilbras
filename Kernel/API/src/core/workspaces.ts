@@ -1,4 +1,5 @@
 import { createStateDocument, type StateDocument } from './state-document.js';
+import { parseBudget, type Budget } from './budgets.js';
 
 export type Workspace = {
   id: string;
@@ -7,6 +8,8 @@ export type Workspace = {
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
+  /** Default spend guardrail for keys in this workspace. A key's own budget overrides it. */
+  budget?: Budget;
 };
 
 export type WorkspaceInput = {
@@ -14,6 +17,8 @@ export type WorkspaceInput = {
   name?: string;
   description?: string;
   enabled?: boolean;
+  /** `null` clears the default; `undefined` keeps it. */
+  budget?: Budget | null;
 };
 
 export interface WorkspaceStore {
@@ -54,7 +59,8 @@ function isStoredWorkspace(value: unknown): value is Workspace {
     && typeof value.description === 'string'
     && typeof value.enabled === 'boolean'
     && typeof value.createdAt === 'string'
-    && typeof value.updatedAt === 'string';
+    && typeof value.updatedAt === 'string'
+    && (value.budget === undefined || parseBudget(value.budget) !== undefined);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -75,6 +81,7 @@ function normalize(input: WorkspaceInput, existing?: Workspace): Workspace {
     enabled: input.enabled ?? existing?.enabled ?? true,
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
+    ...(input.budget === null ? {} : input.budget !== undefined ? { budget: input.budget } : existing?.budget === undefined ? {} : { budget: existing.budget }),
   };
 }
 

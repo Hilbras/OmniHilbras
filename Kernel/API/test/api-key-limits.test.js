@@ -121,3 +121,21 @@ test('the route refuses a body that carries two intents', async (t) => {
   assert.equal(limited.status, 200);
   assert.equal((await limited.json()).apiKey.rpm, 10);
 });
+
+test('a budget, a token limit and an allowlist survive a restart', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'omnihilbras-policy-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const first = new LocalApiKeyStore({ directory, lastUsedFlushIntervalMs: 0 });
+  const created = await first.create('policy');
+  await first.setLimits(created.record.id, { tpm: 500, budget: { usd: 2.5, period: 'month' }, allowedModels: ['gpt-*'], allowedProviders: ['openai'], allowedRoutes: ['/v1/chat/completions'] });
+  await first.close();
+
+  const reopened = new LocalApiKeyStore({ directory, lastUsedFlushIntervalMs: 0 });
+  t.after(() => reopened.close());
+  const [record] = await reopened.list();
+  assert.equal(record.tpm, 500);
+  assert.deepEqual(record.budget, { usd: 2.5, period: 'month' });
+  assert.deepEqual(record.allowedModels, ['gpt-*']);
+  assert.deepEqual(record.allowedProviders, ['openai']);
+  assert.deepEqual(record.allowedRoutes, ['/v1/chat/completions']);
+});

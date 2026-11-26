@@ -36,7 +36,7 @@ import { OpencodeConsoleAdapter } from '@omnihilbras/sdk-opencode-console';
 import { createQoderAdapter } from '@omnihilbras/sdk-qoder';
 import { probeQwenWeb } from '@omnihilbras/sdk-qwen-web';
 import { TokenHarborWebAdapter, tokenHarborWebCredential, tokenHarborWebProviderId } from '@omnihilbras/sdk-tokenharbor-web';
-import { parseApiKeyState, type ApiKeyRecord, type ApiKeyStore } from './api-keys.js';
+import { parseApiKeyState, type ApiKeyLimits, type ApiKeyRecord, type ApiKeyStore } from './api-keys.js';
 import { defaultResilienceSettings, parseConnectionsBackupState, type ConnectionInput, type ConnectionRecord, type ConnectionStore, type ConnectionsBackupState, type ResilienceSettings } from './connections.js';
 import type { GatewayConfig } from './config.js';
 import { ClineSessionStore, beginClineAuthorization, clineCallbackPathFor, createClineAdapter, exchangeClineCode, providerSaid, toClineCredential } from './oauth.js';
@@ -69,6 +69,11 @@ import { SlidingWindowRateLimiter, bareModelFor, modelCapacityCapabilities, noCa
 import { HealthManager } from './health.js';
 import { ConnectionLatencyLedger } from './connection-latency.js';
 import { ResponseCache } from './response-cache.js';
+import { currentPrincipal, principalUsageFields } from './principal.js';
+import { SpendLedger } from './spend-ledger.js';
+import { evaluateBudget, type Budget } from './budgets.js';
+import { requestCostUsd } from './usage-pricing.js';
+import { estimatePromptTokens } from './token-estimate.js';
 import { TokenRenewal, classifyRenewalFailure } from './token-renewal.js';
 import { ProviderResolver } from './provider-resolver.js';
 import { completeSignIn, describeSignInFailure } from './sign-in-coordinator.js';
@@ -177,6 +182,13 @@ function pricingFromConnection(connection: ConnectionRecord | undefined, model: 
     }
   });
   return Object.keys(pricing).length > 0 ? pricing : undefined;
+}
+
+/** A model allowlist entry: `*` and `?` are wildcards, everything else is literal. */
+function globMatches(pattern: string, value: string): boolean {
+  if (pattern === '*') return true;
+  const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.');
+  return new RegExp(`^${escaped}$`).test(value);
 }
 
 export type GatewayProviderHealth = ProviderHealth & {
@@ -304,6 +316,12 @@ export type GatewayServiceOptions = {
    */
   usageStore?: UsageStore;
   /**
+   * Durable spend, when wired. Absent means budgets have nothing to read, and a key that carries a
+   * budget is refused rather than being treated as unlimited — a guardrail that silently does
+   * nothing is the failure this field exists to prevent.
+   */
+  spendLedger?: SpendLedger;
+  /**
    * Optional request-detail store. **Off by default**: usage records deliberately hold no content,
    * and a detail store is a separate, opt-in trade of disk for diagnostics. See `request-details.ts`.
    */
@@ -373,10 +391,13 @@ export class GatewayService {
    * far more requests than it keeps records.
    */
   private readonly toolContractNotes = new Map<string, ToolContractTelemetry>();
+  /** Tokens dispatched in the current minute, per key. Fixed window, reset lazily on read. */
+  private readonly tokenWindows = new Map<string, { start: number; tokens: number }>();
   /** Returned calls the gateway refused to forward, keyed by the same request scope as the tool contract. */
   private readonly blockedCallNotes = new Map<string, number>();
   /** Absent means the gateway records nothing; see `GatewayServiceOptions.usageStore`. */
   private readonly usageStore?: UsageStore;
+  private readonly spendLedger?: SpendLedger;
   private readonly requestDetails?: RequestDetailStore;
   private readonly virtualModelStore?: VirtualModelStore;
   private readonly workspaceStore?: WorkspaceStore;
@@ -619,6 +640,7 @@ export class GatewayService {
     deployment: DeploymentConfig = localDeployment(),
   ) {
     this.deploymentConfig = deployment;
+    this.spendLedger = options.spendLedger;
     this.usageStore = options.usageStore ? this.publishingUsage(options.usageStore) : undefined;
     this.requestDetails = options.requestDetails;
     this.virtualModelStore = options.virtualModels;
@@ -1171,6 +1193,7 @@ export class GatewayService {
     // store, not allowed to keep the gateway alive.
     await this.connectionStore?.flushUsage?.().catch(() => undefined);
     await this.usageStore?.flush?.().catch(() => undefined);
+    await this.spendLedger?.flush().catch(() => undefined);
     await this.apiKeyStore?.close?.();
   }
 
@@ -3375,7 +3398,7 @@ export class GatewayService {
   }
 
   /** Sets or clears a key's rate limit and expiry. `null` clears; an omitted field is left alone. */
-  setApiKeyLimits(id: string, limits: { rpm?: number | null; expiresAt?: string | null }) {
+  setApiKeyLimits(id: string, limits: ApiKeyLimits) {
     return this.apiKeys.setLimits(id, limits);
   }
 
@@ -4524,9 +4547,9 @@ export class GatewayService {
           publicMessage: `Virtual model "${model}" is disabled. Enable it on the Models page to use it.`,
         });
       }
-      return this.planVirtual(virtual, connections, explicitProviderId, explicitConnectionId, context);
+      return this.applyProviderPolicy(await this.planVirtual(virtual, connections, explicitProviderId, explicitConnectionId, context));
     }
-    return this.routing.plan({
+    return this.applyProviderPolicy(await this.routing.plan({
       connections,
       model,
       ...(explicitProviderId === undefined ? {} : { explicitProviderId }),
@@ -4535,7 +4558,20 @@ export class GatewayService {
       // turn actually carries an image. The scope still names what the client asked for, so the wire
       // substitution below never changes the usage label.
       ...(context?.request ? { requiredCapabilities: requiredCapabilitiesFromRequest(context.request) } : {}),
-    });
+    }));
+  }
+
+  /** Removes candidates a key's provider allowlist forbids, refusing rather than silently re-routing. */
+  private applyProviderPolicy(decision: RouteDecision): RouteDecision {
+    const allowed = currentPrincipal()?.allowedProviders;
+    if (!allowed || allowed.length === 0) return decision;
+    const candidates = decision.candidates.filter((candidate) => allowed.includes(candidate.providerId));
+    if (candidates.length === 0) {
+      throw new ProviderError('FORBIDDEN', 'This key may not use any provider that could serve the request.', {
+        publicMessage: `This key may only use: ${allowed.join(', ')}.`,
+      });
+    }
+    return { ...decision, candidates };
   }
 
   /**
@@ -5323,14 +5359,23 @@ export class GatewayService {
   /** Wraps the store so every write is also delivered to the listeners. The store itself is unchanged. */
   private publishingUsage(store: UsageStore): UsageStore {
     const listeners = this.usageListeners;
+    const service = this;
     return new Proxy(store, {
       get(target, property) {
         if (property === 'record') {
           return async (entry: Parameters<UsageStore['record']>[0]) => {
-            const record = await target.record(entry);
+            // Attribution is applied once, at the write boundary, from the request's ambient principal.
+            // An entry that already states who it belongs to keeps its own answer: a test and a
+            // backfill are allowed to be explicit, and a record must never be re-attributed by a
+            // request that merely ran beside it.
+            const attributed = entry.actor === undefined
+              ? { ...entry, ...principalUsageFields(currentPrincipal()) }
+              : entry;
+            const record = await target.record(attributed);
             for (const listener of listeners) {
               try { listener(record); } catch { /* a listener must not fail the request */ }
             }
+            void service.settleSpend(record).catch(() => undefined);
             return record;
           };
         }
@@ -5372,6 +5417,156 @@ export class GatewayService {
     if (!connectionId) return undefined;
     const record = (await this.connections.list()).find((connection) => connection.id === connectionId);
     return pricingFromConnection(record, model);
+  }
+
+  /** The durable spend ledger, when this gateway was started with one. */
+  get spend(): SpendLedger | undefined {
+    return this.spendLedger;
+  }
+
+  /**
+   * The most expensive quote any connection offers for this model.
+   *
+   * A reservation must not under-estimate: the request has not been routed yet, so the price that
+   * matters is the worst one it could be served at. `undefined` means no connection quotes a price,
+   * which is a normal state and is carried through as "unpriced" rather than as free.
+   */
+  async maxModelPrice(model: string): Promise<ModelPricing | undefined> {
+    const connections = await this.connections.list();
+    let best: ModelPricing | undefined;
+    for (const connection of connections) {
+      const pricing = pricingFromConnection(connection, model);
+      if (!pricing) continue;
+      if (!best) { best = pricing; continue; }
+      best = {
+        ...best,
+        ...(pricing.inputPer1M !== undefined ? { inputPer1M: Math.max(best.inputPer1M ?? 0, pricing.inputPer1M) } : {}),
+        ...(pricing.outputPer1M !== undefined ? { outputPer1M: Math.max(best.outputPer1M ?? 0, pricing.outputPer1M) } : {}),
+      };
+    }
+    return best;
+  }
+
+  /**
+   * What this request may spend, resolved from the key's own budget or its workspace default.
+   *
+   * Absent means no budget applies — the historical behaviour. A key with a budget and no ledger is
+   * refused: a guardrail that cannot read spend must not pretend the spend is zero.
+   */
+  async requestBudget(): Promise<{ budget: Budget; scope: 'key' | 'workspace'; id: string } | undefined> {
+    const principal = currentPrincipal();
+    if (!principal || principal.actor !== 'key' || principal.apiKeyId === undefined) return undefined;
+    if (principal.budget) return { budget: principal.budget, scope: 'key', id: principal.apiKeyId };
+    if (principal.workspaceId === undefined) return undefined;
+    const workspace = await this.workspaceStore?.get(principal.workspaceId);
+    return workspace?.budget ? { budget: workspace.budget, scope: 'workspace', id: principal.workspaceId } : undefined;
+  }
+
+  /**
+   * Checks the budget and reserves the worst-case cost for one request.
+   *
+   * Returns a refusal the route can send, or `undefined` when the request may proceed. The hold is
+   * keyed by request id and released when the usage record settles, so two requests dispatched at
+   * once see each other's reservation rather than both reading the same remaining amount.
+   */
+  async reserveBudget(input: { requestId: string; model: string; route?: string; messages?: unknown; maxOutputTokens?: number; inputTokens?: number }): Promise<{
+    status: 402 | 403 | 429;
+    code: 'BUDGET_EXCEEDED' | 'QUOTA_EXCEEDED' | 'POLICY_DENIED';
+    message: string;
+    headers: Record<string, string>;
+  } | undefined> {
+    const principal = currentPrincipal();
+    if (principal?.actor === 'key') {
+      const allowedModels = principal.allowedModels;
+      if (allowedModels && allowedModels.length > 0 && !allowedModels.some((pattern) => globMatches(pattern, input.model))) {
+        return { status: 403, code: 'POLICY_DENIED', message: `This key may not request ${input.model}.`, headers: {} };
+      }
+      const allowedRoutes = principal.allowedRoutes;
+      if (input.route && allowedRoutes && allowedRoutes.length > 0 && !allowedRoutes.includes(input.route)) {
+        return { status: 403, code: 'POLICY_DENIED', message: `This key may not call ${input.route}.`, headers: {} };
+      }
+    }
+    if (principal?.actor === 'key' && principal.apiKeyId && principal.tpm !== undefined && principal.tpm > 0) {
+      const now = Date.now();
+      const window = this.tokenWindows.get(principal.apiKeyId);
+      const current = window && now - window.start < 60_000 ? window : { start: now, tokens: 0 };
+      const estimate = input.inputTokens ?? estimatePromptTokens(Array.isArray(input.messages) ? input.messages : undefined) ?? 0;
+      const wanted = estimate + (input.maxOutputTokens ?? this.maxOutputTokensCap ?? 4096);
+      if (current.tokens > 0 && current.tokens + wanted > principal.tpm) {
+        return {
+          status: 429,
+          code: 'QUOTA_EXCEEDED',
+          message: `This key may spend ${principal.tpm} tokens per minute.`,
+          headers: { 'retry-after': String(Math.max(1, Math.ceil((60_000 - (now - current.start)) / 1000))), 'x-omnihilbras-tpm-remaining': String(Math.max(0, principal.tpm - current.tokens)) },
+        };
+      }
+      current.tokens += wanted;
+      this.tokenWindows.set(principal.apiKeyId, current);
+    }
+    const policy = await this.requestBudget();
+    if (!policy) return undefined;
+    if (!this.spendLedger) {
+      return {
+        status: 402,
+        code: 'BUDGET_EXCEEDED',
+        message: 'This key has a budget but this gateway has no spend ledger, so the budget cannot be enforced.',
+        headers: {},
+      };
+    }
+    const snapshot = await this.spendLedger.snapshot(policy.scope, policy.id, policy.budget.period);
+    const status = evaluateBudget(policy.budget, snapshot);
+    const headers: Record<string, string> = {};
+    if (status.remainingUsdMicros !== undefined) headers['x-omnihilbras-budget-remaining-usd'] = (status.remainingUsdMicros / 1_000_000).toFixed(6);
+    if (status.remainingTokens !== undefined) headers['x-omnihilbras-budget-remaining-tokens'] = String(status.remainingTokens);
+    if (status.resetAt) headers['x-omnihilbras-budget-reset'] = status.resetAt;
+    if (!status.allowed) {
+      const resetSeconds = status.resetAt ? Math.max(1, Math.ceil((Date.parse(status.resetAt) - Date.now()) / 1000)) : undefined;
+      if (resetSeconds) headers['retry-after'] = String(resetSeconds);
+      return {
+        status: status.kind === 'usd' ? 402 : 429,
+        code: status.kind === 'usd' ? 'BUDGET_EXCEEDED' : 'QUOTA_EXCEEDED',
+        message: status.kind === 'usd'
+          ? `This key has reached its ${policy.budget.period} dollar budget.`
+          : `This key has reached its ${policy.budget.period} token quota.`,
+        headers,
+      };
+    }
+    const estimated = await this.estimateReservationMicros(input);
+    if (estimated > 0) {
+      await this.spendLedger.hold({ scope: policy.scope, id: policy.id, requestId: input.requestId, usdMicros: estimated });
+    }
+    return undefined;
+  }
+
+  /** Worst-case cost of one request, in micro-USD. Zero when no connection quotes a price. */
+  private async estimateReservationMicros(input: { model: string; messages?: unknown; maxOutputTokens?: number; inputTokens?: number }): Promise<number> {
+    const pricing = await this.maxModelPrice(input.model);
+    if (!pricing) return 0;
+    const inputTokens = input.inputTokens ?? estimatePromptTokens(Array.isArray(input.messages) ? input.messages : undefined) ?? 0;
+    const outputTokens = input.maxOutputTokens ?? this.maxOutputTokensCap ?? 4096;
+    const cost = ((pricing.inputPer1M ?? 0) * inputTokens + (pricing.outputPer1M ?? 0) * outputTokens) / 1_000_000;
+    return Math.max(0, Math.round(cost * 1_000_000));
+  }
+
+  /** Settles one usage record into the ledger, releasing the reservation it carried. */
+  private async settleSpend(record: UsageRecord): Promise<void> {
+    const ledger = this.spendLedger;
+    if (!ledger) return;
+    const apiKeyId = record.apiKeyId;
+    const workspaceId = record.workspaceId;
+    if (!apiKeyId && !workspaceId) {
+      if (record.requestId) await ledger.release(record.requestId);
+      return;
+    }
+    const pricing = await this.modelPrice(record.connectionId, record.model);
+    const cost = requestCostUsd({ ...record, pricing });
+    const entry = {
+      inputTokens: record.inputTokens,
+      outputTokens: record.outputTokens,
+      ...(cost === undefined ? { unpriced: true } : { usdMicros: Math.round(cost * 1_000_000) }),
+    };
+    if (apiKeyId) await ledger.record({ scope: 'key', id: apiKeyId, requestId: record.requestId, ...entry });
+    if (workspaceId) await ledger.record({ scope: 'workspace', id: workspaceId, ...entry });
   }
 
   private requireAdapter(providerId: string): ProviderAdapter {

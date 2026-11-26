@@ -1,4 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { parseBudget, type Budget } from './budgets.js';
 import { createStateDocument, type StateDocument } from './state-document.js';
 import { defaultStateDirectory } from './secure-store.js';
 
@@ -36,12 +37,33 @@ export type ApiKeyRecord = {
   expiresAt?: string;
   /** Optional workspace this key belongs to (multi-user foundation); absent means unscoped. */
   workspaceId?: string;
+  /** Tokens per minute this key may spend, estimated before dispatch. Absent means no limit. */
+  tpm?: number;
+  /** A spend guardrail for this key. Absent means the workspace default (if any) applies. */
+  budget?: Budget;
+  /** Provider ids this key may reach. Absent or empty means every provider. */
+  allowedProviders?: string[];
+  /** Model globs this key may request. Absent or empty means every model. */
+  allowedModels?: string[];
+  /** Route paths this key may call. Absent or empty means every served route. */
+  allowedRoutes?: string[];
 };
 
 /** A freshly minted key. `key` is returned exactly once, at creation time. */
 export type CreatedApiKey = {
   record: ApiKeyRecord;
   key: string;
+};
+
+/** What may be changed on a key without minting a new one. `null` clears; `undefined` leaves alone. */
+export type ApiKeyLimits = {
+  rpm?: number | null;
+  expiresAt?: string | null;
+  tpm?: number | null;
+  budget?: Budget | null;
+  allowedProviders?: string[] | null;
+  allowedModels?: string[] | null;
+  allowedRoutes?: string[] | null;
 };
 
 export interface ApiKeyStore {
@@ -56,7 +78,7 @@ export interface ApiKeyStore {
    * One method rather than two because both fields answer the same question — "what may this key do" — and a caller
    * that sets one while meaning to keep the other must not be able to drop it by omission.
    */
-  setLimits(id: string, limits: { rpm?: number | null; expiresAt?: string | null }): Promise<ApiKeyRecord | undefined>;
+  setLimits(id: string, limits: ApiKeyLimits): Promise<ApiKeyRecord | undefined>;
   remove(id: string): Promise<boolean>;
   /** Resolves the record for an exact key match, or `undefined` when unknown or paused. */
   authenticate(key: string): Promise<ApiKeyRecord | undefined>;
@@ -162,7 +184,7 @@ export class InMemoryApiKeyStore implements ApiKeyStore {
     return toRecord(updated);
   }
 
-  async setLimits(id: string, limits: { rpm?: number | null; expiresAt?: string | null }) {
+  async setLimits(id: string, limits: ApiKeyLimits) {
     const existing = this.keys.get(id);
     if (!existing) return undefined;
     const updated = applyLimits(existing, limits);
@@ -322,7 +344,7 @@ export class LocalApiKeyStore implements ApiKeyStore {
     });
   }
 
-  async setLimits(id: string, limits: { rpm?: number | null; expiresAt?: string | null }) {
+  async setLimits(id: string, limits: ApiKeyLimits) {
     return this.withMutation(async () => {
       await this.ensureLoaded();
       const existing = this.keys.get(id);
@@ -511,7 +533,7 @@ function normalizeName(name: string) {
 }
 
 /** Applies a limits patch to one stored key, leaving an unspecified field as it was. */
-function applyLimits(stored: StoredApiKey, limits: { rpm?: number | null; expiresAt?: string | null }): StoredApiKey {
+function applyLimits(stored: StoredApiKey, limits: ApiKeyLimits): StoredApiKey {
   const next: StoredApiKey = { ...stored, updatedAt: new Date().toISOString() };
   if (limits.rpm !== undefined) {
     if (limits.rpm === null) delete next.rpm;
@@ -520,6 +542,20 @@ function applyLimits(stored: StoredApiKey, limits: { rpm?: number | null; expire
   if (limits.expiresAt !== undefined) {
     if (limits.expiresAt === null) delete next.expiresAt;
     else next.expiresAt = new Date(limits.expiresAt).toISOString();
+  }
+  if (limits.tpm !== undefined) {
+    if (limits.tpm === null) delete next.tpm;
+    else next.tpm = Math.floor(limits.tpm);
+  }
+  if (limits.budget !== undefined) {
+    if (limits.budget === null) delete next.budget;
+    else next.budget = limits.budget;
+  }
+  for (const key of ['allowedProviders', 'allowedModels', 'allowedRoutes'] as const) {
+    const value = limits[key];
+    if (value === undefined) continue;
+    if (value === null || value.length === 0) delete next[key];
+    else next[key] = [...new Set(value)];
   }
   return next;
 }
@@ -538,6 +574,11 @@ function toRecord(stored: StoredApiKey): ApiKeyRecord {
     ...(stored.expiresAt === undefined ? {} : { expiresAt: stored.expiresAt }),
     ...(stored.workspaceId === undefined ? {} : { workspaceId: stored.workspaceId }),
     ...(stored.lastUsedAt === undefined ? {} : { lastUsedAt: stored.lastUsedAt }),
+    ...(stored.tpm === undefined ? {} : { tpm: stored.tpm }),
+    ...(stored.budget === undefined ? {} : { budget: stored.budget }),
+    ...(stored.allowedProviders === undefined ? {} : { allowedProviders: stored.allowedProviders }),
+    ...(stored.allowedModels === undefined ? {} : { allowedModels: stored.allowedModels }),
+    ...(stored.allowedRoutes === undefined ? {} : { allowedRoutes: stored.allowedRoutes }),
   };
 }
 
@@ -600,6 +641,14 @@ function parseStoredKey(value: unknown): StoredApiKey {
   if (value.expiresAt !== undefined && (typeof value.expiresAt !== 'string' || Number.isNaN(Date.parse(value.expiresAt)))) throw new Error('Local API key store contains an invalid key.');
   if (value.workspaceId !== undefined && (typeof value.workspaceId !== 'string' || !/^[a-z0-9][a-z0-9._-]{0,63}$/i.test(value.workspaceId))) throw new Error('Local API key store contains an invalid key.');
   if (value.role !== undefined && value.role !== 'owner' && value.role !== 'viewer') throw new Error('Local API key store contains an invalid key.');
+  if (value.tpm !== undefined && (!Number.isInteger(value.tpm) || (value.tpm as number) <= 0)) throw new Error('Local API key store contains an invalid key.');
+  if (value.budget !== undefined && parseBudget(value.budget) === undefined) throw new Error('Local API key store contains an invalid key.');
+  for (const key of ['allowedProviders', 'allowedModels', 'allowedRoutes'] as const) {
+    const list = value[key];
+    if (list !== undefined && (!Array.isArray(list) || list.some((entry) => typeof entry !== 'string' || entry.length === 0 || entry.length > 200))) {
+      throw new Error('Local API key store contains an invalid key.');
+    }
+  }
   return {
     id: value.id,
     name: normalizeName(value.name),
@@ -614,6 +663,11 @@ function parseStoredKey(value: unknown): StoredApiKey {
     ...(value.expiresAt === undefined ? {} : { expiresAt: value.expiresAt as string }),
     ...(value.workspaceId === undefined ? {} : { workspaceId: value.workspaceId as string }),
     ...(value.lastUsedAt === undefined ? {} : { lastUsedAt: value.lastUsedAt }),
+    ...(value.tpm === undefined ? {} : { tpm: value.tpm as number }),
+    ...(value.budget === undefined ? {} : { budget: parseBudget(value.budget)! }),
+    ...(value.allowedProviders === undefined ? {} : { allowedProviders: value.allowedProviders as string[] }),
+    ...(value.allowedModels === undefined ? {} : { allowedModels: value.allowedModels as string[] }),
+    ...(value.allowedRoutes === undefined ? {} : { allowedRoutes: value.allowedRoutes as string[] }),
   };
 }
 

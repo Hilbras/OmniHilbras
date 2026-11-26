@@ -1,6 +1,6 @@
 # V4 platform plan
 
-**Goal:** [v4-goal.md](./v4-goal.md) · **Baseline:** `3.100.2` (2026-11-25) · **Status:** 4.0.x final: A/B/C/D complete; E shell palette and existing event/analytics surfaces; F route contracts, job history and existing packaging; `4.0.1` fixes the visual-baseline race that made 4.0.0's e2e red. Known limits are in docs/MIGRATION-4.0.md
+**Goal:** [v4-goal.md](./v4-goal.md) · **Baseline:** `3.100.2` (2026-11-25) · **Status:** 4.0.x final: A/B/C/D complete; E shell palette and existing event/analytics surfaces; F route contracts, job history and existing packaging; `4.0.1` fixes the visual-baseline race that made 4.0.0's e2e red. Known limits are in docs/MIGRATION-4.0.md. **Successor:** [v5-plan.md](./v5-plan.md) — accountable spend, safe exposure, cheaper inference.
 
 ## Why 4.0
 

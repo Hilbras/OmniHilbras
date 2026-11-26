@@ -13,6 +13,7 @@ import {
   readJsonBody,
   sendJson,
 } from '../core/http.js';
+import { validateBudget } from '../core/budgets.js';
 
 export async function handleApiKeysRoute(ctx: RouteContext): Promise<boolean> {
   const { request, response, url, service, origin, options, auth } = ctx;
@@ -63,12 +64,49 @@ export async function handleApiKeysRoute(ctx: RouteContext): Promise<boolean> {
       }
       const body = await readJsonBody(request, Math.min(options.maxBodyBytes ?? maxConnectionBodyBytes, maxKeyBodyBytes));
       if (!isRecord(body)) throw invalidRequest('Request body must be a JSON object.');
-      assertOnlyFields(body, ['enabled', 'name', 'rpm', 'expiresAt']);
-      // One intent per request. Four fields, four meanings, and a body carrying two makes "which one happened" a
-      // question about field order — the answer to which nobody should have to read this file to find.
-      const present = ['enabled', 'name', 'rpm', 'expiresAt'].filter((field) => body[field] !== undefined);
+      assertOnlyFields(body, ['enabled', 'name', 'rpm', 'expiresAt', 'tpm', 'budget', 'allowedProviders', 'allowedModels', 'allowedRoutes']);
+      // One intent per request. Each field is a different decision, and a body carrying two makes "which
+      // one happened" a question about field order — the answer to which nobody should have to read this
+      // file to find.
+      const present = ['enabled', 'name', 'rpm', 'expiresAt', 'tpm', 'budget', 'allowedProviders', 'allowedModels', 'allowedRoutes'].filter((field) => body[field] !== undefined);
       if (present.length !== 1) {
-        throw invalidRequest('Send exactly one of enabled, name, rpm or expiresAt.');
+        throw invalidRequest('Send exactly one of enabled, name, rpm, expiresAt, tpm, budget, allowedProviders, allowedModels or allowedRoutes.');
+      }
+      if (body.budget !== undefined) {
+        if (body.budget === null) {
+          sendJson(response, 200, { apiKey: await service.setApiKeyLimits(apiKeyId, { budget: null }) }, origin);
+          return true;
+        }
+        const validated = validateBudget(body.budget);
+        if (!validated.budget) throw invalidRequest(validated.error ?? 'budget is invalid.');
+        sendJson(response, 200, { apiKey: await service.setApiKeyLimits(apiKeyId, { budget: validated.budget }) }, origin);
+        return true;
+      }
+      if (body.tpm !== undefined) {
+        const tpm = body.tpm;
+        if (tpm !== null && (!Number.isInteger(tpm) || (tpm as number) <= 0 || (tpm as number) > 10_000_000)) {
+          throw invalidRequest('tpm must be a positive whole number of at most 10000000, or null to remove the limit.');
+        }
+        sendJson(response, 200, { apiKey: await service.setApiKeyLimits(apiKeyId, { tpm: tpm as number | null }) }, origin);
+        return true;
+      }
+      for (const field of ['allowedProviders', 'allowedModels', 'allowedRoutes'] as const) {
+        if (body[field] === undefined) continue;
+        const value = body[field];
+        if (value !== null && (!Array.isArray(value) || value.length > 100 || value.some((entry) => typeof entry !== 'string' || entry.length === 0 || entry.length > 200))) {
+          throw invalidRequest(`${field} must be an array of non-empty strings, or null to remove it.`);
+        }
+        if (field === 'allowedProviders' && Array.isArray(value)) {
+          const known = new Set(service.registry.list().map((adapter) => adapter.id));
+          const unknown = value.filter((entry) => !known.has(entry as never));
+          if (unknown.length > 0) throw invalidRequest(`Unknown provider id: ${unknown[0]}.`);
+        }
+        if (field === 'allowedRoutes' && Array.isArray(value)) {
+          const bad = value.find((entry) => typeof entry === 'string' && !entry.startsWith('/'));
+          if (bad !== undefined) throw invalidRequest('allowedRoutes entries must be absolute gateway paths.');
+        }
+        sendJson(response, 200, { apiKey: await service.setApiKeyLimits(apiKeyId, { [field]: value as string[] | null }) }, origin);
+        return true;
       }
       if (body.rpm !== undefined || body.expiresAt !== undefined) {
         const rpm = body.rpm === undefined ? undefined : body.rpm;

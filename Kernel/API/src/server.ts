@@ -6,6 +6,7 @@ import { assertLoopbackHost, createGatewayService, isContainerDeployment, loadGa
 import { isCrossSiteRequest, isJsonRequest, isOauthCallbackNavigation, getRequestOrigin, requestIdOf, resolveCorsOrigins, resolveInferenceBodyBytes, sendError, sendJson, setCors } from './core/http.js';
 import { createDashboardToken, dashboardTokenHeader, publishDashboardToken, tokenMatches } from './core/dashboard-token.js';
 import { isTrustedDashboard, type AuthContext } from './core/runtime.js';
+import { principalFromAuth, runWithPrincipal } from './core/principal.js';
 import { RateLimiter, resolveRequestsPerMinute } from './core/rate-limit.js';
 import { handleApiKeysRoute } from './routes/api-keys.js';
 import { handleMetricsRoute } from './routes/metrics.js';
@@ -21,6 +22,7 @@ import { handleAuditRoute } from './routes/audit.js';
 import { handleOpenApiRoute } from './routes/openapi.js';
 import { handleJobsRoute } from './routes/jobs.js';
 import { handleUsageRoute } from './routes/usage.js';
+import { handleSpendRoute } from './routes/spend.js';
 import { handleLogsRoute } from './routes/logs.js';
 import { handleEventsRoute } from './routes/events.js';
 import { handleSettingsRoute } from './routes/settings.js';
@@ -127,6 +129,7 @@ const routes = [
   handleOpenApiRoute,
   handleJobsRoute,
   handleUsageRoute,
+  handleSpendRoute,
   handleLogsRoute,
   handleEventsRoute,
   handleSettingsRoute,
@@ -442,7 +445,7 @@ export async function startGatewayServer(options: {
  * were already reachable, because `authorize()` returns before it can refuse anything. What changed is that
  * a gateway *with* keys enforced now answers the navigation the same way a gateway without them does.
  */
-const MANAGEMENT_PREFIXES = ['/metrics', '/v1/connections', '/v1/keys', '/v1/audit', '/v1/openapi', '/v1/jobs', '/v1/oauth', '/v1/settings', '/v1/web-cookie', '/v1/routing', '/v1/usage', '/v1/providers', '/v1/logs', '/v1/events', '/v1/health', '/v1/system', '/v1/backup', '/v1/token-saver', '/v1/virtual-models', '/v1/skills', '/v1/workspaces', '/v1/tunnels', '/v1/mitm', '/v1/proxy-pools', '/v1/provider-nodes', '/v1/observability', '/v1/pxpipe', '/v1/locale', '/v1/audio/speech', '/v1/audio/transcriptions', '/v1/search', '/v1/runtime', '/v1/fetch', '/v1/translators', '/v1/systemone'] as const;
+const MANAGEMENT_PREFIXES = ['/metrics', '/v1/connections', '/v1/keys', '/v1/audit', '/v1/openapi', '/v1/jobs', '/v1/oauth', '/v1/settings', '/v1/web-cookie', '/v1/routing', '/v1/usage', '/v1/spend', '/v1/providers', '/v1/logs', '/v1/events', '/v1/health', '/v1/system', '/v1/backup', '/v1/token-saver', '/v1/virtual-models', '/v1/skills', '/v1/workspaces', '/v1/tunnels', '/v1/mitm', '/v1/proxy-pools', '/v1/provider-nodes', '/v1/observability', '/v1/pxpipe', '/v1/locale', '/v1/audio/speech', '/v1/audio/transcriptions', '/v1/search', '/v1/runtime', '/v1/fetch', '/v1/translators', '/v1/systemone'] as const;
 
 function isManagementPath(pathname: string) {
   return MANAGEMENT_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
@@ -500,6 +503,19 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       }
     }
 
+    // The LLM surface authenticates here rather than in its handler, so the principal is known
+    // before the ambient identity for usage records is set. The handler still accepts a direct call
+    // (its own gate remains), but a served request is attributed to the key that reached this line.
+    if (isPublicLlmRoute(request.method, requestUrl.pathname) && !isTrustedDashboard(requestAuth)) {
+      try {
+        const principal = await service.authorizePublicRequest(extractApiKey(request));
+        if (principal) requestAuth = { ...requestAuth, kind: 'api-key', apiKey: principal };
+      } catch (error) {
+        sendError(response, error, false);
+        return;
+      }
+    }
+
     const ctx: RouteContext = {
       request,
       response,
@@ -511,21 +527,27 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       auth: requestAuth,
     };
 
-    // Fast path for the LLM surface. The 23 handlers before `handleInferenceRoute` all decline these paths;
-    // trying each one costs time that shows up at high concurrency (measured at 400 clients: p50 979 ms with
-    // the full loop, 748 ms going straight to inference). `handleInferenceRoute` carries its own auth gate
-    // for exactly these paths, so skipping the loop skips no check. The ordered list above remains the single
-    // source of truth for what the gateway serves and what the spec/test guards inspect; this is a dispatch
-    // shortcut for paths that list ends with, not a second route table.
-    if (isPublicLlmRoute(request.method, ctx.url.pathname) && !isVideoRoute(request.method, ctx.url.pathname)) {
-      return handleInferenceRoute(ctx);
-    }
+    // The ambient identity for everything this request writes. Set once, after the gate has decided
+    // which key survived, so a usage record cannot attribute itself to a key that was refused, and a
+    // stream cannot inherit the principal of the request that happened to run beside it.
+    await runWithPrincipal(principalFromAuth(requestAuth), async () => {
+      // Fast path for the LLM surface. The 23 handlers before `handleInferenceRoute` all decline these paths;
+      // trying each one costs time that shows up at high concurrency (measured at 400 clients: p50 979 ms with
+      // the full loop, 748 ms going straight to inference). `handleInferenceRoute` carries its own auth gate
+      // for exactly these paths, so skipping the loop skips no check. The ordered list above remains the single
+      // source of truth for what the gateway serves and what the spec/test guards inspect; this is a dispatch
+      // shortcut for paths that list ends with, not a second route table.
+      if (isPublicLlmRoute(request.method, ctx.url.pathname) && !isVideoRoute(request.method, ctx.url.pathname)) {
+        await handleInferenceRoute(ctx);
+        return;
+      }
 
-    for (const route of routes) {
-      if (await route(ctx)) return;
-    }
+      for (const route of routes) {
+        if (await route(ctx)) return;
+      }
 
-    sendJson(response, 404, { error: { code: 'NOT_FOUND', message: 'Route not found.', requestId: requestIdOf(request) } }, origin);
+      sendJson(response, 404, { error: { code: 'NOT_FOUND', message: 'Route not found.', requestId: requestIdOf(request) } }, origin);
+    });
   } finally {
     request.off('aborted', abort);
     response.off('close', onResponseClose);

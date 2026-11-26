@@ -35,7 +35,9 @@ export async function handleInferenceRoute(ctx: RouteContext): Promise<boolean> 
     // The LLM surface is the only authenticated part of the gateway. Requests
     // from the allowlisted dashboard origin are local administration traffic
     // and stay reachable so the dashboard can keep testing models.
-    if (isPublicLlmRoute(request.method, url.pathname) && !isTrustedDashboard(auth)) {
+    if (isPublicLlmRoute(request.method, url.pathname) && !isTrustedDashboard(auth) && auth.kind !== 'api-key') {
+      // The server authenticates the public LLM surface before dispatch so the usage record can be
+      // attributed; this remains for a caller that invokes the handler directly.
       await service.authorizePublicRequest(extractApiKey(request));
     }
 
@@ -90,6 +92,34 @@ export async function handleInferenceRoute(ctx: RouteContext): Promise<boolean> 
 }
 
 /**
+ * Refuses a request that its key's budget or quota has already spent, and reserves the worst-case
+ * cost when it may proceed. Returns true when the response has been sent.
+ *
+ * The gate lives at the handler boundary because that is the first point where the model and the
+ * requested output size are known; a check at the route table would have to guess both.
+ */
+async function enforceBudget(
+  service: GatewayService,
+  response: ServerResponse,
+  origin: string | undefined,
+  input: { requestId: string; model: string; route?: string; messages?: unknown; maxOutputTokens?: number; inputTokens?: number },
+): Promise<boolean> {
+  const refusal = await service.reserveBudget(input);
+  if (!refusal) return false;
+  for (const [name, value] of Object.entries(refusal.headers)) response.setHeader(name, value);
+  sendJson(response, refusal.status, {
+    error: {
+      code: refusal.code,
+      message: refusal.message,
+      ...(refusal.headers['x-omnihilbras-budget-reset'] ? { resetAt: refusal.headers['x-omnihilbras-budget-reset'] } : {}),
+      ...(refusal.headers['x-omnihilbras-budget-remaining-usd'] ? { remainingUsd: Number(refusal.headers['x-omnihilbras-budget-remaining-usd']) } : {}),
+      ...(refusal.headers['x-omnihilbras-budget-remaining-tokens'] ? { remainingTokens: Number(refusal.headers['x-omnihilbras-budget-remaining-tokens']) } : {}),
+    },
+  }, origin);
+  return true;
+}
+
+/**
  * `POST /v1/embeddings`, in OpenAI's shape.
  *
  * Deliberately a sibling of `handleChat` and not a call into it: the two share the auth gate, the
@@ -104,6 +134,7 @@ export async function handleEmbeddings(request: IncomingMessage, response: Serve
   const embeddingRequest = explicitConnectionId === undefined ? parsedEmbedding : { ...parsedEmbedding, connectionId: explicitConnectionId };
   const explicitProviderId = getExplicitProviderId(request, body);
   const scope = service.startScope(embeddingRequest.model, explicitProviderId, undefined, requestIdOf(request));
+  if (await enforceBudget(service, response, origin, { requestId: scope.id, model: embeddingRequest.model, route: request.url, inputTokens: estimateTokens(JSON.stringify(embeddingRequest.input ?? '')) })) return;
 
   const startedAt = Date.now();
   let responseBody: { response: EmbeddingResponse; attempts: GatewayFailoverAttempt[] };
@@ -177,6 +208,7 @@ export async function handleImages(request: IncomingMessage, response: ServerRes
   const imageRequest = explicitConnectionId === undefined ? parsedImage : { ...parsedImage, connectionId: explicitConnectionId };
   const explicitProviderId = getExplicitProviderId(request, body);
   const scope = service.startScope(imageRequest.model, explicitProviderId, undefined, requestIdOf(request));
+  if (await enforceBudget(service, response, origin, { requestId: scope.id, model: imageRequest.model, route: request.url })) return;
 
   const startedAt = Date.now();
   let responseBody: { response: ImageResponse; attempts: GatewayFailoverAttempt[] };
@@ -319,6 +351,7 @@ export async function handleResponses(request: IncomingMessage, response: Server
   if (explicitConnectionId !== undefined) chatRequest.connectionId = explicitConnectionId;
   const explicitProviderId = getExplicitProviderId(request, body);
   const scope = service.startScope(chatRequest.model, explicitProviderId, tokenSaverEnabled(request), requestIdOf(request));
+  if (await enforceBudget(service, response, origin, { requestId: scope.id, model: chatRequest.model, route: request.url, messages: chatRequest.messages, maxOutputTokens: chatRequest.maxOutputTokens })) return;
   if (chatRequest.stream) {
     await streamResponses({ response, service, origin, signal, scope, chatRequest, explicitProviderId });
     return;
@@ -571,6 +604,7 @@ export async function handleMessages(request: IncomingMessage, response: ServerR
   if (explicitConnectionId !== undefined) chatRequest.connectionId = explicitConnectionId;
   const explicitProviderId = getExplicitProviderId(request, body);
   const scope = service.startScope(chatRequest.model, explicitProviderId, tokenSaverEnabled(request), requestIdOf(request));
+  if (await enforceBudget(service, response, origin, { requestId: scope.id, model: chatRequest.model, route: request.url, messages: chatRequest.messages, maxOutputTokens: chatRequest.maxOutputTokens })) return;
   const startedAt = Date.now();
   if (chatRequest.stream) {
     return await streamMessages({ response, service, origin, signal, scope, chatRequest, explicitProviderId });
@@ -1017,6 +1051,7 @@ export async function handleChat(request: IncomingMessage, response: ServerRespo
   // the id is per *request* rather than per provider — which is the only way a client can quote it
   // and an operator can find it.
   const scope = service.startScope(chatRequest.model, explicitProviderId, tokenSaverEnabled(request), requestIdOf(request));
+  if (await enforceBudget(service, response, origin, { requestId: scope.id, model: chatRequest.model, route: request.url, messages: chatRequest.messages, maxOutputTokens: chatRequest.maxOutputTokens })) return;
 
   // A refusal is where the id matters most — it is the case where the user needs to quote
   // something — so the error is given the id on its way out rather than only on the success path.

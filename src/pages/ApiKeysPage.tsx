@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import {
   createGatewayApiKey,
+  getGatewaySpend,
   listGatewayApiKeys,
   removeGatewayApiKey,
   renameGatewayApiKey,
@@ -158,6 +159,11 @@ export function ApiKeysContent() {
   const [limitsFor, setLimitsFor] = useState<GatewayApiKey | null>(null);
   const [rpmDraft, setRpmDraft] = useState('');
   const [expiryDraft, setExpiryDraft] = useState('');
+  const [tpmDraft, setTpmDraft] = useState('');
+  const [budgetDraft, setBudgetDraft] = useState('');
+  const [budgetPeriodDraft, setBudgetPeriodDraft] = useState<'day' | 'week' | 'month' | 'total'>('month');
+  const [modelsDraft, setModelsDraft] = useState('');
+  const [spends, setSpends] = useState<Record<string, { usd: number; remainingUsd?: number; requests: number }>>({});
   const [savingLimits, setSavingLimits] = useState(false);
   const [busyKeyId, setBusyKeyId] = useState<string | null>(null);
   /** Whether the key list has been read. `keys: []` before a read is not "there are no keys". */
@@ -170,6 +176,17 @@ export function ApiKeysContent() {
       setKeys(result.keys);
       setRequireApiKey(result.requireApiKey);
       setLoaded(true);
+      // Spend is read from the ledger rather than derived from the bounded usage list; one request per
+      // key is honest about that difference, and a failure leaves the badge absent rather than zero.
+      const spendEntries = await Promise.all(result.keys.map(async (key) => {
+        try {
+          const spend = await getGatewaySpend(key.id, 'month', signal);
+          return [key.id, { usd: spend.spend?.usd ?? 0, ...(spend.status?.remainingUsd === undefined ? {} : { remainingUsd: spend.status.remainingUsd }), requests: spend.spend?.requests ?? 0 }] as const;
+        } catch {
+          return undefined;
+        }
+      }));
+      setSpends(Object.fromEntries(spendEntries.filter((entry): entry is readonly [string, { usd: number; remainingUsd?: number; requests: number }] => entry !== undefined)));
     } catch (error) {
       if (signal?.aborted) return;
       setNoticeError(true);
@@ -284,6 +301,10 @@ export function ApiKeysContent() {
     setRpmDraft(apiKey.rpm === undefined ? '' : String(apiKey.rpm));
     // `datetime-local` wants `YYYY-MM-DDTHH:mm`; the stored value is an ISO instant.
     setExpiryDraft(apiKey.expiresAt === undefined ? '' : new Date(apiKey.expiresAt).toISOString().slice(0, 16));
+    setTpmDraft(apiKey.tpm === undefined ? '' : String(apiKey.tpm));
+    setBudgetDraft(apiKey.budget?.usd === undefined ? '' : String(apiKey.budget.usd));
+    setBudgetPeriodDraft(apiKey.budget?.period ?? 'month');
+    setModelsDraft(apiKey.allowedModels?.join(', ') ?? '');
   }
 
   async function saveLimits() {
@@ -292,12 +313,20 @@ export function ApiKeysContent() {
     try {
       // Two PATCHes because the gateway accepts one intent per request, and clear-the-limit is `null`, not empty.
       const rpm = rpmDraft.trim() === '' ? null : Number(rpmDraft);
-      const updated = await setGatewayApiKeyLimits(limitsFor.id, { rpm: rpm !== null && Number.isFinite(rpm) && rpm > 0 ? Math.floor(rpm) : null });
+      await setGatewayApiKeyLimits(limitsFor.id, { rpm: rpm !== null && Number.isFinite(rpm) && rpm > 0 ? Math.floor(rpm) : null });
       const expiresAt = expiryDraft.trim() === '' ? null : new Date(expiryDraft).toISOString();
-      const withExpiry = await setGatewayApiKeyLimits(limitsFor.id, { expiresAt });
-      setKeys((current) => current.map((item) => (item.id === updated.id ? withExpiry : item)));
+      await setGatewayApiKeyLimits(limitsFor.id, { expiresAt });
+      const tpm = tpmDraft.trim() === '' ? null : Number(tpmDraft);
+      await setGatewayApiKeyLimits(limitsFor.id, { tpm: tpm !== null && Number.isFinite(tpm) && tpm > 0 ? Math.floor(tpm) : null });
+      const usd = budgetDraft.trim() === '' ? null : Number(budgetDraft);
+      await setGatewayApiKeyLimits(limitsFor.id, {
+        budget: usd !== null && Number.isFinite(usd) && usd > 0 ? { usd, period: budgetPeriodDraft } : null,
+      });
+      const models = modelsDraft.split(',').map((entry) => entry.trim()).filter(Boolean);
+      const final = await setGatewayApiKeyLimits(limitsFor.id, { allowedModels: models.length > 0 ? models : null });
+      setKeys((current) => current.map((item) => (item.id === final.id ? final : item)));
       setLimitsFor(null);
-      flash(`Limits saved for ${withExpiry.name}.`);
+      flash(`Limits saved for ${final.name}.`);
     } catch (error) {
       flash(error instanceof Error ? error.message : 'The limits could not be saved.', 'error');
     } finally {
@@ -426,6 +455,14 @@ export function ApiKeysContent() {
                         </span>
                         <span className={`rounded-full border px-2 py-0.5 font-mono text-[9px] ${apiKey.expiresAt === undefined ? 'border-line-strong bg-surface-2 text-muted' : Date.parse(apiKey.expiresAt) <= Date.now() ? badgeTone.bad : badgeTone.neutral}`}>
                           {apiKey.expiresAt === undefined ? 'no expiry' : `expires ${formatDate(apiKey.expiresAt)}`}
+                        </span>
+                        <span className={`rounded-full border px-2 py-0.5 font-mono text-[9px] ${apiKey.tpm === undefined ? 'border-line-strong bg-surface-2 text-muted' : badgeTone.warn}`}>
+                          {apiKey.tpm === undefined ? 'no token limit' : `${apiKey.tpm} tpm`}
+                        </span>
+                        <span className={`rounded-full border px-2 py-0.5 font-mono text-[9px] ${apiKey.budget === undefined ? 'border-line-strong bg-surface-2 text-muted' : badgeTone.warn}`}>
+                          {apiKey.budget === undefined
+                            ? 'no budget'
+                            : `$${spends[apiKey.id]?.usd.toFixed(2) ?? '0.00'} spent · $${apiKey.budget.usd ?? '—'} / ${apiKey.budget.period}`}
                         </span>
                         <button type="button" onClick={() => openLimits(apiKey)} disabled={busyKeyId !== null} aria-label={`Set limits for ${apiKey.name}`} className="rounded-md px-1.5 py-0.5 font-mono text-[9px] text-gold-text hover:bg-gold-soft disabled:opacity-50">
                           change
@@ -570,7 +607,54 @@ export function ApiKeysContent() {
                 className="input !h-10 !w-full !rounded-lg !border !border-line !bg-surface-2 !px-3 !text-sm"
               />
             </label>
-            <p className="muted text-[11px] leading-relaxed">A key past its expiry is refused and has to be replaced. A rate limit refuses with 429 and works again a minute later.</p>
+            <label className="block">
+              <span className="mb-1 block text-xs font-semibold">Tokens per minute</span>
+              <input
+                type="number"
+                min={1}
+                value={tpmDraft}
+                onChange={(event) => setTpmDraft(event.target.value)}
+                placeholder="unlimited"
+                className="input !h-10 !w-full !rounded-lg !border !border-line !bg-surface-2 !px-3 !text-sm"
+              />
+            </label>
+            <div className="grid grid-cols-[1fr_auto] gap-2">
+              <label className="block">
+                <span className="mb-1 block text-xs font-semibold">Dollar budget</span>
+                <input
+                  type="number"
+                  min={0.01}
+                  step={0.01}
+                  value={budgetDraft}
+                  onChange={(event) => setBudgetDraft(event.target.value)}
+                  placeholder="none"
+                  className="input !h-10 !w-full !rounded-lg !border !border-line !bg-surface-2 !px-3 !text-sm"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs font-semibold">Period</span>
+                <select
+                  value={budgetPeriodDraft}
+                  onChange={(event) => setBudgetPeriodDraft(event.target.value as 'day' | 'week' | 'month' | 'total')}
+                  className="input !h-10 !rounded-lg !border !border-line !bg-surface-2 !px-3 !text-sm"
+                >
+                  <option value="day">day</option>
+                  <option value="week">week</option>
+                  <option value="month">month</option>
+                  <option value="total">total</option>
+                </select>
+              </label>
+            </div>
+            <label className="block">
+              <span className="mb-1 block text-xs font-semibold">Allowed models</span>
+              <input
+                value={modelsDraft}
+                onChange={(event) => setModelsDraft(event.target.value)}
+                placeholder="empty means every model; globs like gpt-*"
+                className="input !h-10 !w-full !rounded-lg !border !border-line !bg-surface-2 !px-3 !text-sm"
+              />
+            </label>
+            <p className="muted text-[11px] leading-relaxed">A key past its expiry is refused and has to be replaced. A rate limit refuses with 429 and works again a minute later. A budget is checked before dispatch and reported in dollars from the spend ledger.</p>
           </div>
           <div className="mt-5 flex gap-2">
             <button type="button" onClick={() => void saveLimits()} disabled={savingLimits} className="btn-gold flex-1 !py-2.5 !text-xs disabled:opacity-60">

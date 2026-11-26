@@ -8,6 +8,7 @@ import { OpenRouterAdapter } from '@omnihilbras/sdk-openrouter';
 import { LocalApiKeyStore, type ApiKeyStore } from './api-keys.js';
 import { assertPublicDestination } from './destination-check.js';
 import { createUsageStore, type UsageBackend } from './usage-store-sqlite.js';
+import { SpendLedger } from './spend-ledger.js';
 import { LocalVirtualModelStore } from './virtual-models.js';
 import { LocalSkillStore } from './skills.js';
 import { LocalWorkspaceStore } from './workspaces.js';
@@ -382,6 +383,9 @@ export function createGatewayService(config: GatewayConfig = loadGatewayConfig()
     // `LocalUsageStore` writes through `atomicWrite`, so `usage.json` lands at 0600 in the same 0700
     // directory as the credentials, and is bounded by `maxRecords` on write.
     usageStore: createUsageStore({ directory: config.dataDir, backend: config.usageBackend }),
+    // The ledger is a separate document on purpose: usage is bounded to the last thousand records,
+    // and a monthly budget that read a rolling window would forget what was spent last week.
+    spendLedger: new SpendLedger({ directory: config.dataDir, env }),
     auditStore: new LocalAuditStore({ directory: config.dataDir }),
     jobStore: new LocalJobStore({ directory: config.dataDir }),
     // Opt-in: a request-detail file is a deliberate trade of disk for diagnostics, so the default

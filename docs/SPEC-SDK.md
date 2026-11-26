@@ -1,6 +1,6 @@
 # Spec: OmniHilbras Gateway and Provider SDK
 
-**Status:** Current — release 4.0.1
+**Status:** Current — release 4.1.0
 
 This document is the contract behind the gateway and its provider packages. It is intentionally more
 specific than the [README](../README.md): a route, an error code or a provider boundary written here is
@@ -358,7 +358,10 @@ The first local gateway exposes:
   `/v1/routing`: a record describes what this machine talks to.
   Each record also carries `requestId`, the logical request's id, and `path`, the ordered list of connections
   tried with each outcome, so a failover shows which connection failed and which one answered. Both are optional:
-  records written before they existed show only the total `attempts`. `path` entries record a connection id, a
+  records written before they existed show only the total `attempts`. Records written after 4.1 also carry
+  `actor` (`key`, `dashboard` or `anonymous`), `apiKeyId`, `apiKeyPrefix` and `workspaceId`; `apiKeyId`,
+  `workspaceId` and `actor` are accepted as filters and `byKey` groups the matched records. Older records have
+  no attribution and are grouped as `unattributed` rather than as zero spend. `path` entries record a connection id, a
   provider id, whether the attempt was sent (`dispatched`), its outcome and an error code, and nothing else.
   The page's provider canvas is drawn from `breakdown.byProvider` and **classifies from the window, not from
   live state**: gold means the provider served a request in the window, red means everything it did failed,
@@ -379,6 +382,19 @@ The first local gateway exposes:
   fixtures and callers that name a file keep that file. JSON remains the default for the alpha line; the
   default flips after the migration has been exercised against every store. `GET /v1/events` accepts
   `Last-Event-ID` and replays the journal before resuming live notifications.
+- `GET /v1/spend?scope=key|workspace&id=…&period=day|week|month|total` — what one key or workspace has spent
+  from the durable spend ledger, and how much of its budget remains. `spend` carries `usd`, `usdMicros`,
+  `tokens`, `requests`, `unpricedRequests` and `heldUsd` (in-flight reservations); `budget` and `status`
+  (`remainingUsd`, `remainingTokens`, `resetAt`) are present when a budget is configured. Windows are UTC,
+  money is integer micro-USD, and a model with no published price increments `unpricedRequests` rather than
+  contributing an invented dollar figure. Owner-only; a gateway started without a ledger answers `ledger: false`
+  with a reason instead of zeros.
+- `PATCH /v1/keys/:id` — one intent per request, now also `tpm` (tokens per minute), `budget`
+  (`{ usd?, tokens?, period }`, or `null` to clear), `allowedProviders`, `allowedModels` (globs) and
+  `allowedRoutes`. A budget is checked before dispatch and settled from the usage record; a key over its
+  budget is refused with `402 BUDGET_EXCEEDED`, over its token quota with `429 QUOTA_EXCEEDED`, and a
+  disallowed model or route with `403 POLICY_DENIED`. Refusals carry `x-omnihilbras-budget-remaining-usd`,
+  `-tokens`, `-reset` and, when a window resets, `retry-after`. Every restriction is opt-in.
 - `POST /v1/oauth/cline/start` — begin a sign-in; returns the sign-in URL, a session id, and a single-use `state`.
 - `GET /v1/oauth/cline/authorize` — build the Cline sign-in URL for a loopback callback.
 - `GET /v1/oauth/cline/callback` — where the provider redirects the browser; completes the exchange and reports the outcome.

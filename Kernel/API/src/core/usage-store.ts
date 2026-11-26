@@ -101,6 +101,19 @@ export type UsageRecord = {
    */
   requestId?: string;
   /**
+   * Who spent it. `key` is an authenticated gateway key, `dashboard` is the trusted loopback dashboard,
+   * `anonymous` is a call that arrived outside a request (a test, a background pass) or a gateway with
+   * enforcement off. Records written before 4.1 have no actor and read as unattributed rather than as a
+   * guess.
+   */
+  actor?: 'key' | 'dashboard' | 'anonymous';
+  /** The key's id — never its secret — so spend can be attributed without the key being readable. */
+  apiKeyId?: string;
+  /** The key's displayable prefix, so a record can be shown next to the key without a second lookup. */
+  apiKeyPrefix?: string;
+  /** The key's workspace, when it has one. */
+  workspaceId?: string;
+  /**
    * Each connection tried, in order, with what it did. Present on records written after this field existed;
    * absent on older records, which therefore show only the total.
    */
@@ -131,8 +144,23 @@ export type UsageQuery = {
   model?: string;
   connectionId?: string;
   outcome?: UsageOutcome;
+  apiKeyId?: string;
+  workspaceId?: string;
+  actor?: 'key' | 'dashboard' | 'anonymous';
   limit?: number;
 };
+
+/** Per-key totals, so a page can answer "who spent what" without rendering every record. */
+export type UsageKeyTotals = {
+  apiKeyId: string;
+  apiKeyPrefix?: string;
+  requests: number;
+  inputTokens: number;
+  outputTokens: number;
+};
+
+/** Unattributed records — written before attribution existed — are their own row, never a zero. */
+export const unattributedUsageKey = 'unattributed' as const;
 
 export type UsageTotals = {
   requests: number;
@@ -160,6 +188,8 @@ export type UsageSummary = {
   totals: UsageTotals;
   /** Newest first. Bounded by the store's `maxRecords`, never by the query. */
   records: UsageRecord[];
+  /** Spend per key over the same records. An absent key id is grouped as `unattributed`. */
+  byKey?: UsageKeyTotals[];
 };
 
 export interface UsageStore {
@@ -250,10 +280,33 @@ export function selectUsageRecords(all: readonly UsageRecord[], query: UsageQuer
     if (query.model !== undefined && record.model !== query.model) return false;
     if (query.connectionId !== undefined && record.connectionId !== query.connectionId) return false;
     if (query.outcome !== undefined && record.outcome !== query.outcome) return false;
+    if (query.apiKeyId !== undefined && record.apiKeyId !== query.apiKeyId) return false;
+    if (query.workspaceId !== undefined && record.workspaceId !== query.workspaceId) return false;
+    if (query.actor !== undefined && (record.actor ?? 'anonymous') !== query.actor) return false;
     return true;
   });
 
   return matched.slice(0, limit);
+}
+
+/** Groups the same records the totals were computed from, so the two cannot describe different windows. */
+export function summarizeByKey(records: readonly UsageRecord[]): UsageKeyTotals[] {
+  const groups = new Map<string, UsageKeyTotals>();
+  for (const record of records) {
+    const id = record.apiKeyId ?? unattributedUsageKey;
+    const group = groups.get(id) ?? {
+      apiKeyId: id,
+      ...(record.apiKeyPrefix === undefined ? {} : { apiKeyPrefix: record.apiKeyPrefix }),
+      requests: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+    };
+    group.requests += 1;
+    group.inputTokens += record.inputTokens ?? 0;
+    group.outputTokens += record.outputTokens ?? 0;
+    groups.set(id, group);
+  }
+  return [...groups.values()].sort((left, right) => right.requests - left.requests);
 }
 
 export function summarizeUsage(records: readonly UsageRecord[]): UsageTotals {
@@ -348,7 +401,7 @@ export class InMemoryUsageStore implements UsageStore {
 
   async summary(query: UsageQuery = {}): Promise<UsageSummary> {
     const records = await this.list({ ...query, limit: this.maxRecords });
-    return { totals: summarizeUsage(records), records };
+    return { totals: summarizeUsage(records), records, byKey: summarizeByKey(records) };
   }
 
   async size(): Promise<number> {
@@ -492,7 +545,7 @@ export class LocalUsageStore implements UsageStore {
     await this.mutationQueue;
     await this.ensureLoaded();
     const records = selectUsageRecords(this.records, { ...query, limit: this.maxRecords });
-    return { totals: summarizeUsage(records), records };
+    return { totals: summarizeUsage(records), records, byKey: summarizeByKey(records) };
   }
 
   async size(): Promise<number> {
@@ -572,6 +625,10 @@ export function isUsageRecord(value: unknown): value is UsageRecord {
     typeof value.attempts === 'number' &&
     Number.isFinite(value.attempts) &&
     (value.requestId === undefined || typeof value.requestId === 'string') &&
+    (value.actor === undefined || ['key', 'dashboard', 'anonymous'].includes(value.actor as string)) &&
+    (value.apiKeyId === undefined || typeof value.apiKeyId === 'string') &&
+    (value.apiKeyPrefix === undefined || typeof value.apiKeyPrefix === 'string') &&
+    (value.workspaceId === undefined || typeof value.workspaceId === 'string') &&
     (value.incomplete === undefined || typeof value.incomplete === 'boolean') &&
     (value.toolContract === undefined || isToolContractCounts(value.toolContract)) &&
     (value.path === undefined || (Array.isArray(value.path) && value.path.every(isUsageAttempt)))
@@ -641,6 +698,10 @@ export function normalizeRecord(record: UsageRecord): UsageRecord {
       },
     } : {}),
     ...(typeof record.requestId === 'string' ? { requestId: record.requestId } : {}),
+    ...(record.actor === 'key' || record.actor === 'dashboard' || record.actor === 'anonymous' ? { actor: record.actor } : {}),
+    ...(typeof record.apiKeyId === 'string' ? { apiKeyId: record.apiKeyId } : {}),
+    ...(typeof record.apiKeyPrefix === 'string' ? { apiKeyPrefix: record.apiKeyPrefix } : {}),
+    ...(typeof record.workspaceId === 'string' ? { workspaceId: record.workspaceId } : {}),
     ...(Array.isArray(record.path) ? { path: record.path.map(normalizeAttempt) } : {}),
   };
 }

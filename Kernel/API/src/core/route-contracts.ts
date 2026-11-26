@@ -76,6 +76,7 @@ export const CONCRETE_ROUTE_PATHS: readonly string[] = [
   "/v1/settings",
   "/v1/settings/require-api-key",
   "/v1/skills",
+  "/v1/spend",
   "/v1/system",
   "/v1/system/shutdown",
   "/v1/system/update",

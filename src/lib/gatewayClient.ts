@@ -186,6 +186,27 @@ export type GatewayApiKey = {
   rpm?: number;
   /** ISO 8601; after this the key is refused. */
   expiresAt?: string;
+  /** Tokens per minute this key may spend. Absent means no limit. */
+  tpm?: number;
+  /** A spend guardrail for this key. Absent means the workspace default applies. */
+  budget?: { usd?: number; tokens?: number; period: 'day' | 'week' | 'month' | 'total' };
+  /** Provider ids this key may reach. Absent means every provider. */
+  allowedProviders?: string[];
+  /** Model globs this key may request. Absent means every model. */
+  allowedModels?: string[];
+  /** Route paths this key may call. Absent means every route. */
+  allowedRoutes?: string[];
+};
+
+export type GatewaySpend = {
+  ledger: boolean;
+  reason?: string;
+  scope: 'key' | 'workspace';
+  id: string;
+  period: 'day' | 'week' | 'month' | 'total';
+  spend?: { usd: number; usdMicros: number; tokens: number; requests: number; unpricedRequests: number; heldUsd: number };
+  budget?: GatewayApiKey['budget'];
+  status?: { allowed: boolean; remainingUsd?: number; remainingTokens?: number; resetAt?: string };
 };
 
 export type GatewayApiKeyList = {
@@ -1760,12 +1781,18 @@ export function renameGatewayApiKey(id: string, name: string, signal?: AbortSign
  * One call per intent, because the gateway refuses a body that carries two: `rpm` and `expiresAt` are different
  * questions and a request that answered both would make "which one did I just change" a matter of field order.
  */
-export function setGatewayApiKeyLimits(id: string, limits: { rpm?: number | null; expiresAt?: string | null }, signal?: AbortSignal) {
+export function setGatewayApiKeyLimits(id: string, limits: { rpm?: number | null; expiresAt?: string | null; tpm?: number | null; budget?: GatewayApiKey['budget'] | null; allowedProviders?: string[] | null; allowedModels?: string[] | null; allowedRoutes?: string[] | null }, signal?: AbortSignal) {
   return requestJson<{ apiKey: GatewayApiKey }>(`/v1/keys/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     body: JSON.stringify(limits),
     signal,
   }).then((body) => body.apiKey);
+}
+
+/** What one key has spent in a period, and how much of its budget remains. */
+export function getGatewaySpend(id: string, period: 'day' | 'week' | 'month' | 'total' = 'month', signal?: AbortSignal) {
+  const query = new URLSearchParams({ scope: 'key', id, period });
+  return requestJson<GatewaySpend>(`/v1/spend?${query.toString()}`, { signal });
 }
 
 export function setGatewayApiKeyEnabled(id: string, enabled: boolean, signal?: AbortSignal) {

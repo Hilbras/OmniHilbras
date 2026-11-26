@@ -1,6 +1,7 @@
 import type { RouteContext } from './route-context.js';
 import { invalidRequest, isRecord, readJsonBody, sendJson } from '../core/http.js';
 import { ProviderError } from '../core/provider-error.js';
+import { validateBudget } from '../core/budgets.js';
 
 const workspacesPrefix = '/v1/workspaces';
 
@@ -12,6 +13,13 @@ function store(ctx: RouteContext) {
 
 function decodeId(pathname: string) {
   return decodeURIComponent(pathname.slice(`${workspacesPrefix}/`.length));
+}
+
+function parseWorkspaceBudget(value: unknown): { budget: import('../core/budgets.js').Budget | null } {
+  if (value === null) return { budget: null };
+  const validated = validateBudget(value);
+  if (!validated.budget) throw invalidRequest(validated.error ?? 'budget is invalid.');
+  return { budget: validated.budget };
 }
 
 export async function handleWorkspacesRoute(ctx: RouteContext): Promise<boolean> {
@@ -37,6 +45,7 @@ export async function handleWorkspacesRoute(ctx: RouteContext): Promise<boolean>
       ...(typeof body.name === 'string' ? { name: body.name } : {}),
       ...(typeof body.description === 'string' ? { description: body.description } : {}),
       ...(typeof body.enabled === 'boolean' ? { enabled: body.enabled } : {}),
+      ...(body.budget === undefined ? {} : parseWorkspaceBudget(body.budget)),
     };
     const ws = await store(ctx).save(input);
     sendJson(response, 201, { workspace: ws }, origin);
@@ -51,6 +60,7 @@ export async function handleWorkspacesRoute(ctx: RouteContext): Promise<boolean>
       ...(typeof body.name === 'string' ? { name: body.name } : {}),
       ...(typeof body.description === 'string' ? { description: body.description } : {}),
       ...(typeof body.enabled === 'boolean' ? { enabled: body.enabled } : {}),
+      ...(body.budget === undefined ? {} : parseWorkspaceBudget(body.budget)),
     };
     const ws = await store(ctx).save(input);
     sendJson(response, 200, { workspace: ws }, origin);

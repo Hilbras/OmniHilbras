@@ -72,6 +72,11 @@ export async function handleUsageRoute(context: RouteContext): Promise<boolean> 
     return true;
   }
 
+  const actorParam = url.searchParams.get('actor');
+  if (actorParam !== null && !['key', 'dashboard', 'anonymous'].includes(actorParam)) {
+    sendJson(response, 400, { error: { code: 'INVALID_REQUEST', message: 'actor must be key, dashboard or anonymous.' } }, origin);
+    return true;
+  }
   const periodParam = url.searchParams.get('period');
   if (periodParam !== null && !usagePeriods.includes(periodParam as UsagePeriod)) {
     sendJson(response, 400, {
@@ -118,6 +123,9 @@ export async function handleUsageRoute(context: RouteContext): Promise<boolean> 
     const summary = await store.summary({
       ...(url.searchParams.get('provider') ? { providerId: url.searchParams.get('provider')! } : {}),
       ...(url.searchParams.get('model') ? { model: url.searchParams.get('model')! } : {}),
+      ...(url.searchParams.get('apiKeyId') ? { apiKeyId: url.searchParams.get('apiKeyId')! } : {}),
+      ...(url.searchParams.get('workspaceId') ? { workspaceId: url.searchParams.get('workspaceId')! } : {}),
+      ...(url.searchParams.get('actor') ? { actor: url.searchParams.get('actor') as 'key' | 'dashboard' | 'anonymous' } : {}),
       ...(url.searchParams.get('connection') ? { connectionId: url.searchParams.get('connection')! } : {}),
       ...(explicitSince ? { since: explicitSince } : window.since ? { since: window.since.toISOString() } : {}),
       ...(url.searchParams.get('until') ? { until: url.searchParams.get('until')! } : {}),
@@ -147,6 +155,7 @@ export async function handleUsageRoute(context: RouteContext): Promise<boolean> 
       recording: true,
       period,
       totals: summary.totals,
+      ...(summary.byKey ? { byKey: summary.byKey } : {}),
       records: listed,
       breakdown,
       cost: {
