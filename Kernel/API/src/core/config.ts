@@ -11,6 +11,11 @@ import { createUsageStore, type UsageBackend } from './usage-store-sqlite.js';
 import { SpendLedger } from './spend-ledger.js';
 import { LocalGuardrailStore } from './guardrails.js';
 import { OtelExporter, otelConfigFromEnv } from './otel.js';
+import { createStateDocument } from './state-document.js';
+import { ResponseCache } from './response-cache.js';
+import { SemanticCache } from './semantic-cache.js';
+import { LocalWebhookStore } from './webhooks.js';
+import { LocalBatchStore } from './batches.js';
 import { LocalVirtualModelStore } from './virtual-models.js';
 import { LocalSkillStore } from './skills.js';
 import { LocalWorkspaceStore } from './workspaces.js';
@@ -389,6 +394,19 @@ export function createGatewayService(config: GatewayConfig = loadGatewayConfig()
     // and a monthly budget that read a rolling window would forget what was spent last week.
     spendLedger: new SpendLedger({ directory: config.dataDir, env }),
     guardrails: new LocalGuardrailStore({ directory: config.dataDir, env }),
+    responseCache: new ResponseCache({
+      ttlMs: positiveNumber(env.OMNIHILBRAS_RESPONSE_CACHE_TTL_MS, 30_000),
+      maxEntries: positiveNumber(env.OMNIHILBRAS_RESPONSE_CACHE_ENTRIES, 256),
+      ...(env.OMNIHILBRAS_RESPONSE_CACHE_PERSIST === '1'
+        ? { document: createStateDocument({ name: 'response-cache', directory: config.dataDir, env }) }
+        : {}),
+    }),
+    ...(env.OMNIHILBRAS_SEMANTIC_CACHE === '1'
+      ? { semanticCache: new SemanticCache({ threshold: Number(env.OMNIHILBRAS_SEMANTIC_CACHE_THRESHOLD ?? 0.92) || 0.92, ttlMs: positiveNumber(env.OMNIHILBRAS_SEMANTIC_CACHE_TTL_MS, 300_000) }) }
+      : {}),
+    webhooks: new LocalWebhookStore({ directory: config.dataDir, env }),
+    webhookAllowLocal: env.OMNIHILBRAS_WEBHOOK_ALLOW_LOCAL === '1',
+    batches: new LocalBatchStore({ directory: config.dataDir, env }),
     ...(otelConfigFromEnv(env) ? { otel: new OtelExporter(otelConfigFromEnv(env)!) } : {}),
     auditStore: new LocalAuditStore({ directory: config.dataDir }),
     jobStore: new LocalJobStore({ directory: config.dataDir }),
@@ -481,4 +499,10 @@ export function assertLoopbackHost(host: string) {
   if (!isLoopbackHostname(normalized)) {
     throw new Error('OMNIHILBRAS_HOST must be a loopback address in local mode.');
   }
+}
+
+/** A positive finite number from the environment, or the default. A zero or junk value is the default. */
+function positiveNumber(value: string | undefined, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }

@@ -1,6 +1,6 @@
 # Spec: OmniHilbras Gateway and Provider SDK
 
-**Status:** Current — release 4.2.0
+**Status:** Current — release 4.3.0
 
 This document is the contract behind the gateway and its provider packages. It is intentionally more
 specific than the [README](../README.md): a route, an error code or a provider boundary written here is
@@ -401,6 +401,27 @@ The first local gateway exposes:
   `tools/call` carrying `x-omnihilbras-approval`, and held in memory (a restart forgets it). A plugin
   entry may declare `tools.allow` and `tools.ask`; an allow list also filters `tools/list`, and a
   denied tool is refused before it reaches the child's stdin.
+- `POST /v1/batches` — submit up to 1,000 chat requests as one durable record (`requests[].custom_id`,
+  `requests[].body`). Returns `202` with a `batch`; `GET /v1/batches`, `GET /v1/batches/:id` and
+  `POST /v1/batches/:id/cancel` follow it. Items run through the ordinary routing, budget gate and
+  usage accounting; completion is also a `batch.completed` webhook. A gateway restarted mid-batch
+  marks it `interrupted` rather than pretending it finished. Native provider batch APIs are not used
+  yet — the gateway runs the items itself with bounded concurrency.
+- `GET/POST /v1/webhooks`, `DELETE /v1/webhooks/:id`, `POST /v1/webhooks/test` — signed delivery for
+  `batch.completed`, `video.completed`, `budget.threshold` and `test`. Signature is
+  `sha256=HMAC(secret, "<timestamp>.<body>")` in `x-omnihilbras-signature` with
+  `x-omnihilbras-timestamp` and `x-omnihilbras-event`; retries back off, deliveries are bounded, and
+  the signing secret is returned once at creation. Only `https` public destinations are called;
+  `OMNIHILBRAS_WEBHOOK_ALLOW_LOCAL=1` is the explicit override for a local receiver.
+- `POST /v1/rerank` — `{ model, query, documents: [{ id?, text }] | string[], top_n? }`, served by a
+  connection whose adapter declares `rerank`. No connection declares it today, so the route answers
+  `501 NOT_SUPPORTED` rather than inventing scores; it is a capability surface, not a lexical
+  fallback. Usage is recorded like any other billable request.
+- `DELETE /v1/cache` — empties the exact response cache. The cache serves direct service calls only;
+  **client requests are never deduplicated** (a load invariant asserted in `load.test.js`). TTL,
+  entry count, persistence and the opt-in local semantic layer are
+  `OMNIHILBRAS_RESPONSE_CACHE_TTL_MS`, `_ENTRIES`, `_PERSIST=1`, and `OMNIHILBRAS_SEMANTIC_CACHE=1`
+  with `_THRESHOLD`/`_TTL_MS`.
 - `GET /v1/guardrails` / `PUT /v1/guardrails` — the guardrail policy, as data. Rules are `block`,
   `flag`, `redact`, `limit`, `tool` and `injection`; `dryRun` reports findings and a
   `x-omnihilbras-guardrail` header without refusing. A `block` refuses with `422 GUARDRAIL_BLOCKED`

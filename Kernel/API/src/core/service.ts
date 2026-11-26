@@ -69,7 +69,10 @@ import { SlidingWindowRateLimiter, bareModelFor, modelCapacityCapabilities, noCa
 import { HealthManager } from './health.js';
 import { ConnectionLatencyLedger } from './connection-latency.js';
 import { ResponseCache } from './response-cache.js';
-import { currentPrincipal, principalUsageFields } from './principal.js';
+import { SemanticCache } from './semantic-cache.js';
+import { WebhookDispatcher, type LocalWebhookStore, type WebhookDelivery, type WebhookEvent } from './webhooks.js';
+import { batchChatRequest, type BatchItem, type BatchRecord, type BatchResult, type BatchStore } from './batches.js';
+import { currentPrincipal, principalUsageFields, runWithPrincipal } from './principal.js';
 import { SpendLedger } from './spend-ledger.js';
 import { evaluateBudget, type Budget } from './budgets.js';
 import { requestCostUsd } from './usage-pricing.js';
@@ -327,6 +330,16 @@ export type GatewayServiceOptions = {
   guardrails?: LocalGuardrailStore;
   /** Opt-in OTLP exporter. Absent means no spans are exported. */
   otel?: OtelExporter;
+  /** Replaces the default 30-second exact cache (direct service calls only; client requests are never deduplicated). */
+  responseCache?: ResponseCache;
+  /** Opt-in similarity cache for direct service calls. */
+  semanticCache?: SemanticCache;
+  /** Opt-in webhook registry. */
+  webhooks?: LocalWebhookStore;
+  /** Allow a deliberately local webhook receiver. Off by default because a webhook is an SSRF surface. */
+  webhookAllowLocal?: boolean;
+  /** Opt-in batch store. */
+  batches?: BatchStore;
   /**
    * Optional request-detail store. **Off by default**: usage records deliberately hold no content,
    * and a detail store is a separate, opt-in trade of disk for diagnostics. See `request-details.ts`.
@@ -406,6 +419,14 @@ export class GatewayService {
   private readonly spendLedger?: SpendLedger;
   private readonly guardrailStore?: LocalGuardrailStore;
   private readonly otelExporter?: OtelExporter;
+  private readonly responseCache: ResponseCache;
+  private readonly semanticCache?: SemanticCache;
+  private readonly webhookStore?: LocalWebhookStore;
+  private readonly webhookDispatcher?: WebhookDispatcher;
+  private readonly batchStore?: BatchStore;
+  private readonly batchControllers = new Map<string, AbortController>();
+  /** Budget alerts already sent, so a refused request does not send one per retry. */
+  private readonly budgetAlerts = new Set<string>();
   private readonly requestDetails?: RequestDetailStore;
   private readonly virtualModelStore?: VirtualModelStore;
   private readonly workspaceStore?: WorkspaceStore;
@@ -571,7 +592,6 @@ export class GatewayService {
   private readonly connectionLatency = new ConnectionLatencyLedger();
   private readonly stickyConnections = new Map<string, { connectionId: string; until: number }>();
   private readonly stickyTtlMs = 5 * 60 * 1000;
-  private readonly responseCache = new ResponseCache({ ttlMs: 30_000 });
   /**
    * Identical requests already in flight, keyed the same way as the response cache.
    *
@@ -651,6 +671,11 @@ export class GatewayService {
     this.spendLedger = options.spendLedger;
     this.guardrailStore = options.guardrails;
     this.otelExporter = options.otel;
+    this.responseCache = options.responseCache ?? new ResponseCache({ ttlMs: 30_000 });
+    this.semanticCache = options.semanticCache;
+    this.webhookStore = options.webhooks;
+    this.webhookDispatcher = options.webhooks ? new WebhookDispatcher({ store: options.webhooks, allowLocal: options.webhookAllowLocal === true }) : undefined;
+    this.batchStore = options.batches;
     this.usageStore = options.usageStore ? this.publishingUsage(options.usageStore) : undefined;
     this.requestDetails = options.requestDetails;
     this.virtualModelStore = options.virtualModels;
@@ -4435,17 +4460,25 @@ export class GatewayService {
      * directly with no signal.
      */
     const cacheable = (request.temperature === undefined || request.temperature === 0) && !signal && request.connectionId === undefined && explicitProviderId === undefined;
+    if (cacheable) await this.responseCache.ready();
     const cacheKey = cacheable ? this.responseCache.keyFor(request) : undefined;
     if (cacheKey) {
       const cached = this.responseCache.get(cacheKey) as ChatResponse | undefined;
       if (cached) return { response: cached, attempts: [] };
+      if (this.semanticCache) {
+        const similar = await this.semanticCache.get(JSON.stringify(request.messages)).catch(() => undefined);
+        if (similar) return { response: similar.value as ChatResponse, attempts: [] };
+      }
       // A duplicate already running is waited on rather than sent again. `!signal` is guaranteed by
       // `cacheable`, so no caller can abort out of a shared promise and strand the others.
       const inflight = this.inflightChats.get(cacheKey);
       if (inflight) return inflight;
       const work = this.requests.chat(request, explicitProviderId, undefined, scope)
         .then((outcome) => {
-          if (outcome?.response) this.responseCache.set(cacheKey, outcome.response);
+          if (outcome?.response) {
+            this.responseCache.set(cacheKey, outcome.response);
+            void this.semanticCache?.set(JSON.stringify(request.messages), outcome.response).catch(() => undefined);
+          }
           return outcome;
         })
         .finally(() => { this.inflightChats.delete(cacheKey); });
@@ -5422,6 +5455,118 @@ export class GatewayService {
     const connections = await this.connections.list();
     const byId = new Map(connections.map((connection) => [connection.id, connection]));
     return requests.map((request) => pricingFromConnection(byId.get(request.connectionId ?? ''), request.model));
+  }
+
+  /** The batch store, when this gateway was started with one. */
+  get batches(): BatchStore | undefined {
+    return this.batchStore;
+  }
+
+
+  /** The webhook registry, when this gateway was started with one. */
+  get webhooks(): LocalWebhookStore | undefined {
+    return this.webhookStore;
+  }
+
+  /** Recent webhook deliveries, newest first. */
+  webhookDeliveries(limit = 50): WebhookDelivery[] {
+    return this.webhookDispatcher?.list(limit) ?? [];
+  }
+
+  /** Delivers one event to every subscribed hook. Never throws. */
+  async deliverWebhook(event: WebhookEvent, payload: unknown): Promise<WebhookDelivery[]> {
+    try { return (await this.webhookDispatcher?.deliver(event, payload)) ?? []; } catch { return []; }
+  }
+
+  /** Empties the exact cache. The semantic cache, when wired, is cleared with it. */
+  async clearResponseCache(): Promise<void> {
+    await this.responseCache.clear();
+  }
+
+  /**
+   * Submits a batch and starts it. The record is created before any request is sent, so a caller that
+   * loses the connection can still find what it asked for.
+   */
+  async submitBatch(items: BatchItem[]): Promise<BatchRecord | undefined> {
+    if (!this.batchStore) return undefined;
+    const principal = currentPrincipal();
+    const record = await this.batchStore.create({
+      status: 'in_progress',
+      items,
+      results: [],
+      ...(principal?.apiKeyId === undefined ? {} : { apiKeyId: principal.apiKeyId }),
+      ...(principal?.workspaceId === undefined ? {} : { workspaceId: principal.workspaceId }),
+    });
+    const controller = new AbortController();
+    this.batchControllers.set(record.id, controller);
+    void this.runBatch(record.id, items, principal, controller.signal);
+    return record;
+  }
+
+  /** Cancels a running batch; the record is updated when its workers stop. */
+  async cancelBatch(id: string): Promise<BatchRecord | undefined> {
+    const controller = this.batchControllers.get(id);
+    if (!controller) return undefined;
+    controller.abort();
+    return this.batchStore?.get(id);
+  }
+
+  private async runBatch(id: string, items: BatchItem[], principal: ReturnType<typeof currentPrincipal>, signal: AbortSignal): Promise<void> {
+    const results: BatchResult[] = [];
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < items.length && !signal.aborted) {
+        const item = items[cursor++]!;
+        try {
+          const request = batchChatRequest(item.body);
+          const scope = this.startScope(request.model, undefined, true);
+          await runWithPrincipal(principal ?? { actor: 'anonymous' }, async () => {
+            const refusal = await this.reserveBudget({ requestId: scope.id, model: request.model, messages: request.messages, maxOutputTokens: request.maxOutputTokens });
+            if (refusal) throw new ProviderError(refusal.code, refusal.message);
+            const outcome = await this.chatWithFailover(request, undefined, signal, scope);
+            results.push({
+              customId: item.customId,
+              ok: true,
+              response: {
+                model: outcome.response.model,
+                content: outcome.response.message.content ?? '',
+                ...(outcome.response.usage ? { usage: outcome.response.usage } : {}),
+              },
+            });
+          });
+        } catch (error) {
+          results.push({ customId: item.customId, ok: false, error: error instanceof Error ? error.message.slice(0, 300) : 'The request failed.' });
+        }
+      }
+    };
+    await Promise.all([worker(), worker()]);
+    this.batchControllers.delete(id);
+    const status = signal.aborted ? 'cancelled' : 'completed';
+    await this.batchStore?.update(id, { status, results, completedAt: new Date().toISOString() });
+    void this.deliverWebhook('batch.completed', { batchId: id, status, completed: results.filter((result) => result.ok).length, failed: results.filter((result) => !result.ok).length });
+  }
+
+  /**
+   * Orders documents through a connection whose adapter declares `rerank`.
+   *
+   * Returns undefined when no connection can do it: a gateway that invented relevance scores would be
+   * answering a different question.
+   */
+  async rerank(
+    input: { model: string; query: string; documents: Array<{ index: number; text: string; id?: string }>; topN?: number },
+    signal?: AbortSignal,
+  ): Promise<{ results: Array<{ index: number; relevanceScore: number; document?: string }>; providerId?: string; connectionId?: string } | undefined> {
+    const connections = (await this.connections.list()).filter((connection) => connection.enabled && (connection.modelPolicy === 'all' || connection.modelIds.includes(input.model)));
+    for (const connection of connections) {
+      const adapter = this.registry.get(connection.providerId) as ProviderAdapter & {
+        rerank?: (request: { model: string; query: string; documents: Array<{ index: number; text: string; id?: string }>; topN?: number }, context: ProviderRequestContext) => Promise<Array<{ index: number; relevanceScore: number; document?: string }>>;
+      };
+      if (typeof adapter.rerank !== 'function') continue;
+      const context = await this.contextForAdapter(connection.providerId, signal);
+      const results = await adapter.rerank(input, context);
+      return { results, providerId: connection.providerId, connectionId: connection.id };
+    }
+    return undefined;
   }
 
   async modelPrice(connectionId: string | undefined, model: string): Promise<ModelPricing | undefined> {

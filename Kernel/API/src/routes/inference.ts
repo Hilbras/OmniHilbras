@@ -85,6 +85,12 @@ export async function handleInferenceRoute(ctx: RouteContext): Promise<boolean> 
       return true;
     }
 
+    if (request.method === 'POST' && url.pathname === '/v1/rerank') {
+      const { handleRerankRoute } = await import('./rerank.js');
+      await handleRerankRoute({ ...ctx, url });
+      return true;
+    }
+
     if (request.method === 'POST' && url.pathname === '/v1/images/generations') {
       await handleImages(request, response, service, options, origin, signal);
       return true;
@@ -1124,7 +1130,7 @@ export async function handleChat(request: IncomingMessage, response: ServerRespo
  * The three outcomes are kept distinct, and `cancelled` is neither success nor failure: see the v1.52.0 note
  * in `request-executor.ts`. A client that closed its connection did not make the provider slow.
  */
-function recordUsage(
+export function recordUsage(
   service: GatewayService,
   input: {
     model: string;
@@ -2027,6 +2033,7 @@ export function isPublicLlmRoute(method: string | undefined, pathname: string) {
     || (method === 'POST' && pathname === '/v1/embeddings')
     || (method === 'POST' && pathname === '/v1/images/generations')
     || (method === 'POST' && pathname === '/v1/messages/count_tokens')
+    || (method === 'POST' && pathname === '/v1/rerank')
     || isVideoRoute(method, pathname);
 }
 

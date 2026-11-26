@@ -15,14 +15,16 @@ export const CONCRETE_ROUTE_PATHS: readonly string[] = [
   "/v1/backup/export",
   "/v1/backup/import",
   "/v1/backup/verify",
+  "/v1/batches",
+  "/v1/cache",
   "/v1/chat/completions",
   "/v1/connections",
   "/v1/connections/openrouter",
   "/v1/embeddings",
   "/v1/events",
   "/v1/fetch",
-  "/v1/images/generations",
   "/v1/guardrails",
+  "/v1/images/generations",
   "/v1/jobs",
   "/v1/keys",
   "/v1/locale",
@@ -68,6 +70,7 @@ export const CONCRETE_ROUTE_PATHS: readonly string[] = [
   "/v1/provider-nodes",
   "/v1/proxy-pools",
   "/v1/pxpipe",
+  "/v1/rerank",
   "/v1/responses",
   "/v1/routing",
   "/v1/runtime/opencode",
@@ -105,11 +108,15 @@ export const CONCRETE_ROUTE_PATHS: readonly string[] = [
   "/v1/web-cookie/tokenharbor/connect",
   "/v1/web-cookie/zcode/check",
   "/v1/web-cookie/zcode/connect",
-  "/v1/workspaces"
+  "/v1/webhooks",
+  "/v1/webhooks/test",
+  "/v1/workspaces",
+
 ] as const;
 
 export const ROUTE_PREFIXES: readonly string[] = [
   "/",
+  "/v1/batches/",
   "/v1/connections/",
   "/v1/health/",
   "/v1/keys/",
@@ -147,7 +154,9 @@ export const ROUTE_PREFIXES: readonly string[] = [
   "/v1/token-saver/",
   "/v1/tunnels/",
   "/v1/virtual-models/",
-  "/v1/workspaces/"
+  "/v1/webhooks/",
+  "/v1/workspaces/",
+
 ] as const;
 
 export function openApiDocument(version = process.env.npm_package_version ?? 'unknown') {

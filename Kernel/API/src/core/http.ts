@@ -261,7 +261,9 @@ export function statusForError(error: unknown) {  if (!isProviderError(error)) r
   if (error.code === 'NOT_FOUND') return 404;
   if (error.code === 'CONFLICT') return 409;
   if (error.code === 'FORBIDDEN') return 403;
-  if (error.code === 'RATE_LIMITED') return 429;
+  if (error.code === 'RATE_LIMITED' || error.code === 'QUOTA_EXCEEDED') return 429;
+  if (error.code === 'BUDGET_EXCEEDED') return 402;
+  if (error.code === 'POLICY_DENIED') return 403;
   if (error.code === 'PROVIDER_TIMEOUT') return 504;
   if (error.code === 'CANCELLED') return 499;
   if (error.code === 'PROVIDER_UNAVAILABLE' || error.code === 'PROVIDER_REQUEST_FAILED' || error.code === 'INVALID_RESPONSE') return 502;

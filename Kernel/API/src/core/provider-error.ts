@@ -11,7 +11,10 @@ export type ProviderErrorCode =
   | 'PROVIDER_UNAVAILABLE'
   | 'INVALID_RESPONSE'
   | 'CANCELLED'
-  | 'CONFIGURATION_ERROR';
+  | 'CONFIGURATION_ERROR'
+  | 'BUDGET_EXCEEDED'
+  | 'QUOTA_EXCEEDED'
+  | 'POLICY_DENIED';
 
 export type ProviderErrorOptions = {
   providerId?: string;
@@ -79,6 +82,9 @@ export function publicProviderMessage(code: ProviderErrorCode) {
     case 'CONFLICT': return 'The request conflicts with an earlier one.';
     case 'FORBIDDEN': return 'This credential may not perform that action.';
     case 'CONFIGURATION_ERROR': return 'The provider is not configured correctly.';
+    case 'BUDGET_EXCEEDED': return 'This key has reached its spend budget.';
+    case 'QUOTA_EXCEEDED': return 'This key has reached its quota.';
+    case 'POLICY_DENIED': return 'This key may not make that request.';
     case 'PROVIDER_REQUEST_FAILED':
     default: return 'The provider request failed.';
   }

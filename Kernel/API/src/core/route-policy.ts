@@ -19,6 +19,7 @@ const BILLABLE_POST_PATHS = new Set([
   '/v1/systemone',
   '/v1/fetch',
   '/v1/search',
+  '/v1/rerank',
 ]);
 
 const VIDEO_GENERATION_PATHS = new Set([
