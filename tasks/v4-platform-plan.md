@@ -1,6 +1,6 @@
 # V4 platform plan
 
-**Goal:** [v4-goal.md](./v4-goal.md) · **Baseline:** `3.100.2` (2026-11-25) · **Status:** 4.0.0 final: A/B/C/D complete; E shell palette and existing event/analytics surfaces; F route contracts, job history and existing packaging. Known limits are in docs/MIGRATION-4.0.md
+**Goal:** [v4-goal.md](./v4-goal.md) · **Baseline:** `3.100.2` (2026-11-25) · **Status:** 4.0.x final: A/B/C/D complete; E shell palette and existing event/analytics surfaces; F route contracts, job history and existing packaging; `4.0.1` fixes the visual-baseline race that made 4.0.0's e2e red. Known limits are in docs/MIGRATION-4.0.md
 
 ## Why 4.0
 
@@ -99,6 +99,14 @@ Each phase ships as a prerelease with the normal ceremony (`verify` → version 
 - Freeze, migration rehearsal from 3.100.2 and 3.99.x, upgrade guide, deprecation notes.
 - Full `verify`, e2e, visual, load, security and release audit.
 - Tag, GitHub release, npm `latest`, website release notes.
+
+### `4.0.1` patch — visual-baseline race
+
+- The keys page screenshot raced the "Live failure feed unavailable" notice: the baseline was
+  captured before the toast on one run and after it on the next, so the same commit produced 0 and
+  4,536 changed pixels. `tests/e2e/visual.spec.ts` now waits for the notice, dismisses what rendered,
+  and asserts the viewport is clean before every screenshot; the keys baselines were regenerated.
+- Shipped because 4.0.0's e2e run was red on that race. No runtime code changed.
 
 ## Test gates
 

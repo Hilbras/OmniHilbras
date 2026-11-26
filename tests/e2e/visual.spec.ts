@@ -104,6 +104,12 @@ for (const theme of ['dark', 'light'] as const) {
       // The skeleton carries `aria-busy`; photographing a page that is still loading bakes the loading state in.
       await expect(page.locator('[aria-busy="true"]')).toHaveCount(0, { timeout: 20_000 });
       await expect(page.locator('main')).toBeVisible();
+      // A screenshot taken while the failure-feed notice is arriving is a screenshot of a race: the
+      // baseline was captured before the toast on one run and after it on the next. Wait for the notice
+      // (or for the stream to prove it works), dismiss what is there, and assert the viewport is clean.
+      await page.getByText('Live failure feed unavailable. Failed requests will not be announced.').waitFor({ state: 'visible', timeout: 5_000 }).catch(() => undefined);
+      for (const dismiss of await page.getByLabel('Dismiss notification').all()) await dismiss.click();
+      await expect(page.getByLabel('Dismiss notification')).toHaveCount(0);
       await expect(page).toHaveScreenshot(`dashboard-${name}-${theme}.png`, {
         animations: 'disabled',
         timeout: 20_000,
