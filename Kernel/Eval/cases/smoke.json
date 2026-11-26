@@ -1,0 +1,7 @@
+{
+  "name": "smoke",
+  "cases": [
+    { "id": "echo-number", "prompt": "Reply with exactly the number 42 and nothing else.", "expectation": { "kind": "regex", "pattern": "^\\s*42\\s*$" } },
+    { "id": "json-shape", "prompt": "Reply with JSON only: {\"ok\": true}.", "expectation": { "kind": "json", "subset": { "ok": true } } }
+  ]
+}

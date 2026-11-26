@@ -1,6 +1,6 @@
 # Spec: OmniHilbras Gateway and Provider SDK
 
-**Status:** Current — release 4.3.0
+**Status:** Current — release 4.4.0
 
 This document is the contract behind the gateway and its provider packages. It is intentionally more
 specific than the [README](../README.md): a route, an error code or a provider boundary written here is
@@ -401,6 +401,11 @@ The first local gateway exposes:
   `tools/call` carrying `x-omnihilbras-approval`, and held in memory (a restart forgets it). A plugin
   entry may declare `tools.allow` and `tools.ask`; an allow list also filters `tools/list`, and a
   denied tool is refused before it reaches the child's stdin.
+- `GET/POST /v1/prompts`, `GET /v1/prompts/:id`, `POST /v1/prompts/:id/versions`,
+  `POST /v1/prompts/:id/activate`, `POST /v1/prompts/:id/render`, `DELETE /v1/prompts/:id` — a local,
+  versioned prompt registry. Every edit appends a version; activating an older one is one call, and
+  rendering refuses a missing variable rather than leaving `{{name}}` for a model to read. Prompts are
+  content, exported with the encrypted backup, never credentials.
 - `POST /v1/batches` — submit up to 1,000 chat requests as one durable record (`requests[].custom_id`,
   `requests[].body`). Returns `202` with a `batch`; `GET /v1/batches`, `GET /v1/batches/:id` and
   `POST /v1/batches/:id/cancel` follow it. Items run through the ordinary routing, budget gate and

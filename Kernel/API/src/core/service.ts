@@ -78,6 +78,7 @@ import { evaluateBudget, type Budget } from './budgets.js';
 import { requestCostUsd } from './usage-pricing.js';
 import { estimatePromptTokens } from './token-estimate.js';
 import type { LocalGuardrailStore } from './guardrails.js';
+import type { LocalPromptStore } from './prompts.js';
 import { spanFromUsage, type OtelExporter } from './otel.js';
 import { TokenRenewal, classifyRenewalFailure } from './token-renewal.js';
 import { ProviderResolver } from './provider-resolver.js';
@@ -340,6 +341,8 @@ export type GatewayServiceOptions = {
   webhookAllowLocal?: boolean;
   /** Opt-in batch store. */
   batches?: BatchStore;
+  /** Opt-in prompt registry. */
+  prompts?: LocalPromptStore;
   /**
    * Optional request-detail store. **Off by default**: usage records deliberately hold no content,
    * and a detail store is a separate, opt-in trade of disk for diagnostics. See `request-details.ts`.
@@ -424,6 +427,7 @@ export class GatewayService {
   private readonly webhookStore?: LocalWebhookStore;
   private readonly webhookDispatcher?: WebhookDispatcher;
   private readonly batchStore?: BatchStore;
+  private readonly promptStore?: LocalPromptStore;
   private readonly batchControllers = new Map<string, AbortController>();
   /** Budget alerts already sent, so a refused request does not send one per retry. */
   private readonly budgetAlerts = new Set<string>();
@@ -676,6 +680,7 @@ export class GatewayService {
     this.webhookStore = options.webhooks;
     this.webhookDispatcher = options.webhooks ? new WebhookDispatcher({ store: options.webhooks, allowLocal: options.webhookAllowLocal === true }) : undefined;
     this.batchStore = options.batches;
+    this.promptStore = options.prompts;
     this.usageStore = options.usageStore ? this.publishingUsage(options.usageStore) : undefined;
     this.requestDetails = options.requestDetails;
     this.virtualModelStore = options.virtualModels;
@@ -5460,6 +5465,11 @@ export class GatewayService {
   /** The batch store, when this gateway was started with one. */
   get batches(): BatchStore | undefined {
     return this.batchStore;
+  }
+
+  /** The prompt registry, when this gateway was started with one. */
+  get prompts(): LocalPromptStore | undefined {
+    return this.promptStore;
   }
 
 

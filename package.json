@@ -1,7 +1,7 @@
 {
   "name": "omnihilbras-site",
   "private": true,
-  "version": "4.3.0",
+  "version": "4.4.0",
   "description": "Provider-neutral local gateway and desktop dashboard",
   "author": {
     "name": "Hilbras",
@@ -32,7 +32,7 @@
     "preview": "vite preview",
     "typecheck": "pnpm build:sdk && pnpm build:token-saver && pnpm build:tools && pnpm build:gateway && tsc --noEmit && pnpm typecheck:gateway",
     "typecheck:gateway": "pnpm --filter @omnihilbras/kernel-api typecheck",
-    "test": "pnpm build:sdk && pnpm build:token-saver && pnpm build:tools && pnpm build:gateway && pnpm test:repo && pnpm test:sdk && pnpm test:gateway && pnpm test:token-saver && pnpm test:tools",
+    "test": "pnpm build:sdk && pnpm build:token-saver && pnpm build:tools && pnpm build:gateway && pnpm test:repo && pnpm test:sdk && pnpm test:gateway && pnpm test:token-saver && pnpm test:tools && pnpm test:eval",
     "test:repo": "node --test tests/*.test.js",
     "test:token-saver": "node --test Kernel/TokenSaver/test/*.test.js",
     "test:sdk": "node --test Kernel/SDK/tests/*.test.js",
@@ -55,7 +55,9 @@
     "build:tools": "pnpm --filter @omnihilbras/tools build",
     "test:tools": "node --test Kernel/Tools/test/*.test.js",
     "build:cli": "node scripts/build-cli-server.mjs --skip-builds",
-    "smoke:cli": "node scripts/smoke-cli-server.mjs"
+    "smoke:cli": "node scripts/smoke-cli-server.mjs",
+    "test:eval": "tsc -p Kernel/Eval/tsconfig.json && node --test Kernel/Eval/test/*.test.js",
+    "eval": "tsc -p Kernel/Eval/tsconfig.json && node Kernel/Eval/dist/src/run.js"
   },
   "dependencies": {
     "@capacitor/android": "^8.6.0",

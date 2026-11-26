@@ -116,7 +116,7 @@ test('the dispatcher tries every route module, in the order the old chain used',
   // owns the paths. `Inference` still stays last. `Translators` is a read-only capability inventory with no
   // body and no write surface; it sits beside `Fetch` and before the billable video surface. `SystemOne` is the
   // native decision-model JSON lane; it sits just before `Inference` so its body is never translated into a chat body.
-  assert.deepEqual(order, ['Status', 'Metrics', 'Connections', 'Backup', 'TokenSaver', 'Oauth', 'ApiKeys', 'Audit', 'OpenApi', 'Jobs', 'Usage', 'Spend', 'Guardrails', 'Batches', 'Webhooks', 'Cache', 'Logs', 'Events', 'Settings', 'VirtualModels', 'Skills', 'Workspaces', 'Tunnels', 'Mitm', 'ProxyPools', 'ProviderNodes', 'Observability', 'Pxpipe', 'Locale', 'Runtime', 'Media', 'Mcp', 'McpPlugins', 'Fetch', 'Translators', 'Video', 'SystemOne', 'Inference']);
+  assert.deepEqual(order, ['Status', 'Metrics', 'Connections', 'Backup', 'TokenSaver', 'Oauth', 'ApiKeys', 'Audit', 'OpenApi', 'Jobs', 'Usage', 'Spend', 'Guardrails', 'Batches', 'Webhooks', 'Cache', 'Prompts', 'Logs', 'Events', 'Settings', 'VirtualModels', 'Skills', 'Workspaces', 'Tunnels', 'Mitm', 'ProxyPools', 'ProviderNodes', 'Observability', 'Pxpipe', 'Locale', 'Runtime', 'Media', 'Mcp', 'McpPlugins', 'Fetch', 'Translators', 'Video', 'SystemOne', 'Inference']);
   // Every module that exists must actually be wired in: a module with routes but no entry here is
   // a module whose routes 404, which no unit test would catch.
   for (const { name } of modules) {

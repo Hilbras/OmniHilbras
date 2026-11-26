@@ -16,6 +16,7 @@ import { ResponseCache } from './response-cache.js';
 import { SemanticCache } from './semantic-cache.js';
 import { LocalWebhookStore } from './webhooks.js';
 import { LocalBatchStore } from './batches.js';
+import { LocalPromptStore } from './prompts.js';
 import { LocalVirtualModelStore } from './virtual-models.js';
 import { LocalSkillStore } from './skills.js';
 import { LocalWorkspaceStore } from './workspaces.js';
@@ -407,6 +408,7 @@ export function createGatewayService(config: GatewayConfig = loadGatewayConfig()
     webhooks: new LocalWebhookStore({ directory: config.dataDir, env }),
     webhookAllowLocal: env.OMNIHILBRAS_WEBHOOK_ALLOW_LOCAL === '1',
     batches: new LocalBatchStore({ directory: config.dataDir, env }),
+    prompts: new LocalPromptStore({ directory: config.dataDir, env }),
     ...(otelConfigFromEnv(env) ? { otel: new OtelExporter(otelConfigFromEnv(env)!) } : {}),
     auditStore: new LocalAuditStore({ directory: config.dataDir }),
     jobStore: new LocalJobStore({ directory: config.dataDir }),
