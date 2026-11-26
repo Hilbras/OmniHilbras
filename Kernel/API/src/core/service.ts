@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { executeLocalTool, localToolRootsFromEnv } from './local-tool-executor.js';
 import { readStateEventsSince } from './state-document.js';
 import type { AuditStore } from './audit.js';
+import type { JobStore } from './jobs.js';
 import { OWN_PROVIDER_ADAPTERS } from './own-provider-adapters.js';
 import { ApmixAdapter } from '@omnihilbras/sdk-apmix';
 import { BeatApiAdapter } from '@omnihilbras/sdk-beatapi';
@@ -292,6 +293,8 @@ export type GatewayServiceOptions = {
   config?: GatewayConfig;
   /** Optional durable audit trail. Absent means the gateway records no management-write audit. */
   auditStore?: AuditStore;
+  /** Optional durable history of background passes. */
+  jobStore?: JobStore;
   /**
    * Where per-request records go. **Optional, and absent by default.**
    *
@@ -390,6 +393,7 @@ export class GatewayService {
   private readonly smartStickyOrder: string[] = [];
   private readonly gatewayConfig: GatewayConfig | undefined;
   private readonly auditStore?: AuditStore;
+  private readonly jobStore?: JobStore;
   private readonly tokenSaverConfig?: NonNullable<GatewayServiceOptions['tokenSaver']>;
   private readonly tokenSaverStore?: MemoryCcrStore;
   private readonly maxOutputTokensCap?: number;
@@ -626,6 +630,7 @@ export class GatewayService {
     this.skillStore = options.skills;
     this.gatewayConfig = options.config;
     this.auditStore = options.auditStore;
+    this.jobStore = options.jobStore;
     this.tokenSaverConfig = options.tokenSaver?.enabled ? options.tokenSaver : undefined;
     this.historyTrim = options.historyTrim && options.historyTrim.maxInputTokens > 0 ? options.historyTrim : undefined;
     // History trimming needs the retrieval store even when content compression is off: a trimmed turn
@@ -919,6 +924,14 @@ export class GatewayService {
         now,
         ...(options.recoveryCooldownMs === undefined ? {} : { recoveryCooldownMs: options.recoveryCooldownMs }),
         ...(options.failureThreshold === undefined ? {} : { failureThreshold: options.failureThreshold }),
+        onPass: (report) => {
+          void this.recordJob({
+            name: 'health',
+            durationMs: report.durationMs ?? 0,
+            outcome: report.status === 'ok' ? 'ok' : 'error',
+            detail: `${report.providers.length} provider(s), status ${report.status}`,
+          }).catch(() => undefined);
+        },
         /**
          * Cooldowns are written through to the vault, not kept in memory.
          *
@@ -1048,6 +1061,14 @@ export class GatewayService {
       onError: (connection, error) => {
         if (classifyRenewalFailure(error) !== 'needs-sign-in') return;
         this.healthManager.noteLoginRefused(connection.providerId, 'The login needs sign-in again: refresh was refused.', connection.id);
+      },
+      onPass: (result) => {
+        void this.recordJob({
+          name: 'token-renewal',
+          durationMs: result.durationMs,
+          outcome: result.failed > 0 ? 'error' : 'ok',
+          detail: `${result.ran} due, ${result.failed} failed`,
+        }).catch(() => undefined);
       },
     });
   }
@@ -3240,6 +3261,14 @@ export class GatewayService {
 
   async listAudit(limit = 100) {
     return this.auditStore?.list(limit) ?? [];
+  }
+
+  async recordJob(input: { name: string; durationMs: number; outcome: 'ok' | 'error'; detail?: string }) {
+    await this.jobStore?.record(input);
+  }
+
+  async listJobs(limit = 50) {
+    return this.jobStore?.list(limit) ?? [];
   }
 
   async stateFingerprint(): Promise<string> {

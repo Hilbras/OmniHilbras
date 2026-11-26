@@ -22,6 +22,7 @@ export const CONCRETE_ROUTE_PATHS: readonly string[] = [
   "/v1/events",
   "/v1/fetch",
   "/v1/images/generations",
+  "/v1/jobs",
   "/v1/keys",
   "/v1/locale",
   "/v1/logs/stream",

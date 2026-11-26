@@ -1,6 +1,6 @@
 # V4 platform plan
 
-**Goal:** [v4-goal.md](./v4-goal.md) · **Baseline:** `3.100.2` (2026-11-25) · **Status:** A/B/C/D complete; E command palette shipped; F route-contract inventory shipped in `4.0.0-alpha.9`; wider E, durable jobs and 4.0.0 final remain
+**Goal:** [v4-goal.md](./v4-goal.md) · **Baseline:** `3.100.2` (2026-11-25) · **Status:** A/B/C/D complete; E command palette shipped; F route contracts (alpha.9) and durable job history (alpha.10) done; wider E and 4.0.0 final remain
 
 ## Why 4.0
 
@@ -83,7 +83,7 @@ Each phase ships as a prerelease with the normal ceremony (`verify` → version 
 
 **Exit criteria:** axe critical 0, keyboard paths complete, visual baselines stable, initial JS budget met, live changes appear without polling.
 
-### Phase F — Runtime, contracts and packaging (`4.0.0-alpha.9`) — route contracts done; jobs/packaging pending
+### Phase F — Runtime, contracts and packaging (`4.0.0-alpha.9`, `alpha.10`) — contracts and jobs done; packaging already shipped in 3.99; done
 
 - Typed route registry with zod schemas, request validation and generated OpenAPI.
 - Graceful drain, liveness/readiness split, structured logs with trace ids, optional OpenTelemetry export.

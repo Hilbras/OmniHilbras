@@ -46,6 +46,8 @@ export type HealthReport = {
   status: 'ok' | 'degraded';
   checkedAt: string;
   providers: GatewayProviderHealth[];
+  /** How long the sweep took, when the caller measured it. */
+  durationMs?: number;
 };
 
 /**
@@ -77,6 +79,7 @@ const defaultFailureThreshold = 3;
 
 export class HealthManager {
   private readonly registry: HealthRegistry;
+  private readonly onPass?: (report: HealthReport) => void;
   private intervalMs: number;
   private failureThreshold: number;
   private timer?: ReturnType<typeof setInterval>;
@@ -87,11 +90,12 @@ export class HealthManager {
 
   constructor(
     private readonly source: HealthProbeSource,
-    options: { now?: () => number; recoveryCooldownMs?: number; maxRecoveryCooldownMs?: number; intervalMs?: number; failureThreshold?: number; persistCooldown?: (key: string, cooldown: ModelCooldown | undefined) => void } = {},
+    options: { now?: () => number; recoveryCooldownMs?: number; maxRecoveryCooldownMs?: number; intervalMs?: number; failureThreshold?: number; persistCooldown?: (key: string, cooldown: ModelCooldown | undefined) => void; onPass?: (report: HealthReport) => void } = {},
   ) {
     this.registry = new HealthRegistry(options.now ?? (() => Date.now()), options.recoveryCooldownMs, options.maxRecoveryCooldownMs, options.persistCooldown);
     this.intervalMs = options.intervalMs ?? defaultHealthIntervalMs;
     this.failureThreshold = options.failureThreshold ?? defaultFailureThreshold;
+    this.onPass = options.onPass;
   }
 
   /** Cooldowns read back from the vault at startup. Best-effort and never awaited by a request. */
@@ -183,9 +187,17 @@ export class HealthManager {
    */
   refresh(signal?: AbortSignal): Promise<HealthReport> {
     if (!this.inFlight) {
-      this.inFlight = this.sweep(signal).finally(() => {
-        this.inFlight = undefined;
-      });
+      const started = Date.now();
+      this.inFlight = this.sweep(signal)
+        .then((report) => {
+          this.onPass?.({ ...report, durationMs: Date.now() - started });
+          return report;
+        }, (error: unknown) => {
+          throw error;
+        })
+        .finally(() => {
+          this.inFlight = undefined;
+        });
     }
     return this.inFlight;
   }

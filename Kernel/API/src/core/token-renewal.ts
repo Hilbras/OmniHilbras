@@ -41,6 +41,8 @@ export type TokenRenewalOptions = {
   /** How often a pass runs. */
   intervalMs?: number;
   onError?: (connection: RenewableConnection, error: unknown) => void;
+  /** Called after a pass with what it attempted, so a durable job history can record it. */
+  onPass?: (result: { ran: number; failed: number; durationMs: number }) => void;
 };
 
 const defaultWindowMs = 30 * 60_000;
@@ -60,18 +62,24 @@ export class TokenRenewal {
 
   /** One pass over the connections that expire within the window. */
   async pass(): Promise<void> {
+    const started = Date.now();
     const connections = await this.source.connections();
     const horizon = this.now() + this.windowMs;
+    let ran = 0;
+    let failed = 0;
     for (const connection of connections) {
       if (!connection.expiresAt) continue;
       const expires = Date.parse(connection.expiresAt);
       if (!Number.isFinite(expires) || expires > horizon) continue;
+      ran += 1;
       try {
         await this.source.renew(connection);
       } catch (error) {
+        failed += 1;
         this.options.onError?.(connection, error);
       }
     }
+    this.options.onPass?.({ ran, failed, durationMs: Date.now() - started });
   }
 
   start(): void {
