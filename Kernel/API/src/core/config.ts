@@ -11,6 +11,7 @@ import { createUsageStore, type UsageBackend } from './usage-store-sqlite.js';
 import { LocalVirtualModelStore } from './virtual-models.js';
 import { LocalSkillStore } from './skills.js';
 import { LocalWorkspaceStore } from './workspaces.js';
+import { LocalAuditStore } from './audit.js';
 import { LocalTunnelStore } from './tunnels.js';
 import { LocalMitmStore } from './mitm.js';
 import { LocalProxyPoolStore } from './proxy-pools.js';
@@ -380,6 +381,7 @@ export function createGatewayService(config: GatewayConfig = loadGatewayConfig()
     // `LocalUsageStore` writes through `atomicWrite`, so `usage.json` lands at 0600 in the same 0700
     // directory as the credentials, and is bounded by `maxRecords` on write.
     usageStore: createUsageStore({ directory: config.dataDir, backend: config.usageBackend }),
+    auditStore: new LocalAuditStore({ directory: config.dataDir }),
     // Opt-in: a request-detail file is a deliberate trade of disk for diagnostics, so the default
     // remains "record nothing but usage". `OMNIHILBRAS_REQUEST_DETAILS=1` turns it on.
     ...(env.OMNIHILBRAS_REQUEST_DETAILS === '1' ? { requestDetails: new LocalRequestDetailStore({ directory: config.dataDir }) } : {}),

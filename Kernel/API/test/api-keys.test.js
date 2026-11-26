@@ -487,3 +487,37 @@ test('a viewer may read the observation surface but not write or read the vault'
   const ownerGet = await fetch(`${baseUrl}/v1/keys`, { headers: { authorization: `Bearer ${owner.key}` } });
   assert.equal(ownerGet.status, 200, 'an owner keeps the historical full access');
 });
+
+test('a workspace-scoped key sees and changes only its workspace', async (t) => {
+  const apiKeys = new InMemoryApiKeyStore();
+  const scoped = await apiKeys.create('Workspace A', 'a', 'owner');
+  await apiKeys.create('Elsewhere', 'b', 'viewer');
+
+  const connections = new InMemoryConnectionStore();
+  await connections.save(
+    { id: 'a1', providerId: 'a', workspaceId: 'a', name: 'A', endpoint: 'http://127.0.0.1:9', priority: 1, proxyPool: 'none', modelPolicy: 'all' },
+    { type: 'none' },
+  );
+  await connections.save(
+    { id: 'b1', providerId: 'b', workspaceId: 'b', name: 'B', endpoint: 'http://127.0.0.1:9', priority: 1, proxyPool: 'none', modelPolicy: 'all' },
+    { type: 'none' },
+  );
+
+  const { baseUrl } = await startServer(t, apiKeys, connections);
+  const headers = { authorization: `Bearer ${scoped.key}` };
+  const list = await (await fetch(`${baseUrl}/v1/connections`, { headers })).json();
+  assert.deepEqual(list.data.map((connection) => connection.id), ['a1'], 'another workspace\'s connection leaked into the list');
+
+  const crossRead = await fetch(`${baseUrl}/v1/connections/b1/quota`, { headers });
+  assert.equal(crossRead.status, 404, 'a connection in another workspace must not be addressable');
+
+  const crossWrite = await fetch(`${baseUrl}/v1/connections/new`, {
+    method: 'PUT',
+    headers: { ...headers, 'content-type': 'application/json' },
+    body: JSON.stringify({ providerId: 'new', name: 'New', endpoint: 'http://127.0.0.1:9', workspaceId: 'b', credential: 'none' }),
+  });
+  assert.equal(crossWrite.status, 400, 'a scoped key must not save into another workspace');
+
+  const keys = await (await fetch(`${baseUrl}/v1/keys`, { headers })).json();
+  assert.deepEqual(keys.keys.map((key) => key.id), [scoped.record.id], 'another workspace\'s key leaked into the list');
+});

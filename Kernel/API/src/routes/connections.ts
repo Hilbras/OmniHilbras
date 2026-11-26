@@ -24,6 +24,7 @@ type OpenRouterConnectionRequest = {
   enabled?: boolean;
   quotaTier?: QuotaTier;
   modelPolicy: ModelImportPolicy;
+  workspaceId?: string;
   credential: ProviderCredential;
 };
 import {
@@ -43,10 +44,24 @@ import {
 } from '../core/http.js';
 
 export async function handleConnectionsRoute(ctx: RouteContext): Promise<boolean> {
-  const { request, response, url, service, origin, options, signal } = ctx;
+  const { request, response, url, service, origin, options, signal, auth } = ctx;
+  // A key scoped to a workspace sees and changes only that workspace. An unscoped key — every key that
+  // existed before workspaces were enforced — keeps the operator-wide view.
+  const scope = auth?.apiKey?.workspaceId;
+  const scopedConnectionId = url.pathname.startsWith('/v1/connections/')
+    ? decodeURIComponent(url.pathname.slice('/v1/connections/'.length).split('/')[0] ?? '')
+    : '';
+  if (scope && scopedConnectionId && scopedConnectionId !== 'openrouter') {
+    const record = (await service.listConnections()).find((connection) => connection.id === scopedConnectionId);
+    if (record && record.workspaceId !== scope) {
+      sendJson(response, 404, { error: { code: 'NOT_FOUND', message: 'Connection not found.' } }, origin);
+      return true;
+    }
+  }
 
     if (request.method === 'GET' && url.pathname === '/v1/connections') {
-      sendJson(response, 200, { object: 'list', data: await service.listConnectionsWithExpiry(), build: gatewayBuild() }, origin);
+      const connections = await service.listConnectionsWithExpiry();
+      sendJson(response, 200, { object: 'list', data: scope ? connections.filter((connection) => connection.workspaceId === scope) : connections, build: gatewayBuild() }, origin);
       return true;
     }
 
@@ -78,6 +93,10 @@ export async function handleConnectionsRoute(ctx: RouteContext): Promise<boolean
     if (request.method === 'PUT' && url.pathname === '/v1/connections/openrouter') {
       const body = await readJsonBody(request, Math.min(options.maxBodyBytes ?? maxConnectionBodyBytes, maxConnectionBodyBytes));
       const { credential, ...input } = parseOpenRouterConnectionRequest(body);
+      if (scope) {
+        if (input.workspaceId !== undefined && input.workspaceId !== scope) throw invalidRequest('This key cannot save a connection in another workspace.');
+        input.workspaceId = scope;
+      }
       const connection = await service.saveConnection(input, credential, signal);
       sendJson(response, 200, { connection }, origin);
       return true;
@@ -91,6 +110,10 @@ export async function handleConnectionsRoute(ctx: RouteContext): Promise<boolean
       const providerId = decodeProviderId(url.pathname.slice('/v1/connections/'.length));
       const body = await readJsonBody(request, Math.min(options.maxBodyBytes ?? maxConnectionBodyBytes, maxConnectionBodyBytes));
       const { credential, ...input } = parseGenericConnectionRequest(body, providerId);
+      if (scope) {
+        if (input.workspaceId !== undefined && input.workspaceId !== scope) throw invalidRequest('This key cannot save a connection in another workspace.');
+        input.workspaceId = scope;
+      }
       // Detailed, so the dashboard can say "that key is already account 2" instead of silently
       // appearing to add a twin. `identical` wrote nothing; `updated` renewed an existing sign-in.
       const { connection, duplicate } = await service.saveConnectionDetailed(input, credential, signal);
@@ -231,7 +254,7 @@ export const openRouterEndpoint = 'https://openrouter.ai/api/v1' as const;
 
 export function parseOpenRouterConnectionRequest(body: unknown): OpenRouterConnectionRequest {
   if (!isRecord(body)) throw invalidRequest('Request body must be a JSON object.');
-  assertOnlyFields(body, ['apiKey', 'name', 'priority', 'proxyPool', 'enabled', 'quotaTier', 'modelPolicy']);
+  assertOnlyFields(body, ['apiKey', 'name', 'priority', 'proxyPool', 'enabled', 'quotaTier', 'modelPolicy', 'workspaceId']);
   const name = parseBoundedString(body.name, 'name', 120);
   const priority = body.priority === undefined ? 1 : parsePriority(body.priority);
   const proxyPool = body.proxyPool === undefined ? 'none' : parseBoundedString(body.proxyPool, 'proxyPool', 128, true);
@@ -247,10 +270,17 @@ export function parseOpenRouterConnectionRequest(body: unknown): OpenRouterConne
     ...(body.quotaTier === undefined ? {} : { quotaTier: parseQuotaTier(body.quotaTier) }),
     modelPolicy,
     ...(body.enabled === undefined ? {} : { enabled: body.enabled }),
+    ...(body.workspaceId === undefined ? {} : { workspaceId: parseWorkspaceId(body.workspaceId) }),
     credential: parseApiKey(body),
   };
 }
 
+
+function parseWorkspaceId(value: unknown) {
+  const id = parseBoundedString(value, 'workspaceId', 64);
+  if (!/^[a-z0-9][a-z0-9._-]{0,63}$/i.test(id)) throw invalidRequest('workspaceId must be an identifier.');
+  return id;
+}
 
 export function decodeProviderId(value: string) {
   let decoded: string;
@@ -283,11 +313,11 @@ function parseConnectionCredential(body: Record<string, unknown>): ProviderCrede
   return { type: 'none' };
 }
 
-export function parseGenericConnectionRequest(body: unknown, providerId: string): { id?: string; providerId: string; name: string; endpoint: string; priority: number; proxyPool: string; enabled?: boolean; quotaTier?: QuotaTier; modelPolicy?: ModelImportPolicy; responsibility?: { owner?: string; purpose?: string }; resilience?: { timeoutMs?: number; maxRetries?: number; requestsPerMinute?: number; hedgeAfterMs?: number }; credential: ProviderCredential } {
+export function parseGenericConnectionRequest(body: unknown, providerId: string): { id?: string; providerId: string; name: string; endpoint: string; priority: number; proxyPool: string; enabled?: boolean; quotaTier?: QuotaTier; modelPolicy?: ModelImportPolicy; workspaceId?: string; responsibility?: { owner?: string; purpose?: string }; resilience?: { timeoutMs?: number; maxRetries?: number; requestsPerMinute?: number; hedgeAfterMs?: number }; credential: ProviderCredential } {
   if (!isRecord(body)) throw invalidRequest('Request body must be a JSON object.');
   // `id` is accepted so a caller can add a second connection for a provider that
   // already has one. Omitting it reuses that provider's existing connection.
-  assertOnlyFields(body, ['apiKey', 'credential', 'name', 'endpoint', 'id', 'priority', 'proxyPool', 'enabled', 'quotaTier', 'modelPolicy', 'resilience', 'responsibility']);
+  assertOnlyFields(body, ['apiKey', 'credential', 'name', 'endpoint', 'id', 'priority', 'proxyPool', 'enabled', 'quotaTier', 'modelPolicy', 'workspaceId', 'resilience', 'responsibility']);
   const endpoint = body.endpoint === undefined ? '' : parseBoundedString(body.endpoint, 'endpoint', 2048);
   if (!endpoint) throw invalidRequest('endpoint is required.');
   assertSafeEndpoint(endpoint, providerId);
@@ -306,6 +336,7 @@ export function parseGenericConnectionRequest(body: unknown, providerId: string)
     ...(body.enabled === undefined ? {} : { enabled: body.enabled }),
     ...(body.quotaTier === undefined ? {} : { quotaTier: parseQuotaTier(body.quotaTier) }),
     ...(body.modelPolicy === undefined ? {} : { modelPolicy: parseModelPolicy(body.modelPolicy) }),
+    ...(body.workspaceId === undefined ? {} : { workspaceId: parseWorkspaceId(body.workspaceId) }),
     ...(body.responsibility === undefined ? {} : { responsibility: parseResponsibility(body.responsibility) }),
     ...(body.resilience === undefined
       ? {}

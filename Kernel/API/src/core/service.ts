@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { executeLocalTool, localToolRootsFromEnv } from './local-tool-executor.js';
 import { readStateEventsSince } from './state-document.js';
+import type { AuditStore } from './audit.js';
 import { OWN_PROVIDER_ADAPTERS } from './own-provider-adapters.js';
 import { ApmixAdapter } from '@omnihilbras/sdk-apmix';
 import { BeatApiAdapter } from '@omnihilbras/sdk-beatapi';
@@ -288,6 +289,8 @@ export type GatewayServiceOptions = {
    * So: required here, supplied by the one factory that reads the environment.
    */
   config?: GatewayConfig;
+  /** Optional durable audit trail. Absent means the gateway records no management-write audit. */
+  auditStore?: AuditStore;
   /**
    * Where per-request records go. **Optional, and absent by default.**
    *
@@ -385,6 +388,7 @@ export class GatewayService {
   /** The fingerprints of the last 500 conversations, bounded so a long-lived gateway cannot grow forever. */
   private readonly smartStickyOrder: string[] = [];
   private readonly gatewayConfig: GatewayConfig | undefined;
+  private readonly auditStore?: AuditStore;
   private readonly tokenSaverConfig?: NonNullable<GatewayServiceOptions['tokenSaver']>;
   private readonly tokenSaverStore?: MemoryCcrStore;
   private readonly maxOutputTokensCap?: number;
@@ -620,6 +624,7 @@ export class GatewayService {
     this.providerNodeStore = options.providerNodes;
     this.skillStore = options.skills;
     this.gatewayConfig = options.config;
+    this.auditStore = options.auditStore;
     this.tokenSaverConfig = options.tokenSaver?.enabled ? options.tokenSaver : undefined;
     this.historyTrim = options.historyTrim && options.historyTrim.maxInputTokens > 0 ? options.historyTrim : undefined;
     // History trimming needs the retrieval store even when content compression is off: a trimmed turn
@@ -3223,6 +3228,14 @@ export class GatewayService {
     const dataDir = this.config()?.dataDir;
     if (!dataDir) return [];
     return readStateEventsSince(dataDir, afterSeq, limit);
+  }
+
+  async recordAudit(input: { actor: string; action: string; target: string; outcome: number; requestId?: string }) {
+    await this.auditStore?.record(input);
+  }
+
+  async listAudit(limit = 100) {
+    return this.auditStore?.list(limit) ?? [];
   }
 
   async stateFingerprint(): Promise<string> {

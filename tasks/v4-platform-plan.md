@@ -1,6 +1,6 @@
 # V4 platform plan
 
-**Goal:** [v4-goal.md](./v4-goal.md) · **Baseline:** `3.100.2` (2026-11-25) · **Status:** A complete (alpha.2), B seam complete (alpha.3), C started: owner/viewer keys enforced in `4.0.0-alpha.4`; workspace isolation and audit pending
+**Goal:** [v4-goal.md](./v4-goal.md) · **Baseline:** `3.100.2` (2026-11-25) · **Status:** A complete (alpha.2), B seam complete (alpha.3), C complete in `4.0.0-alpha.5` (roles, workspace scope on connections/keys, boundary audit); D next
 
 ## Why 4.0
 
@@ -54,7 +54,7 @@ Each phase ships as a prerelease with the normal ceremony (`verify` → version 
 
 **Exit criteria:** every store passes the contract suite on SQLite and JSON; upgrade/rollback tests pass; a killed process loses no committed write; `/v1/events` replays missed events.
 
-### Phase C — Identity and policy (`4.0.0-alpha.4`) — read-only role done; workspace/audit pending
+### Phase C — Identity and policy (`4.0.0-alpha.4`, `alpha.5`) — done
 
 - Add principals, roles (`owner`, `operator`, `viewer`) and scoped API keys. Scopes: `inference`, `manage`, `vault`, `read`.
 - Enforce workspace isolation on every route; `workspaceId` becomes an authorization claim.

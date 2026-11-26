@@ -15,10 +15,17 @@ import {
 } from '../core/http.js';
 
 export async function handleApiKeysRoute(ctx: RouteContext): Promise<boolean> {
-  const { request, response, url, service, origin, options } = ctx;
+  const { request, response, url, service, origin, options, auth } = ctx;
+  const scope = auth?.apiKey?.workspaceId;
+  const findScopedKey = async (id: string) => {
+    if (!scope) return undefined;
+    const listed = await service.listApiKeys();
+    return listed.keys.find((key) => key.id === id && key.workspaceId !== scope);
+  };
 
     if (request.method === 'GET' && url.pathname === '/v1/keys') {
-      sendJson(response, 200, { object: 'list', ...(await service.listApiKeys()) }, origin);
+      const listed = await service.listApiKeys();
+      sendJson(response, 200, { object: 'list', ...listed, keys: scope ? listed.keys.filter((key) => key.workspaceId === scope) : listed.keys }, origin);
       return true;
     }
 
@@ -28,8 +35,10 @@ export async function handleApiKeysRoute(ctx: RouteContext): Promise<boolean> {
       assertOnlyFields(body, ['name', 'workspaceId', 'role']);
       const name = parseBoundedString(body.name, 'name', 80);
       // A workspace scope is optional; validate its shape here so a malformed value never reaches the store.
-      const workspaceId = body.workspaceId === undefined ? undefined : parseBoundedString(body.workspaceId, 'workspaceId', 64);
-      if (workspaceId !== undefined && !/^[a-z0-9][a-z0-9._-]{0,63}$/i.test(workspaceId)) throw invalidRequest('workspaceId must be an identifier.');
+      const requestedWorkspace = body.workspaceId === undefined ? undefined : parseBoundedString(body.workspaceId, 'workspaceId', 64);
+      if (requestedWorkspace !== undefined && !/^[a-z0-9][a-z0-9._-]{0,63}$/i.test(requestedWorkspace)) throw invalidRequest('workspaceId must be an identifier.');
+      if (scope && requestedWorkspace !== undefined && requestedWorkspace !== scope) throw invalidRequest('This key cannot mint a key in another workspace.');
+      const workspaceId = scope ?? requestedWorkspace;
       const role = body.role === undefined ? 'owner' : body.role;
       if (role !== 'owner' && role !== 'viewer') throw invalidRequest('role must be owner or viewer.');
       const created = await service.createApiKey(name, workspaceId, role);
@@ -48,6 +57,10 @@ export async function handleApiKeysRoute(ctx: RouteContext): Promise<boolean> {
 
     if (request.method === 'PATCH' && url.pathname.startsWith('/v1/keys/')) {
       const apiKeyId = decodeApiKeyId(url.pathname.slice('/v1/keys/'.length));
+      if (await findScopedKey(apiKeyId)) {
+        sendJson(response, 404, { error: { code: 'NOT_FOUND', message: 'API key not found.' } }, origin);
+        return true;
+      }
       const body = await readJsonBody(request, Math.min(options.maxBodyBytes ?? maxConnectionBodyBytes, maxKeyBodyBytes));
       if (!isRecord(body)) throw invalidRequest('Request body must be a JSON object.');
       assertOnlyFields(body, ['enabled', 'name', 'rpm', 'expiresAt']);
@@ -85,6 +98,10 @@ export async function handleApiKeysRoute(ctx: RouteContext): Promise<boolean> {
 
     if (request.method === 'DELETE' && url.pathname.startsWith('/v1/keys/')) {
       const apiKeyId = decodeApiKeyId(url.pathname.slice('/v1/keys/'.length));
+      if (await findScopedKey(apiKeyId)) {
+        sendJson(response, 404, { error: { code: 'NOT_FOUND', message: 'API key not found.' } }, origin);
+        return true;
+      }
       await service.removeApiKey(apiKeyId);
       sendJson(response, 200, { deleted: true, id: apiKeyId }, origin);
       return true;

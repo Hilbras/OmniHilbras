@@ -53,10 +53,19 @@ tunnels, pool and node metadata) and is refused every management write plus the 
 (`/v1/keys`, `/v1/backup`, `/v1/oauth`, `/v1/mitm`, `/v1/settings`, `/v1/runtime`). A key written
 before roles existed loads as `owner`.
 
-`workspaceId` and `responsibility.owner` are still metadata, not tenancy principals. No route claims
-cross-workspace isolation yet: a viewer sees every connection the operator sees. A hosted multi-user
-deployment needs the workspace claim threaded through every store and route, and the audit trail that
-goes with it; this role split is the first enforceable boundary, not the whole model.
+**A key with a `workspaceId` is scoped to it.** The connection list is filtered, a connection in
+another workspace answers `404` rather than leaking its existence, a save is forced into the key's
+workspace (a body naming another one is `400`), and the key list only shows keys in that workspace.
+An unscoped key — every key written before this existed — keeps the operator-wide view. The scope is
+enforced on `connections` and `keys`; usage, logs and the remaining stores are still operator-wide, so
+`workspaceId` is a real boundary where it is applied and metadata elsewhere. `responsibility.owner`
+remains metadata.
+
+**Every authenticated management write is audited.** The HTTP boundary records actor (`key:<id>`,
+`dashboard` or `system`), method, path, outcome and request id after the response is produced. The
+record is content-free: no body, credential, prompt or connection record. `GET /v1/audit` is owner-only
+and bounded to the last 5,000 records; the trail is local and is not yet in the encrypted backup
+envelope.
 
 The one administrative boundary that is enforced is process ownership: a desktop or CLI credential is
 read only after the caller proves it owns the gateway process it is about to address.
@@ -118,15 +127,15 @@ that holds is one a machine re-derives.
 | `Kernel/API/src/core/circuit-breaker.ts` | 192 | **0** | per-connection closed → open → half-open; counts what it refused |
 | `Kernel/API/src/core/request-executor.ts` | 1049 | **0** | the failover loop, the attempt ledger, the ordering |
 | `Kernel/API/src/core/connection-manager.ts` | 383 | **0** | one error mapper, one catalog merge, one lock scope |
-| `Kernel/API/src/core/service.ts` | 5350 | 54 | every `.onDemand()` registration, in one constructor |
+| `Kernel/API/src/core/service.ts` | 5363 | 54 | every `.onDemand()` registration, in one constructor |
 | `Kernel/API/src/core/http.ts` | 359 | **0** | the vocabulary every route shares |
 | `Kernel/API/src/routes/oauth.ts` | 967 | 14 | the module a provider split would help most |
-| `Kernel/API/src/routes/connections.ts` | 410 | 1 | one OpenRouter save shortcut, the generic quota route, the build stamp, and the route that forgets an added model |
+| `Kernel/API/src/routes/connections.ts` | 441 | 1 | one OpenRouter save shortcut, the generic quota route, the build stamp, and the route that forgets an added model |
 | `Kernel/API/src/routes/inference.ts` | 1963 | **0** | `/v1/models`, `/v1/chat/completions`, `/v1/responses`, `/v1/messages` (Anthropic shape + SSE), the video path constants, and the auth gate |
-| `Kernel/API/src/routes/api-keys.ts` | 107 | **0** | the key list, the one mutable setting, and the PATCH that either pauses or renames — never both |
+| `Kernel/API/src/routes/api-keys.ts` | 124 | **0** | the key list, the one mutable setting, and the PATCH that either pauses or renames — never both |
 | `Kernel/API/src/routes/status.ts` | 220 | **0** | `/health`, `/`, `/v1/system`, `/v1/routing`, and the build stamp |
 | `Kernel/API/src/core/codexCallbackListener.ts` | 92 | **0** | the loopback socket a registered redirect points at |
-| `Kernel/API/src/server.ts` | 521 | **1** | refuses a half-configured Codex OAuth override at startup, dispatches the video surface, and gives every request the id its record will carry |
+| `Kernel/API/src/server.ts` | 539 | **1** | refuses a half-configured Codex OAuth override at startup, dispatches the video surface, and gives every request the id its record will carry |
 
 **The Core was far more provider-neutral than it looked.** The non-zero cells above are the entire
 provider-specific surface of the gateway core, and none of it is a scattered conditional — it is a

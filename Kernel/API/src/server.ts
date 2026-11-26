@@ -17,6 +17,7 @@ import { isBillableRoute } from './core/route-policy.js';
 import { handleVideoRoute } from './routes/video.js';
 import { handleOauthRoute } from './routes/oauth.js';
 import { handleStatusRoute } from './routes/status.js';
+import { handleAuditRoute } from './routes/audit.js';
 import { handleUsageRoute } from './routes/usage.js';
 import { handleLogsRoute } from './routes/logs.js';
 import { handleEventsRoute } from './routes/events.js';
@@ -120,6 +121,7 @@ const routes = [
   handleTokenSaverRoute,
   handleOauthRoute,
   handleApiKeysRoute,
+  handleAuditRoute,
   handleUsageRoute,
   handleLogsRoute,
   handleEventsRoute,
@@ -436,7 +438,7 @@ export async function startGatewayServer(options: {
  * were already reachable, because `authorize()` returns before it can refuse anything. What changed is that
  * a gateway *with* keys enforced now answers the navigation the same way a gateway without them does.
  */
-const MANAGEMENT_PREFIXES = ['/metrics', '/v1/connections', '/v1/keys', '/v1/oauth', '/v1/settings', '/v1/web-cookie', '/v1/routing', '/v1/usage', '/v1/providers', '/v1/logs', '/v1/events', '/v1/health', '/v1/system', '/v1/backup', '/v1/token-saver', '/v1/virtual-models', '/v1/skills', '/v1/workspaces', '/v1/tunnels', '/v1/mitm', '/v1/proxy-pools', '/v1/provider-nodes', '/v1/observability', '/v1/pxpipe', '/v1/locale', '/v1/audio/speech', '/v1/audio/transcriptions', '/v1/search', '/v1/runtime', '/v1/fetch', '/v1/translators', '/v1/systemone'] as const;
+const MANAGEMENT_PREFIXES = ['/metrics', '/v1/connections', '/v1/keys', '/v1/audit', '/v1/oauth', '/v1/settings', '/v1/web-cookie', '/v1/routing', '/v1/usage', '/v1/providers', '/v1/logs', '/v1/events', '/v1/health', '/v1/system', '/v1/backup', '/v1/token-saver', '/v1/virtual-models', '/v1/skills', '/v1/workspaces', '/v1/tunnels', '/v1/mitm', '/v1/proxy-pools', '/v1/provider-nodes', '/v1/observability', '/v1/pxpipe', '/v1/locale', '/v1/audio/speech', '/v1/audio/transcriptions', '/v1/search', '/v1/runtime', '/v1/fetch', '/v1/translators', '/v1/systemone'] as const;
 
 function isManagementPath(pathname: string) {
   return MANAGEMENT_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
@@ -466,6 +468,8 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
   };
   request.once('aborted', abort);
   response.once('close', onResponseClose);
+  const requestUrl = new URL(request.url ?? '/', 'http://localhost');
+  let requestAuth = auth;
 
   try {
     if (request.method === 'OPTIONS') {
@@ -474,30 +478,34 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       return;
     }
 
-    const ctx: RouteContext = {
-      request,
-      response,
-      url: new URL(request.url ?? '/', 'http://localhost'),
-      service,
-      options,
-      origin,
-      signal: controller.signal,
-      auth,
-    };
     // The management surface is gated here rather than in each handler, so a route added later cannot
     // forget it. `authorize()` returns immediately when enforcement is off, which is what keeps local
     // mode and every test that builds a gateway without a key store working unchanged.
-    if (isManagementPath(ctx.url.pathname) && !isTrustedDashboard(auth) && !isOauthCallbackNavigation(request)) {
+    if (isManagementPath(requestUrl.pathname) && !isTrustedDashboard(auth) && !isOauthCallbackNavigation(request)) {
       try {
         const principal = await service.authorizePublicRequest(extractApiKey(request));
-        if (principal?.role === 'viewer' && !viewerMayRead(request.method ?? 'GET', ctx.url.pathname)) {
+        if (principal?.role === 'viewer' && !viewerMayRead(request.method ?? 'GET', requestUrl.pathname)) {
           throw new ProviderError('FORBIDDEN', 'This API key is read-only.', { publicMessage: 'This API key is read-only.' });
         }
+        // The routes read `auth.apiKey.workspaceId` for scope; the gate is the one place that knows
+        // which key survived authentication.
+        if (principal) requestAuth = { ...auth, kind: 'api-key', apiKey: principal };
       } catch (error) {
         sendError(response, error, false);
         return;
       }
     }
+
+    const ctx: RouteContext = {
+      request,
+      response,
+      url: requestUrl,
+      service,
+      options,
+      origin,
+      signal: controller.signal,
+      auth: requestAuth,
+    };
 
     // Fast path for the LLM surface. The 23 handlers before `handleInferenceRoute` all decline these paths;
     // trying each one costs time that shows up at high concurrency (measured at 400 clients: p50 979 ms with
@@ -517,5 +525,15 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
   } finally {
     request.off('aborted', abort);
     response.off('close', onResponseClose);
+    if (isManagementPath(requestUrl.pathname) && request.method !== 'GET' && request.method !== 'HEAD' && !isOauthCallbackNavigation(request)) {
+      const actor = requestAuth.apiKey ? `key:${requestAuth.apiKey.id}` : requestAuth.kind === 'dashboard' ? 'dashboard' : 'system';
+      await service.recordAudit({
+        actor,
+        action: request.method ?? 'UNKNOWN',
+        target: requestUrl.pathname,
+        outcome: response.statusCode,
+        requestId: requestIdOf(request),
+      }).catch(() => undefined);
+    }
   }
 }
