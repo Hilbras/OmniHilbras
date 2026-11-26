@@ -14,12 +14,14 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Route as RouteIcon,
+  Search,
   Server,
   Settings2,
   Terminal,
   X,
 } from 'lucide-react';
 import { ThemeToggle } from './ThemeToggle';
+import { CommandPalette } from './CommandPalette';
 import { UpdateIndicator } from './UpdateIndicator';
 import { WindowControls } from './WindowControls';
 import { FailureNotifications } from './FailureNotifications';
@@ -143,7 +145,7 @@ function SidebarLink({ item, activePage, collapsed, onNavigate }: { item: Sideba
   );
 }
 
-function Sidebar({ onClose, activePage, collapsed, onToggleCollapse, status }: { onClose: () => void; activePage: DashboardPage; collapsed: boolean; onToggleCollapse: () => void; status: ReturnType<typeof useGatewayStatus> }) {
+function Sidebar({ onClose, onOpenSearch, activePage, collapsed, onToggleCollapse, status }: { onClose: () => void; onOpenSearch: () => void; activePage: DashboardPage; collapsed: boolean; onToggleCollapse: () => void; status: ReturnType<typeof useGatewayStatus> }) {
   /**
    * The badge is driven by a real probe, polled every few seconds.
    *
@@ -255,6 +257,17 @@ function Sidebar({ onClose, activePage, collapsed, onToggleCollapse, status }: {
       {/* Update, directly under the gateway badge: both are statements about this installation. */}
       <UpdateIndicator collapsed={collapsed} />
 
+      <button
+        type="button"
+        onClick={onOpenSearch}
+        aria-label="Search dashboard"
+        title={collapsed ? 'Search dashboard (Cmd/Ctrl+K)' : undefined}
+        className={`mx-3 mb-2 flex items-center gap-2 rounded-lg border border-line px-3 py-2 text-[12px] text-muted hover:border-gold/30 hover:bg-surface hover:text-text ${collapsed ? 'justify-center px-2' : ''}`}
+      >
+        <Search className="h-4 w-4 shrink-0" aria-hidden="true" />
+        {!collapsed && <><span className="flex-1 text-left">Search</span><kbd className="rounded border border-line-strong px-1 py-0.5 font-mono text-[9px]">⌘K</kbd></>}
+      </button>
+
       <nav className={`dashboard-scroll flex-1 overflow-y-auto ${collapsed ? 'px-2' : 'px-3'}`} aria-label="Dashboard navigation">
         {!collapsed && <p className="mono-label px-3 pb-2">Workspace</p>}
         {collapsed && <div className="h-5" aria-hidden="true" />}
@@ -303,6 +316,7 @@ export function DashboardShell({
   pageDescription?: string;
 }) {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(getInitialCollapsed);
   const mobileNavRef = useRef<HTMLDivElement>(null);
   const mobileOpenerRef = useRef<HTMLButtonElement>(null);
@@ -321,6 +335,17 @@ export function DashboardShell({
   const { reachable } = gatewayStatus;
   const gatewayUp = reachable !== false;
 
+
+  useEffect(() => {
+    const onShortcut = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setPaletteOpen((value) => !value);
+      }
+    };
+    window.addEventListener('keydown', onShortcut);
+    return () => window.removeEventListener('keydown', onShortcut);
+  }, []);
 
   useEffect(() => {
     try {
@@ -369,10 +394,15 @@ export function DashboardShell({
       <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-[70] focus:rounded-lg focus:bg-surface focus:px-3 focus:py-2 focus:text-xs focus:text-text">Skip to content</a>
       {/* App-wide announcement of failed requests; renders nothing itself. */}
       <FailureNotifications />
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        items={[...primaryItems, ...insightItems].map((item) => ({ label: item.label, to: item.to, hint: item.page }))}
+      />
       {mobileOpen && <button type="button" aria-label="Close dashboard navigation" onClick={() => setMobileOpen(false)} className="fixed inset-0 z-40 bg-black/45 backdrop-blur-[2px] lg:hidden" />}
 
       <div id="dashboard-mobile-nav" ref={mobileNavRef} className={`fixed inset-y-0 left-0 z-50 transition-transform duration-200 lg:translate-x-0 ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}`} aria-hidden={!mobileOpen && undefined}>
-        <Sidebar onClose={() => setMobileOpen(false)} activePage={activePage} collapsed={collapsed} onToggleCollapse={() => setCollapsed((value) => !value)} status={gatewayStatus} />
+        <Sidebar onClose={() => setMobileOpen(false)} onOpenSearch={() => setPaletteOpen(true)} activePage={activePage} collapsed={collapsed} onToggleCollapse={() => setCollapsed((value) => !value)} status={gatewayStatus} />
       </div>
 
       {/*

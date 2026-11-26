@@ -1,6 +1,6 @@
 # V4 platform plan
 
-**Goal:** [v4-goal.md](./v4-goal.md) · **Baseline:** `3.100.2` (2026-11-25) · **Status:** A complete (alpha.2), B seam complete (alpha.3), C complete (alpha.5), D contract+harness complete in `4.0.0-alpha.6`; provider manifests and E/F remain
+**Goal:** [v4-goal.md](./v4-goal.md) · **Baseline:** `3.100.2` (2026-11-25) · **Status:** A/B/C complete; D contract+harness (alpha.6); E started with the command palette in `4.0.0-alpha.7`; provider manifests and the wider E/F work remain
 
 ## Why 4.0
 
@@ -73,7 +73,7 @@ Each phase ships as a prerelease with the normal ceremony (`verify` → version 
 
 **Exit criteria:** adding a provider is an adapter + manifest with no Core edit; all providers pass the harness; the manifest is the only place a provider is described.
 
-### Phase E — V4 experience (`4.0.0-beta.2`)
+### Phase E — V4 experience (`4.0.0-alpha.7`) — command palette done; wider shell/analytics pending
 
 - App shell with grouped navigation (Operate / Observe / Configure), command palette, global search and status bar.
 - Event-driven pages; polling only as fallback. No page needs a 4-second timer to feel current.

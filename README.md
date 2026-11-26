@@ -24,7 +24,7 @@
   <a href="./CONTRIBUTING.md">Contributing</a>
 </p>
 
-**Current version: 4.0.0-alpha.6**
+**Current version: 4.0.0-alpha.7**
 
 OmniHilbras sits between your application and the model providers you already use. It gives every client one
 OpenAI-compatible endpoint, keeps credentials on your machine, and decides which saved connection serves each
@@ -388,6 +388,10 @@ One React Router app mounted at `/dashboard`; client-side navigation never reloa
 
 There is no Overview page: the earlier one had no data source and was removed rather than kept. `/dashboard`
 is the Servers page; unknown paths under it redirect to providers.
+
+**Cmd/Ctrl+K opens a command palette.** It lists the same destinations the sidebar renders, filters by
+label or path, and is a real listbox: arrow keys move, Enter opens, Escape closes and focus returns to
+the element that opened it. A destination that is not a route the router serves cannot appear in it.
 
 A static host must send every `/dashboard/*` request to `dashboard.html`. `public/_redirects` covers Netlify
 and Cloudflare Pages; the nginx equivalent is:
