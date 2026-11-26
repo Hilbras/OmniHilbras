@@ -1,6 +1,6 @@
 # V4 platform plan
 
-**Goal:** [v4-goal.md](./v4-goal.md) · **Baseline:** `3.100.2` (2026-11-25) · **Status:** A complete (alpha.2), B seam complete (alpha.3), C complete in `4.0.0-alpha.5` (roles, workspace scope on connections/keys, boundary audit); D next
+**Goal:** [v4-goal.md](./v4-goal.md) · **Baseline:** `3.100.2` (2026-11-25) · **Status:** A complete (alpha.2), B seam complete (alpha.3), C complete (alpha.5), D contract+harness complete in `4.0.0-alpha.6`; provider manifests and E/F remain
 
 ## Why 4.0
 
@@ -64,7 +64,7 @@ Each phase ships as a prerelease with the normal ceremony (`verify` → version 
 
 **Exit criteria:** a viewer key cannot read the vault; a workspace cannot see another workspace; every mutation is audited; old keys keep working; route guards cover all management prefixes.
 
-### Phase D — Provider lifecycle and manifests (`4.0.0-beta.1`)
+### Phase D — Provider lifecycle and manifests (`4.0.0-alpha.6`) — contract + harness done; manifests pending
 
 - `CredentialProvisioner` (`create` / `refresh` / `revoke` / `describe`) absorbs the hand-wired lifecycle branches.
 - A unified adapter contract harness covering transport, fetch and driver doubles; every provider is in the matrix.

@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { readdirSync } from 'node:fs';
-import { scriptedFetch } from './harness/scripted-fetch.js';
-import { scriptedTokenHarborFetch } from './harness/scripted-tokenharbor-fetch.js';
-import { scriptedDriver, chatGptWebFixtureCredential, CHATGPT_WEB_CONTRACT_MODEL, scriptedGeminiDriver, geminiWebFixtureCredential, GEMINI_WEB_CONTRACT_MODEL, scriptedDuckDuckGoDriver, DUCKDUCKGO_WEB_CONTRACT_MODEL } from './harness/scripted-driver.js';
+import { scriptedFetch } from './harness/index.js';
+import { scriptedTokenHarborFetch } from './harness/index.js';
+import { scriptedDriver, chatGptWebFixtureCredential, CHATGPT_WEB_CONTRACT_MODEL, scriptedGeminiDriver, geminiWebFixtureCredential, GEMINI_WEB_CONTRACT_MODEL, scriptedDuckDuckGoDriver, DUCKDUCKGO_WEB_CONTRACT_MODEL } from './harness/index.js';
 import test from 'node:test';
 import { runProviderContract, CONTRACT_TEXT } from './provider-contract.js';
-import { framesFor, scriptedTransport } from './harness/scripted-transport.js';
+import { framesFor, scriptedTransport } from './harness/index.js';
 import { OpenAIAdapter } from '../openai/dist/adapter/index.js';
 import { VengeticAdapter } from '../vengetic/dist/adapter/index.js';
 import { NvidiaAdapter } from '../nvidia/dist/adapter/index.js';

@@ -127,7 +127,7 @@ that holds is one a machine re-derives.
 | `Kernel/API/src/core/circuit-breaker.ts` | 192 | **0** | per-connection closed → open → half-open; counts what it refused |
 | `Kernel/API/src/core/request-executor.ts` | 1049 | **0** | the failover loop, the attempt ledger, the ordering |
 | `Kernel/API/src/core/connection-manager.ts` | 383 | **0** | one error mapper, one catalog merge, one lock scope |
-| `Kernel/API/src/core/service.ts` | 5363 | 54 | every `.onDemand()` registration, in one constructor |
+| `Kernel/API/src/core/service.ts` | 5367 | 54 | every `.onDemand()` registration, in one constructor |
 | `Kernel/API/src/core/http.ts` | 359 | **0** | the vocabulary every route shares |
 | `Kernel/API/src/routes/oauth.ts` | 967 | 14 | the module a provider split would help most |
 | `Kernel/API/src/routes/connections.ts` | 441 | 1 | one OpenRouter save shortcut, the generic quota route, the build stamp, and the route that forgets an added model |
@@ -196,11 +196,15 @@ creates, refreshes and revokes nothing. `revoke`, `onboard` and `provision` are 
 as evidence stops being evidence the moment it moves, and this one was left standing as though it had
 not.
 
-**That is the real gap, and it is one abstraction, not twelve refactors.** A contract offering
-`create` / `refresh` / `revoke` / `describe`, with the Core owning *when* to call it and the adapter
-owning *how*, would absorb every one of those hand-wired branches. It cannot be called
-`CredentialLifecycle`, because that name is taken by the pre-check above — `CredentialProvisioner` is
-the name available.
+**That gap now has its contract.** `CredentialProvisioner` (`refresh` / `revoke` / `describe`) is
+implemented by `AdapterCredentialProvisioner`, which delegates the *how* to the adapter's
+`renewCredential` and removes the secret through the connection store. The renewal pass calls the
+provisioner instead of branching on the adapter method, so a lifecycle provider can adopt the
+contract without teaching the Core another branch; `create` remains the sign-in routes, because
+creating a credential is a flow with a browser, not a method call. `CredentialLifecycle` keeps its
+separate job: the pre-check that avoids launching a browser to learn a token's written expiry.
+Provider manifests are the remaining D item: the catalogue card, capability table and registry are
+still three descriptions, and a generated manifest is the next step.
 
 ---
 
@@ -393,10 +397,11 @@ similar one cannot exercise the adapter at all. The `fetch` double is built from
 objects, because DeepSeek's reader streams `response.body` and refuses a body past 8 MB; the driver
 double has no HTTP request to intercept, so the driver interface *is* the seam.
 
-Every contract test needs a harness per style, so a single seam here would remove real cost. It is the
-largest piece of the refactor still outstanding — `resolveAdapter` is closed, since it now delegates to
-the resolver's registrations and the branches that named providers are gone — and it ranks above
-decomposing the service.
+There is now one import seam, `Kernel/SDK/tests/harness/index.js`, and the contract suite uses it. The
+three doubles remain because the three interfaces are genuinely different: a single double cannot
+implement a transport, a streaming `fetch` and a page driver without becoming the union of all three
+and losing the property that it implements the real interface. The seam removes the import cost; it
+does not pretend the styles are one.
 
 ### Decision, 2026-11-18: the two remaining seams are deferred
 

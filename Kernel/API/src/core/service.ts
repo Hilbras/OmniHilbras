@@ -74,6 +74,7 @@ import { completeSignIn, describeSignInFailure } from './sign-in-coordinator.js'
 import { assertPublicDestination } from './destination-check.js';
 import { CredentialManager } from './credential-manager.js';
 import { CredentialLifecycle } from './credential-lifecycle.js';
+import { AdapterCredentialProvisioner } from './credential-provisioner.js';
 import { CircuitBreaker, type BreakerConfig } from './circuit-breaker.js';
 import { localDeployment, type ConnectionSecretStore, type DeploymentConfig } from './runtime.js';
 import { RoutingEngine } from './routing-engine.js';
@@ -1031,9 +1032,12 @@ export class GatewayService {
          * refresh token leaves the stored one dead the moment it hands a new one out. An adapter may also write
          * through its own `onTokensRefreshed`; writing the same value twice is harmless, and losing it is not.
          */
-        if (typeof adapter.renewCredential === 'function') {
-          const renewed = await adapter.renewCredential(credential);
-          if (renewed) await this.connectionStore?.set(connection.id, renewed);
+        // The provisioner is the contract; today it delegates to the adapter's own renewal method.
+        // A lifecycle provider that implements the contract later changes this call, not the pass.
+        const provisioner = new AdapterCredentialProvisioner(adapter, this.secretStore);
+        const renewed = await provisioner.refresh(credential, context);
+        if (renewed) {
+          await this.connectionStore?.set(connection.id, renewed);
           return;
         }
         await adapter.validateCredential?.(credential, context);
