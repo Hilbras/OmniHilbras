@@ -74,6 +74,8 @@ import { SpendLedger } from './spend-ledger.js';
 import { evaluateBudget, type Budget } from './budgets.js';
 import { requestCostUsd } from './usage-pricing.js';
 import { estimatePromptTokens } from './token-estimate.js';
+import type { LocalGuardrailStore } from './guardrails.js';
+import { spanFromUsage, type OtelExporter } from './otel.js';
 import { TokenRenewal, classifyRenewalFailure } from './token-renewal.js';
 import { ProviderResolver } from './provider-resolver.js';
 import { completeSignIn, describeSignInFailure } from './sign-in-coordinator.js';
@@ -321,6 +323,10 @@ export type GatewayServiceOptions = {
    * nothing is the failure this field exists to prevent.
    */
   spendLedger?: SpendLedger;
+  /** Opt-in guardrail policy. Absent means no policy is evaluated. */
+  guardrails?: LocalGuardrailStore;
+  /** Opt-in OTLP exporter. Absent means no spans are exported. */
+  otel?: OtelExporter;
   /**
    * Optional request-detail store. **Off by default**: usage records deliberately hold no content,
    * and a detail store is a separate, opt-in trade of disk for diagnostics. See `request-details.ts`.
@@ -398,6 +404,8 @@ export class GatewayService {
   /** Absent means the gateway records nothing; see `GatewayServiceOptions.usageStore`. */
   private readonly usageStore?: UsageStore;
   private readonly spendLedger?: SpendLedger;
+  private readonly guardrailStore?: LocalGuardrailStore;
+  private readonly otelExporter?: OtelExporter;
   private readonly requestDetails?: RequestDetailStore;
   private readonly virtualModelStore?: VirtualModelStore;
   private readonly workspaceStore?: WorkspaceStore;
@@ -641,6 +649,8 @@ export class GatewayService {
   ) {
     this.deploymentConfig = deployment;
     this.spendLedger = options.spendLedger;
+    this.guardrailStore = options.guardrails;
+    this.otelExporter = options.otel;
     this.usageStore = options.usageStore ? this.publishingUsage(options.usageStore) : undefined;
     this.requestDetails = options.requestDetails;
     this.virtualModelStore = options.virtualModels;
@@ -5375,6 +5385,7 @@ export class GatewayService {
             for (const listener of listeners) {
               try { listener(record); } catch { /* a listener must not fail the request */ }
             }
+            service.otelExporter?.record(spanFromUsage(record) ?? { name: 'gen_ai.chat', traceId: record.requestId ?? '0'.repeat(32), startMs: Date.now() - record.latencyMs, endMs: Date.now(), attributes: { 'gen_ai.request.model': record.model, 'omnihilbras.outcome': record.outcome } });
             void service.settleSpend(record).catch(() => undefined);
             return record;
           };
@@ -5422,6 +5433,11 @@ export class GatewayService {
   /** The durable spend ledger, when this gateway was started with one. */
   get spend(): SpendLedger | undefined {
     return this.spendLedger;
+  }
+
+  /** The guardrail policy store, when this gateway was started with one. */
+  get guardrails(): LocalGuardrailStore | undefined {
+    return this.guardrailStore;
   }
 
   /**

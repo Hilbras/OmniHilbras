@@ -26,12 +26,13 @@ import { extractApiKey } from './inference.js';
 const PLUGINS_PATH = '/v1/mcp/plugins';
 const STREAM_PREFIX = '/v1/mcp/plugins/stream/';
 const MESSAGE_PREFIX = '/v1/mcp/plugins/message/';
+const APPROVAL_PREFIX = '/v1/mcp/plugins/approvals/';
 const REGISTRY_FILE = 'mcp-plugins.json';
 const MAX_TEXT_CHARS = 50_000;
 const TRUNCATED_SUFFIX = `\n… [truncated at ${MAX_TEXT_CHARS} characters by the gateway]`;
 const ID_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 
-type Plugin = { id: string; command: string; args: string[] };
+type Plugin = { id: string; command: string; args: string[]; tools?: { allow?: string[]; ask?: string[] } };
 type Bridge = {
   plugin: Plugin;
   child: ChildProcessWithoutNullStreams;
@@ -51,7 +52,7 @@ type JsonRpc = {
 const bridges = new Map<string, Bridge>();
 
 /** The registry is operator state, never request data. A missing or malformed file means no plugins. */
-function registeredPlugins(directory: string | undefined): Plugin[] {
+export function registeredPlugins(directory: string | undefined): Plugin[] {
   if (!directory) return [];
   let parsed: unknown;
   try {
@@ -73,7 +74,16 @@ function registeredPlugins(directory: string | undefined): Plugin[] {
     if (!ID_PATTERN.test(id) || !isAbsolute(command)) continue;
     const rawArgs = Array.isArray(candidate.args) ? candidate.args : [];
     if (rawArgs.length > 64 || !rawArgs.every((arg) => typeof arg === 'string' && arg.length <= 4096)) continue;
-    out.push({ id, command, args: rawArgs as string[] });
+    const rawTools = candidate.tools;
+    let tools: Plugin['tools'];
+    if (rawTools && typeof rawTools === 'object') {
+      const record = rawTools as Record<string, unknown>;
+      const list = (value: unknown) => Array.isArray(value) && value.every((entry) => typeof entry === 'string' && entry.length > 0 && entry.length <= 200) ? value as string[] : undefined;
+      const allow = list(record.allow);
+      const ask = list(record.ask);
+      if (allow || ask) tools = { ...(allow ? { allow } : {}), ...(ask ? { ask } : {}) };
+    }
+    out.push({ id, command, args: rawArgs as string[], ...(tools ? { tools } : {}) });
   }
   return out;
 }
@@ -84,7 +94,7 @@ function pluginFor(ctx: RouteContext, id: string): Plugin | undefined {
 }
 
 /** No text block, however chatty the plugin, may exceed the browser-facing cap. */
-function boundFrame(line: string): string | undefined {
+function boundFrame(line: string, plugin?: Plugin): string | undefined {
   let message: JsonRpc;
   try {
     message = JSON.parse(line) as JsonRpc;
@@ -106,7 +116,12 @@ function boundFrame(line: string): string | undefined {
     }
     // A shell tool is not part of this gateway's tool surface even if a plugin advertises one.
     if (Array.isArray(result.tools)) {
-      result.tools = result.tools.filter((tool) => !(tool && typeof tool === 'object' && (tool as { name?: unknown }).name === 'shell'));
+      result.tools = result.tools.filter((tool) => {
+        const name = tool && typeof tool === 'object' ? (tool as { name?: unknown }).name : undefined;
+        if (name === 'shell') return false;
+        if (plugin?.tools?.allow && typeof name === 'string' && !plugin.tools.allow.includes(name)) return false;
+        return true;
+      });
     }
   }
   return JSON.stringify(message);
@@ -151,7 +166,7 @@ function getOrSpawn(plugin: Plugin): Bridge {
       bridge.buffer = bridge.buffer.slice(newline + 1);
       newline = bridge.buffer.indexOf('\n');
       if (!line) continue;
-      const frame = boundFrame(line);
+      const frame = boundFrame(line, plugin);
       if (frame === undefined) continue;
       for (const sessionId of [...bridge.sessions]) {
         const session = sessions.get(sessionId);
@@ -177,12 +192,51 @@ export function activePluginBridges(): number {
   return bridges.size;
 }
 
+/**
+ * Short-lived, one-shot approvals for a tool a plugin marks `ask`.
+ *
+ * The token is minted by an operator call from the dashboard, bound to one plugin id, and consumed by
+ * the next call for that plugin — so an approval cannot silently cover a second invocation. It is
+ * held in memory: a restart forgets pending approvals, which is the safe direction.
+ */
+const approvals = new Map<string, Map<string, number>>();
+const approvalTtlMs = 5 * 60_000;
+
+export function mintPluginApproval(pluginId: string): { token: string; expiresAt: string } {
+  const token = randomUUID();
+  const expiresAt = Date.now() + approvalTtlMs;
+  const perPlugin = approvals.get(pluginId) ?? new Map<string, number>();
+  perPlugin.set(token, expiresAt);
+  approvals.set(pluginId, perPlugin);
+  return { token, expiresAt: new Date(expiresAt).toISOString() };
+}
+
+export function consumePluginApproval(pluginId: string, token: string | undefined): boolean {
+  if (!token) return false;
+  const perPlugin = approvals.get(pluginId);
+  const expiresAt = perPlugin?.get(token);
+  if (!perPlugin || expiresAt === undefined) return false;
+  perPlugin.delete(token);
+  if (expiresAt <= Date.now()) return false;
+  return true;
+}
+
+/** The tool name a `tools/call` names, or undefined for any other message. */
+function toolCallName(message: JsonRpc): string | undefined {
+  if (message.method !== 'tools/call') return undefined;
+  const params = message.params;
+  if (!params || typeof params !== 'object') return undefined;
+  const name = (params as { name?: unknown }).name;
+  return typeof name === 'string' ? name : undefined;
+}
+
 export async function handleMcpPluginsRoute(ctx: RouteContext): Promise<boolean> {
   const { request, response, url, service, options, signal } = ctx;
   const isList = url.pathname === PLUGINS_PATH;
   const isStream = url.pathname.startsWith(STREAM_PREFIX);
   const isMessage = url.pathname.startsWith(MESSAGE_PREFIX);
-  if (!isList && !isStream && !isMessage) return false;
+  const isApproval = url.pathname.startsWith(APPROVAL_PREFIX);
+  if (!isList && !isStream && !isMessage && !isApproval) return false;
 
   // The same two gates as /v1/mcp. An Origin from a browser must be one the gateway allows; a key
   // is required for every call that can spawn a process or read a plugin's output.
@@ -211,7 +265,9 @@ export async function handleMcpPluginsRoute(ctx: RouteContext): Promise<boolean>
     return true;
   }
 
-  const id = url.pathname.slice((isStream ? STREAM_PREFIX : MESSAGE_PREFIX).length).trim();
+  const id = isApproval
+    ? url.pathname.slice(APPROVAL_PREFIX.length).trim()
+    : url.pathname.slice((isStream ? STREAM_PREFIX : MESSAGE_PREFIX).length).trim();
   if (!ID_PATTERN.test(id)) {
     sendJson(response, 400, { error: { code: 'INVALID_REQUEST', message: 'Unknown plugin id.' } }, ctx.origin);
     return true;
@@ -220,6 +276,17 @@ export async function handleMcpPluginsRoute(ctx: RouteContext): Promise<boolean>
   const plugin = registeredPlugins(directory).find((entry) => entry.id === id);
   if (!plugin) {
     sendJson(response, 404, { error: { code: 'NOT_FOUND', message: `Plugin "${id}" is not registered by the operator.` } }, ctx.origin);
+    return true;
+  }
+
+  if (isApproval) {
+    if (request.method !== 'POST') {
+      response.setHeader('allow', 'POST');
+      sendJson(response, 405, { error: { code: 'METHOD_NOT_ALLOWED', message: 'An approval is minted with POST.' } }, ctx.origin);
+      return true;
+    }
+    const approval = mintPluginApproval(plugin.id);
+    sendJson(response, 201, { plugin: plugin.id, ttlSeconds: approvalTtlMs / 1000, ...approval }, ctx.origin);
     return true;
   }
 
@@ -278,6 +345,21 @@ export async function handleMcpPluginsRoute(ctx: RouteContext): Promise<boolean>
       error: { code: -32601, message: 'The tool "shell" is not available through the MCP plugin bridge.' },
     }, ctx.origin);
     return true;
+  }
+  const toolName = toolCallName(message);
+  if (toolName) {
+    if (plugin.tools?.allow && !plugin.tools.allow.includes(toolName)) {
+      sendJson(response, 403, { jsonrpc: '2.0', id: message.id ?? null, error: { code: -32004, message: `The tool "${toolName}" is not allowed for this plugin.` } }, ctx.origin);
+      return true;
+    }
+    if (plugin.tools?.ask?.includes(toolName)) {
+      const presented = request.headers['x-omnihilbras-approval'];
+      const token = Array.isArray(presented) ? presented[0] : presented;
+      if (!consumePluginApproval(plugin.id, token)) {
+        sendJson(response, 403, { jsonrpc: '2.0', id: message.id ?? null, error: { code: -32005, message: `The tool "${toolName}" needs an approval token from POST ${APPROVAL_PREFIX}${plugin.id}.` } }, ctx.origin);
+        return true;
+      }
+    }
   }
   const bridge = getOrSpawn(plugin);
   if (!bridge.child.stdin.writable) {

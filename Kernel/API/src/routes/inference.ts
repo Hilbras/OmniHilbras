@@ -8,6 +8,8 @@ import { requestIdOf } from '../core/http.js';
  */
 
 import { estimatePromptTokens, estimateTokens } from '../core/token-estimate.js';
+import { evaluateRequest, evaluateResponse } from '../core/guardrails.js';
+import { currentPrincipal } from '../core/principal.js';
 import { anthropicMessageId, anthropicMessagesToChat, anthropicUsage, chatToMessagesBody, translatorFor } from '../core/format-translation.js';
 import { ProviderError, canonicalizeUsage, isLoopbackHostname, isPrivateHostname, isProviderError, type ChatChunk, type ChatChunkAnnotation, type ChatChunkCodeInterpreterCall, type ChatChunkFileSearchCall, type ChatMessage, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type ImageRequest, type ImageResponse, type MessageContent, type Model, type ProviderId, type ToolCall, type ToolDefinition } from '../core/index.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -120,6 +122,49 @@ async function enforceBudget(
 }
 
 /**
+ * Evaluates a key's guardrail policy on the request half. Returns true when the response was sent.
+ *
+ * A dry-run adds a header and never refuses; a flag never refuses either. Only a rule whose action is
+ * `block` stops the request, and the refusal names the rule so an operator can find it.
+ */
+async function enforceGuardrails(
+  service: GatewayService,
+  response: ServerResponse,
+  origin: string | undefined,
+  input: { text: string; messages?: number; tools?: readonly string[]; maxOutputTokens?: number },
+): Promise<boolean> {
+  const store = service.guardrails;
+  if (!store) return false;
+  const policy = await store.get();
+  if (!policy.enabled) return false;
+  const decision = evaluateRequest(policy, { ...input, keyId: currentPrincipal()?.apiKeyId });
+  if (decision.findings.length > 0) {
+    response.setHeader('x-omnihilbras-guardrail', policy.dryRun ? 'dry-run' : 'triggered');
+    response.setHeader('x-omnihilbras-guardrail-rules', decision.findings.map((finding) => finding.ruleId).join(','));
+  }
+  if (!decision.blocked) return false;
+  sendJson(response, 422, {
+    error: {
+      code: 'GUARDRAIL_BLOCKED',
+      message: 'A guardrail rule refused this request.',
+      rules: decision.findings.filter((finding) => finding.action !== 'flag' && finding.action !== 'injection').map((finding) => ({ id: finding.ruleId, detail: finding.detail })),
+    },
+  }, origin);
+  return true;
+}
+
+/** Scans a completed answer; a redact rule returns replacement text, a block rule refuses. */
+async function guardResponse(service: GatewayService, response: ServerResponse, text: string): Promise<{ blocked: boolean; text?: string }> {
+  const store = service.guardrails;
+  if (!store) return { blocked: false };
+  const policy = await store.get();
+  if (!policy.enabled) return { blocked: false };
+  const decision = evaluateResponse(policy, text, currentPrincipal()?.apiKeyId);
+  if (decision.findings.length > 0) response.setHeader('x-omnihilbras-guardrail', policy.dryRun ? 'dry-run' : 'triggered');
+  return { blocked: decision.blocked, ...(decision.text === undefined ? {} : { text: decision.text }) };
+}
+
+/**
  * `POST /v1/embeddings`, in OpenAI's shape.
  *
  * Deliberately a sibling of `handleChat` and not a call into it: the two share the auth gate, the
@@ -135,6 +180,7 @@ export async function handleEmbeddings(request: IncomingMessage, response: Serve
   const explicitProviderId = getExplicitProviderId(request, body);
   const scope = service.startScope(embeddingRequest.model, explicitProviderId, undefined, requestIdOf(request));
   if (await enforceBudget(service, response, origin, { requestId: scope.id, model: embeddingRequest.model, route: request.url, inputTokens: estimateTokens(JSON.stringify(embeddingRequest.input ?? '')) })) return;
+  if (await enforceGuardrails(service, response, origin, { text: JSON.stringify(embeddingRequest.input ?? ''), maxOutputTokens: 0 })) return;
 
   const startedAt = Date.now();
   let responseBody: { response: EmbeddingResponse; attempts: GatewayFailoverAttempt[] };
@@ -209,6 +255,7 @@ export async function handleImages(request: IncomingMessage, response: ServerRes
   const explicitProviderId = getExplicitProviderId(request, body);
   const scope = service.startScope(imageRequest.model, explicitProviderId, undefined, requestIdOf(request));
   if (await enforceBudget(service, response, origin, { requestId: scope.id, model: imageRequest.model, route: request.url })) return;
+  if (await enforceGuardrails(service, response, origin, { text: String((imageRequest as { prompt?: unknown }).prompt ?? '') })) return;
 
   const startedAt = Date.now();
   let responseBody: { response: ImageResponse; attempts: GatewayFailoverAttempt[] };
@@ -352,6 +399,7 @@ export async function handleResponses(request: IncomingMessage, response: Server
   const explicitProviderId = getExplicitProviderId(request, body);
   const scope = service.startScope(chatRequest.model, explicitProviderId, tokenSaverEnabled(request), requestIdOf(request));
   if (await enforceBudget(service, response, origin, { requestId: scope.id, model: chatRequest.model, route: request.url, messages: chatRequest.messages, maxOutputTokens: chatRequest.maxOutputTokens })) return;
+  if (await enforceGuardrails(service, response, origin, { text: JSON.stringify(chatRequest.messages), messages: chatRequest.messages.length, tools: chatRequest.tools?.map((tool) => tool.name), ...(chatRequest.maxOutputTokens === undefined ? {} : { maxOutputTokens: chatRequest.maxOutputTokens }) })) return;
   if (chatRequest.stream) {
     await streamResponses({ response, service, origin, signal, scope, chatRequest, explicitProviderId });
     return;
@@ -605,6 +653,7 @@ export async function handleMessages(request: IncomingMessage, response: ServerR
   const explicitProviderId = getExplicitProviderId(request, body);
   const scope = service.startScope(chatRequest.model, explicitProviderId, tokenSaverEnabled(request), requestIdOf(request));
   if (await enforceBudget(service, response, origin, { requestId: scope.id, model: chatRequest.model, route: request.url, messages: chatRequest.messages, maxOutputTokens: chatRequest.maxOutputTokens })) return;
+  if (await enforceGuardrails(service, response, origin, { text: JSON.stringify(chatRequest.messages), messages: chatRequest.messages.length, tools: chatRequest.tools?.map((tool) => tool.name), ...(chatRequest.maxOutputTokens === undefined ? {} : { maxOutputTokens: chatRequest.maxOutputTokens }) })) return;
   const startedAt = Date.now();
   if (chatRequest.stream) {
     return await streamMessages({ response, service, origin, signal, scope, chatRequest, explicitProviderId });
@@ -1052,6 +1101,7 @@ export async function handleChat(request: IncomingMessage, response: ServerRespo
   // and an operator can find it.
   const scope = service.startScope(chatRequest.model, explicitProviderId, tokenSaverEnabled(request), requestIdOf(request));
   if (await enforceBudget(service, response, origin, { requestId: scope.id, model: chatRequest.model, route: request.url, messages: chatRequest.messages, maxOutputTokens: chatRequest.maxOutputTokens })) return;
+  if (await enforceGuardrails(service, response, origin, { text: JSON.stringify(chatRequest.messages), messages: chatRequest.messages.length, tools: chatRequest.tools?.map((tool) => tool.name), ...(chatRequest.maxOutputTokens === undefined ? {} : { maxOutputTokens: chatRequest.maxOutputTokens }) })) return;
 
   // A refusal is where the id matters most — it is the case where the user needs to quote
   // something — so the error is given the id on its way out rather than only on the success path.

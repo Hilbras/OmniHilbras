@@ -1,6 +1,6 @@
 # Spec: OmniHilbras Gateway and Provider SDK
 
-**Status:** Current — release 4.1.0
+**Status:** Current — release 4.2.0
 
 This document is the contract behind the gateway and its provider packages. It is intentionally more
 specific than the [README](../README.md): a route, an error code or a provider boundary written here is
@@ -382,6 +382,13 @@ The first local gateway exposes:
   fixtures and callers that name a file keep that file. JSON remains the default for the alpha line; the
   default flips after the migration has been exercised against every store. `GET /v1/events` accepts
   `Last-Event-ID` and replays the journal before resuming live notifications.
+  **Trace export (4.2.0):** `OMNIHILBRAS_OTEL_ENDPOINT` (an OTLP/HTTP JSON receiver, e.g.
+  `http://127.0.0.1:4318/v1/traces`) turns on spans for every finished request. `OMNIHILBRAS_OTEL_HEADERS`
+  is a JSON object of header values, `OMNIHILBRAS_OTEL_SERVICE_NAME` defaults to `omnihilbras`, and
+  `OMNIHILBRAS_OTEL_SAMPLE_RATE` is 0–1. Attributes are a pinned `gen_ai.*` subset plus
+  `omnihilbras.outcome`/`attempts`/key and workspace ids. **Prompts, messages and tool arguments are
+  never exported**; the exporter is hand-written (no dependency), bounded (512 spans) and fails open, so a
+  collector that is down never costs a request. A second pass also exposes `GET/PUT /v1/guardrails`.
 - `GET /v1/spend?scope=key|workspace&id=…&period=day|week|month|total` — what one key or workspace has spent
   from the durable spend ledger, and how much of its budget remains. `spend` carries `usd`, `usdMicros`,
   `tokens`, `requests`, `unpricedRequests` and `heldUsd` (in-flight reservations); `budget` and `status`
@@ -389,6 +396,17 @@ The first local gateway exposes:
   money is integer micro-USD, and a model with no published price increments `unpricedRequests` rather than
   contributing an invented dollar figure. Owner-only; a gateway started without a ledger answers `ledger: false`
   with a reason instead of zeros.
+- `POST /v1/mcp/plugins/approvals/:id` — mint a one-shot approval for a plugin tool that its registry
+  entry marks `ask`. The token is bound to that plugin, valid for five minutes, consumed by the next
+  `tools/call` carrying `x-omnihilbras-approval`, and held in memory (a restart forgets it). A plugin
+  entry may declare `tools.allow` and `tools.ask`; an allow list also filters `tools/list`, and a
+  denied tool is refused before it reaches the child's stdin.
+- `GET /v1/guardrails` / `PUT /v1/guardrails` — the guardrail policy, as data. Rules are `block`,
+  `flag`, `redact`, `limit`, `tool` and `injection`; `dryRun` reports findings and a
+  `x-omnihilbras-guardrail` header without refusing. A `block` refuses with `422 GUARDRAIL_BLOCKED`
+  and names the rule. Request rules run before dispatch; response rules scan a non-streaming answer.
+  **Streaming output cannot be unsent** — bytes already sent are not recalled, and the page says so.
+  A rule whose shape cannot be read is refused at `PUT` rather than silently dropped.
 - `PATCH /v1/keys/:id` — one intent per request, now also `tpm` (tokens per minute), `budget`
   (`{ usd?, tokens?, period }`, or `null` to clear), `allowedProviders`, `allowedModels` (globs) and
   `allowedRoutes`. A budget is checked before dispatch and settled from the usage record; a key over its

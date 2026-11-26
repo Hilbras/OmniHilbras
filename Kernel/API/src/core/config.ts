@@ -9,6 +9,8 @@ import { LocalApiKeyStore, type ApiKeyStore } from './api-keys.js';
 import { assertPublicDestination } from './destination-check.js';
 import { createUsageStore, type UsageBackend } from './usage-store-sqlite.js';
 import { SpendLedger } from './spend-ledger.js';
+import { LocalGuardrailStore } from './guardrails.js';
+import { OtelExporter, otelConfigFromEnv } from './otel.js';
 import { LocalVirtualModelStore } from './virtual-models.js';
 import { LocalSkillStore } from './skills.js';
 import { LocalWorkspaceStore } from './workspaces.js';
@@ -386,6 +388,8 @@ export function createGatewayService(config: GatewayConfig = loadGatewayConfig()
     // The ledger is a separate document on purpose: usage is bounded to the last thousand records,
     // and a monthly budget that read a rolling window would forget what was spent last week.
     spendLedger: new SpendLedger({ directory: config.dataDir, env }),
+    guardrails: new LocalGuardrailStore({ directory: config.dataDir, env }),
+    ...(otelConfigFromEnv(env) ? { otel: new OtelExporter(otelConfigFromEnv(env)!) } : {}),
     auditStore: new LocalAuditStore({ directory: config.dataDir }),
     jobStore: new LocalJobStore({ directory: config.dataDir }),
     // Opt-in: a request-detail file is a deliberate trade of disk for diagnostics, so the default
