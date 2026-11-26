@@ -260,6 +260,7 @@ export function statusForError(error: unknown) {  if (!isProviderError(error)) r
   if (error.code === 'NOT_SUPPORTED') return 501;
   if (error.code === 'NOT_FOUND') return 404;
   if (error.code === 'CONFLICT') return 409;
+  if (error.code === 'FORBIDDEN') return 403;
   if (error.code === 'RATE_LIMITED') return 429;
   if (error.code === 'PROVIDER_TIMEOUT') return 504;
   if (error.code === 'CANCELLED') return 499;

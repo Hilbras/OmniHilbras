@@ -435,3 +435,55 @@ test('paused and credential-less connections are excluded from routing and the c
   const listed = await (await fetch(`${baseUrl}/v1/models`, { headers: { authorization: `Bearer ${created.key}` } })).json();
   assert.deepEqual(listed.data.map((model) => model.id), ['fake-1', 'paid/never-imported'], 'a disabled connection falls back to live provider listing');
 });
+
+test('a key is an owner by default, and a viewer when asked', async (t) => {
+  const keys = new InMemoryApiKeyStore();
+  const owner = await keys.create('Owner');
+  const viewer = await keys.create('Viewer', undefined, 'viewer');
+  assert.equal(owner.record.role, 'owner');
+  assert.equal(viewer.record.role, 'viewer');
+
+  const directory = await mkdtemp(join(tmpdir(), 'omnihilbras-key-role-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const first = new LocalApiKeyStore({ directory });
+  await first.create('Persisted viewer', undefined, 'viewer');
+  await first.close();
+  const reopened = new LocalApiKeyStore({ directory });
+  const [record] = await reopened.list();
+  assert.equal(record?.role, 'viewer', 'the role survived a restart');
+  await reopened.close();
+
+  // A file written before roles existed has no field. It must open as an owner, not become unreadable.
+  const path = join(directory, 'api-keys.json');
+  const file = JSON.parse(await readFile(path, 'utf8'));
+  delete file.keys[0].role;
+  await writeFile(path, JSON.stringify(file), 'utf8');
+  const legacy = new LocalApiKeyStore({ directory });
+  const [migrated] = await legacy.list();
+  assert.equal(migrated?.role, 'owner', 'a pre-role key is the historical admin key');
+  await legacy.close();
+});
+
+test('a viewer may read the observation surface but not write or read the vault', async (t) => {
+  const apiKeys = new InMemoryApiKeyStore();
+  const viewer = await apiKeys.create('Viewer', undefined, 'viewer');
+  const owner = await apiKeys.create('Owner');
+  const { baseUrl } = await startServer(t, apiKeys);
+
+  const viewerGet = (path) => fetch(`${baseUrl}${path}`, { headers: { authorization: `Bearer ${viewer.key}` } });
+  const viewerPost = (path) => fetch(`${baseUrl}${path}`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${viewer.key}`, 'content-type': 'application/json' },
+    body: '{}',
+  });
+
+  assert.equal((await viewerGet('/v1/connections')).status, 200, 'a viewer may read connections');
+  assert.equal((await viewerGet('/v1/usage')).status, 200, 'a viewer may read usage');
+  assert.equal((await viewerPost('/v1/connections')).status, 403, 'a viewer may not save a connection');
+  assert.equal((await viewerGet('/v1/keys')).status, 403, 'a viewer may not read key prefixes');
+  assert.equal((await viewerGet('/v1/backup')).status, 403, 'a viewer may not read the encrypted vault');
+  assert.equal((await viewerGet('/v1/settings')).status, 403, 'a viewer may not read gateway policy');
+
+  const ownerGet = await fetch(`${baseUrl}/v1/keys`, { headers: { authorization: `Bearer ${owner.key}` } });
+  assert.equal(ownerGet.status, 200, 'an owner keeps the historical full access');
+});

@@ -1,6 +1,6 @@
 # Spec: OmniHilbras Gateway and Provider SDK
 
-**Status:** Current — release 4.0.0-alpha.3
+**Status:** Current — release 4.0.0-alpha.4
 
 This document is the contract behind the gateway and its provider packages. It is intentionally more
 specific than the [README](../README.md): a route, an error code or a provider boundary written here is
@@ -255,7 +255,7 @@ The first local gateway exposes:
   account row: **Delete** asks first, names the account, and says the credential cannot be
   recovered, because the switch beside it is the reversible action and a delete is not.
 - `GET /v1/keys` — gateway key metadata plus the enforcement flag; never returns a secret. Each key carries `requests` (how many calls it has authenticated) and `lastUsedAt`; the counter moves in memory on every call and reaches disk on the same throttle as `lastUsedAt`, so it is exact for the life of the process and may lag the file by one flush interval.
-- `POST /v1/keys` — mint a key; the response is the only time the secret is returned.
+- `POST /v1/keys` — mint a key; the response is the only time the secret is returned. The body takes `name`, optional `workspaceId` and optional `role`: `owner` (the historical admin key, the default) or `viewer` (read-only). A viewer may `GET` the observation surface — connections without credentials, providers, usage, logs, events, health, routing, observability, token-saver, virtual models, skills, workspaces, tunnels, pool and node metadata — and is refused with `403 FORBIDDEN` for every management write and for `GET /v1/keys`, `/v1/backup`, `/v1/oauth`, `/v1/mitm`, `/v1/settings` and `/v1/runtime`. A key written before roles existed loads as `owner`, so enforcement changes nothing for an existing install until a viewer is minted.
 - `PATCH /v1/keys/:id` — **exactly one of four intents per request**: `{"enabled": boolean}` pauses or resumes, `{"name": string}` renames (1–80 characters, trimmed), `{"rpm": number | null}` sets or clears a per-minute limit (1–100000), `{"expiresAt": ISO string | null}` sets or clears an expiry. A body carrying two is refused, because each answers a different question and "which one happened" must not depend on field order. A rename never touches the secret, its prefix or its hash, so a client already using the key keeps working; an unknown id is 404.
   Both limits are enforced at the **auth gate**, before routing: an expired key is `AUTHENTICATION_FAILED` naming the date (the fix is a new key), and a key over its rate is `RATE_LIMITED` with `retryable` (the fix is waiting). The counter is a sliding minute held in memory — exact per process, reset by a restart — because a disk write per request to enforce a limit measured in minutes is the worse trade.
 - `DELETE /v1/keys/:id` — revoke a key.

@@ -45,12 +45,18 @@ provider are separate accounts, not one account with aliases.
 
 ## Identity boundary
 
-This release remains **single-operator by contract**. A gateway API key is an admin credential: it
-can read and change the same local vault the dashboard can. `workspaceId` and `responsibility.owner`
-are metadata, not authorization principals, and no route claims tenant isolation. A hosted multi-user
-deployment needs scopes and a principal threaded through every route before it can safely expose the
-same stores; adding that half-way would make the fields look enforced while leaving cross-workspace
-access open.
+The deployment is still **single-operator by contract**, but a key now has a role. `owner` is the
+historical admin credential: it can read and change the local vault the dashboard can. `viewer` is
+read-only: it may read the observation surface (connections without credentials, providers, usage,
+logs, events, health, routing, observability, token-saver, virtual models, skills, workspaces,
+tunnels, pool and node metadata) and is refused every management write plus the sensitive reads
+(`/v1/keys`, `/v1/backup`, `/v1/oauth`, `/v1/mitm`, `/v1/settings`, `/v1/runtime`). A key written
+before roles existed loads as `owner`.
+
+`workspaceId` and `responsibility.owner` are still metadata, not tenancy principals. No route claims
+cross-workspace isolation yet: a viewer sees every connection the operator sees. A hosted multi-user
+deployment needs the workspace claim threaded through every store and route, and the audit trail that
+goes with it; this role split is the first enforceable boundary, not the whole model.
 
 The one administrative boundary that is enforced is process ownership: a desktop or CLI credential is
 read only after the caller proves it owns the gateway process it is about to address.
@@ -113,14 +119,14 @@ that holds is one a machine re-derives.
 | `Kernel/API/src/core/request-executor.ts` | 1049 | **0** | the failover loop, the attempt ledger, the ordering |
 | `Kernel/API/src/core/connection-manager.ts` | 383 | **0** | one error mapper, one catalog merge, one lock scope |
 | `Kernel/API/src/core/service.ts` | 5350 | 54 | every `.onDemand()` registration, in one constructor |
-| `Kernel/API/src/core/http.ts` | 358 | **0** | the vocabulary every route shares |
+| `Kernel/API/src/core/http.ts` | 359 | **0** | the vocabulary every route shares |
 | `Kernel/API/src/routes/oauth.ts` | 967 | 14 | the module a provider split would help most |
 | `Kernel/API/src/routes/connections.ts` | 410 | 1 | one OpenRouter save shortcut, the generic quota route, the build stamp, and the route that forgets an added model |
 | `Kernel/API/src/routes/inference.ts` | 1963 | **0** | `/v1/models`, `/v1/chat/completions`, `/v1/responses`, `/v1/messages` (Anthropic shape + SSE), the video path constants, and the auth gate |
-| `Kernel/API/src/routes/api-keys.ts` | 105 | **0** | the key list, the one mutable setting, and the PATCH that either pauses or renames — never both |
+| `Kernel/API/src/routes/api-keys.ts` | 107 | **0** | the key list, the one mutable setting, and the PATCH that either pauses or renames — never both |
 | `Kernel/API/src/routes/status.ts` | 220 | **0** | `/health`, `/`, `/v1/system`, `/v1/routing`, and the build stamp |
 | `Kernel/API/src/core/codexCallbackListener.ts` | 92 | **0** | the loopback socket a registered redirect points at |
-| `Kernel/API/src/server.ts` | 502 | **1** | refuses a half-configured Codex OAuth override at startup, dispatches the video surface, and gives every request the id its record will carry |
+| `Kernel/API/src/server.ts` | 521 | **1** | refuses a half-configured Codex OAuth override at startup, dispatches the video surface, and gives every request the id its record will carry |
 
 **The Core was far more provider-neutral than it looked.** The non-zero cells above are the entire
 provider-specific surface of the gateway core, and none of it is a scattered conditional — it is a

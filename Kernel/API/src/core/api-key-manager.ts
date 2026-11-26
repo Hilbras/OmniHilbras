@@ -95,10 +95,10 @@ export class ApiKeyManager {
     });
   }
 
-  create(name: string, workspaceId?: string) {
+  create(name: string, workspaceId?: string, role?: 'owner' | 'viewer') {
     // The secret is returned exactly once, here, and never re-readable. Anything that wanted to
     // show it twice would have to store it, which is the thing this design avoids.
-    return this.mutate(() => this.requireStore().create(name, workspaceId));
+    return this.mutate(() => this.requireStore().create(name, workspaceId, role));
   }
 
   async setEnabled(id: string, enabled: boolean) {
@@ -153,6 +153,7 @@ export class ApiKeyManager {
       throw new ProviderError('AUTHENTICATION_FAILED', invalidApiKeyMessage, { publicMessage: invalidApiKeyMessage });
     }
     this.enforceLimits(record);
+    return record;
   }
 
   /**

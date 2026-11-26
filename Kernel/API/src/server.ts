@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { createHash } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { canonicalLoopbackHost, isLoopbackHostname, loopbackBaseUrl } from './core/index.js';
+import { canonicalLoopbackHost, isLoopbackHostname, loopbackBaseUrl, ProviderError } from './core/index.js';
 import { assertLoopbackHost, createGatewayService, isContainerDeployment, loadGatewayConfig, type GatewayConfig } from './core/config.js';
 import { isCrossSiteRequest, isJsonRequest, isOauthCallbackNavigation, getRequestOrigin, requestIdOf, resolveCorsOrigins, resolveInferenceBodyBytes, sendError, sendJson, setCors } from './core/http.js';
 import { createDashboardToken, dashboardTokenHeader, publishDashboardToken, tokenMatches } from './core/dashboard-token.js';
@@ -442,6 +442,22 @@ function isManagementPath(pathname: string) {
   return MANAGEMENT_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
 }
 
+/**
+ * What a read-only key may read.
+ *
+ * The exclusion list is the point: `GET /v1/keys`, `/v1/backup`, `/v1/oauth`, `/v1/mitm` and `/v1/settings`
+ * are read methods that expose key prefixes, the encrypted vault, sign-in flows, the CA and gateway policy.
+ * A viewer gets the observation surfaces — connections without credentials, providers, usage, logs, events,
+ * health, routing, observability, token-saver, virtual models, skills, workspaces, tunnels and pool metadata —
+ * and nothing that can mint, export or change a credential.
+ */
+const VIEWER_READ_PREFIXES = ['/metrics', '/v1/connections', '/v1/providers', '/v1/usage', '/v1/logs', '/v1/events', '/v1/health', '/v1/system', '/v1/routing', '/v1/observability', '/v1/token-saver', '/v1/virtual-models', '/v1/skills', '/v1/workspaces', '/v1/tunnels', '/v1/proxy-pools', '/v1/provider-nodes', '/v1/translators', '/v1/locale'] as const;
+
+function viewerMayRead(method: string, pathname: string) {
+  if (method !== 'GET' && method !== 'HEAD') return false;
+  return VIEWER_READ_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+}
+
 async function handleRequest(request: IncomingMessage, response: ServerResponse, service: GatewayService, options: GatewayServerOptions, origin: string | undefined, auth: AuthContext) {
   const controller = new AbortController();
   const abort = () => controller.abort();
@@ -473,7 +489,10 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     // mode and every test that builds a gateway without a key store working unchanged.
     if (isManagementPath(ctx.url.pathname) && !isTrustedDashboard(auth) && !isOauthCallbackNavigation(request)) {
       try {
-        await service.authorizePublicRequest(extractApiKey(request));
+        const principal = await service.authorizePublicRequest(extractApiKey(request));
+        if (principal?.role === 'viewer' && !viewerMayRead(request.method ?? 'GET', ctx.url.pathname)) {
+          throw new ProviderError('FORBIDDEN', 'This API key is read-only.', { publicMessage: 'This API key is read-only.' });
+        }
       } catch (error) {
         sendError(response, error, false);
         return;

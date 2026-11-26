@@ -2,6 +2,9 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createStateDocument, type StateDocument } from './state-document.js';
 import { defaultStateDirectory } from './secure-store.js';
 
+/** What a key may do. `owner` is the historical admin key; `viewer` is read-only. */
+export type ApiKeyRole = 'owner' | 'viewer';
+
 /** Public metadata for a gateway key. The secret itself is never stored or returned again. */
 export type ApiKeyRecord = {
   id: string;
@@ -9,6 +12,8 @@ export type ApiKeyRecord = {
   /** Displayable leading characters, for example `ohk_a1b2c3d4`. */
   prefix: string;
   enabled: boolean;
+  /** Absent in files written before roles existed; those keys are owners. */
+  role: ApiKeyRole;
   createdAt: string;
   updatedAt: string;
   lastUsedAt?: string;
@@ -41,7 +46,7 @@ export type CreatedApiKey = {
 
 export interface ApiKeyStore {
   list(): Promise<ApiKeyRecord[]>;
-  create(name: string, workspaceId?: string): Promise<CreatedApiKey>;
+  create(name: string, workspaceId?: string, role?: ApiKeyRole): Promise<CreatedApiKey>;
   setEnabled(id: string, enabled: boolean): Promise<ApiKeyRecord | undefined>;
   /** Renames a key. `undefined` when no key has that id — the route answers 404 rather than inventing one. */
   rename(id: string, name: string): Promise<ApiKeyRecord | undefined>;
@@ -116,7 +121,7 @@ export class InMemoryApiKeyStore implements ApiKeyStore {
     return [...this.keys.values()].map((stored) => toRecord(stored)).sort((left, right) => left.createdAt.localeCompare(right.createdAt));
   }
 
-  async create(name: string, workspaceId?: string) {
+  async create(name: string, workspaceId?: string, role: ApiKeyRole = 'owner') {
     const normalizedName = normalizeName(name);
     if (this.keys.size >= maxKeys) throw new ApiKeyLimitError();
     const secret = `${keyPrefix}${randomBytes(keySecretBytes).toString('base64url')}`;
@@ -128,6 +133,7 @@ export class InMemoryApiKeyStore implements ApiKeyStore {
       prefix: secret.slice(0, keyPrefix.length + 8),
       keyHash: hashKey(secret),
       enabled: true,
+      role,
       createdAt: now,
       updatedAt: now,
       requests: 0,
@@ -248,7 +254,7 @@ export class LocalApiKeyStore implements ApiKeyStore {
     return [...this.keys.values()].map((stored) => toRecord(stored)).sort((left, right) => left.createdAt.localeCompare(right.createdAt));
   }
 
-  async create(name: string, workspaceId?: string) {
+  async create(name: string, workspaceId?: string, role: ApiKeyRole = 'owner') {
     return this.withMutation(async () => {
       const normalizedName = normalizeName(name);
       await this.ensureLoaded();
@@ -262,6 +268,7 @@ export class LocalApiKeyStore implements ApiKeyStore {
         prefix: secret.slice(0, keyPrefix.length + 8),
         keyHash: hashKey(secret),
         enabled: true,
+        role,
         createdAt: now,
         updatedAt: now,
         requests: 0,
@@ -523,6 +530,7 @@ function toRecord(stored: StoredApiKey): ApiKeyRecord {
     name: stored.name,
     prefix: stored.prefix,
     enabled: stored.enabled,
+    role: stored.role,
     createdAt: stored.createdAt,
     updatedAt: stored.updatedAt,
     requests: stored.requests ?? 0,
@@ -591,12 +599,14 @@ function parseStoredKey(value: unknown): StoredApiKey {
   if (value.rpm !== undefined && (!Number.isInteger(value.rpm) || (value.rpm as number) <= 0)) throw new Error('Local API key store contains an invalid key.');
   if (value.expiresAt !== undefined && (typeof value.expiresAt !== 'string' || Number.isNaN(Date.parse(value.expiresAt)))) throw new Error('Local API key store contains an invalid key.');
   if (value.workspaceId !== undefined && (typeof value.workspaceId !== 'string' || !/^[a-z0-9][a-z0-9._-]{0,63}$/i.test(value.workspaceId))) throw new Error('Local API key store contains an invalid key.');
+  if (value.role !== undefined && value.role !== 'owner' && value.role !== 'viewer') throw new Error('Local API key store contains an invalid key.');
   return {
     id: value.id,
     name: normalizeName(value.name),
     prefix: value.prefix,
     keyHash: value.keyHash,
     enabled: value.enabled,
+    role: value.role === 'viewer' ? 'viewer' : 'owner',
     createdAt: value.createdAt,
     updatedAt: value.updatedAt,
     requests: typeof value.requests === 'number' ? Math.floor(value.requests) : 0,

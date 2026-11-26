@@ -25,12 +25,14 @@ export async function handleApiKeysRoute(ctx: RouteContext): Promise<boolean> {
     if (request.method === 'POST' && url.pathname === '/v1/keys') {
       const body = await readJsonBody(request, Math.min(options.maxBodyBytes ?? maxConnectionBodyBytes, maxKeyBodyBytes));
       if (!isRecord(body)) throw invalidRequest('Request body must be a JSON object.');
-      assertOnlyFields(body, ['name', 'workspaceId']);
+      assertOnlyFields(body, ['name', 'workspaceId', 'role']);
       const name = parseBoundedString(body.name, 'name', 80);
       // A workspace scope is optional; validate its shape here so a malformed value never reaches the store.
       const workspaceId = body.workspaceId === undefined ? undefined : parseBoundedString(body.workspaceId, 'workspaceId', 64);
       if (workspaceId !== undefined && !/^[a-z0-9][a-z0-9._-]{0,63}$/i.test(workspaceId)) throw invalidRequest('workspaceId must be an identifier.');
-      const created = await service.createApiKey(name, workspaceId);
+      const role = body.role === undefined ? 'owner' : body.role;
+      if (role !== 'owner' && role !== 'viewer') throw invalidRequest('role must be owner or viewer.');
+      const created = await service.createApiKey(name, workspaceId, role);
       sendJson(response, 201, { apiKey: created.record, key: created.key }, origin);
       return true;
     }

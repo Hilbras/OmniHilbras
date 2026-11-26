@@ -3,6 +3,7 @@ export type ProviderErrorCode =
   | 'NOT_FOUND'
   | 'INVALID_REQUEST'
   | 'CONFLICT'
+  | 'FORBIDDEN'
   | 'AUTHENTICATION_FAILED'
   | 'RATE_LIMITED'
   | 'PROVIDER_REQUEST_FAILED'
@@ -76,6 +77,7 @@ export function publicProviderMessage(code: ProviderErrorCode) {
     case 'NOT_FOUND': return 'The requested resource was not found.';
     case 'INVALID_REQUEST': return 'The request is invalid.';
     case 'CONFLICT': return 'The request conflicts with an earlier one.';
+    case 'FORBIDDEN': return 'This credential may not perform that action.';
     case 'CONFIGURATION_ERROR': return 'The provider is not configured correctly.';
     case 'PROVIDER_REQUEST_FAILED':
     default: return 'The provider request failed.';
