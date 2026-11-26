@@ -1,6 +1,6 @@
 # V4 platform plan
 
-**Goal:** [v4-goal.md](./v4-goal.md) · **Baseline:** `3.100.2` (2026-11-25) · **Status:** A/B/C/D complete; E command palette shipped; F route contracts (alpha.9) and durable job history (alpha.10) done; wider E and 4.0.0 final remain
+**Goal:** [v4-goal.md](./v4-goal.md) · **Baseline:** `3.100.2` (2026-11-25) · **Status:** 4.0.0 final: A/B/C/D complete; E shell palette and existing event/analytics surfaces; F route contracts, job history and existing packaging. Known limits are in docs/MIGRATION-4.0.md
 
 ## Why 4.0
 

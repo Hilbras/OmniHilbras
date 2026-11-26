@@ -24,7 +24,7 @@
   <a href="./CONTRIBUTING.md">Contributing</a>
 </p>
 
-**Current version: 4.0.0-alpha.10**
+**Current version: 4.0.0**
 
 OmniHilbras sits between your application and the model providers you already use. It gives every client one
 OpenAI-compatible endpoint, keeps credentials on your machine, and decides which saved connection serves each
@@ -591,6 +591,7 @@ record the mutation that first proved them blind; keep that habit when adding on
 | [`docs/SPEC-SDK.md`](./docs/SPEC-SDK.md) | Gateway routes, provider contract, rejection shapes and success criteria |
 | [`docs/CLI.md`](./docs/CLI.md) | The `omnihilbras` verbs, their flags, the auth they use and the exit codes they return |
 | [`docs/INSTALL.md`](./docs/INSTALL.md) | Installing, the first-run check, and uninstalling every version on a machine |
+| [`docs/MIGRATION-4.0.md`](./docs/MIGRATION-4.0.md) | Upgrading to 4.0: automatic vault/key migration, opt-in state backend and identity features, and the known limits |
 | [`NPM-PUBLISH.md`](./NPM-PUBLISH.md) | What is published, how, and how to confirm it actually landed |
 | [`docs/architecture/README.md`](./docs/architecture/README.md) | Measured architecture, layer boundaries and provider-specific surface |
 | [`docs/architecture/embeddings-plan.md`](./docs/architecture/embeddings-plan.md) | Embeddings design and dispatch rules |
