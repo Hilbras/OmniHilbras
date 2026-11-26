@@ -83,6 +83,16 @@ file was already safe by `wx`: two first runs race, one creates it, the other re
 Usage counters are accumulated as deltas and folded in after the reload, so a concurrent save cannot
 discard a count that arrived while the flush was waiting.
 
+## Route contracts
+
+`Kernel/API/src/core/route-contracts.ts` is the dispatcher's path inventory: 97 concrete paths and 38
+prefixes, generated once from the route modules and served by `GET /v1/openapi` as an OpenAPI 3.1
+document. Each path carries `x-omnihilbras-served`; prefixes are repeated in
+`x-omnihilbras-prefixes`. This is discovery, not a typed schema: `tests/gateway-routes.test.js` parses
+the same source and fails if the list and the dispatcher disagree. `!==` comparisons are included in
+that parser because the early-return route shape (`if (url.pathname !== path) return false`) was a
+blind spot the OpenAPI check exposed.
+
 ## State engine
 
 Every local store now writes through one `StateDocument` seam. Its JSON shape is unchanged, so a vault, a
@@ -135,7 +145,7 @@ that holds is one a machine re-derives.
 | `Kernel/API/src/routes/api-keys.ts` | 124 | **0** | the key list, the one mutable setting, and the PATCH that either pauses or renames — never both |
 | `Kernel/API/src/routes/status.ts` | 220 | **0** | `/health`, `/`, `/v1/system`, `/v1/routing`, and the build stamp |
 | `Kernel/API/src/core/codexCallbackListener.ts` | 92 | **0** | the loopback socket a registered redirect points at |
-| `Kernel/API/src/server.ts` | 539 | **1** | refuses a half-configured Codex OAuth override at startup, dispatches the video surface, and gives every request the id its record will carry |
+| `Kernel/API/src/server.ts` | 541 | **1** | refuses a half-configured Codex OAuth override at startup, dispatches the video surface, and gives every request the id its record will carry |
 
 **The Core was far more provider-neutral than it looked.** The non-zero cells above are the entire
 provider-specific surface of the gateway core, and none of it is a scattered conditional — it is a

@@ -3,6 +3,7 @@ import test from 'node:test';
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { CONCRETE_ROUTE_PATHS, ROUTE_PREFIXES, openApiDocument } from '../Kernel/API/src/core/route-contracts.ts';
 
 /**
  * The rule that every gateway route is documented, made checkable.
@@ -98,7 +99,7 @@ function servedPaths() {
     // that had nothing to do with routing — 16 documented routes reported as unserved. The alternation
     // is explicit instead: the helper form repeats the subject it needs.
     const DISPATCH = new RegExp(
-      String.raw`url\.pathname\s*(?:===|\.endsWith\(|\.startsWith\()\s*(?:['"\`]([^'"\`]*)['"\`]|([A-Za-z_$][\w$]*))` +
+      String.raw`url\.pathname\s*(?:===|!==|\.endsWith\(|\.startsWith\()\s*(?:['"\`]([^'"\`]*)['"\`]|([A-Za-z_$][\w$]*))` +
         String.raw`|matches\s*\(\s*url\.pathname\s*,\s*(?:['"\`]([^'"\`]*)['"\`]|([A-Za-z_$][\w$]*))`,
       'g',
     );
@@ -237,4 +238,18 @@ test('THE COUNT, asserted so it cannot drift quietly', () => {
   assert.ok(paths.length >= 27, `expected the gateway's route table to be at least this large, found ${paths.length}`);
   assert.ok(documentedRoutes().length >= 20, 'the spec documents a substantial route table');
   console.log(`    routes served: ${paths.length}   documented: ${documentedRoutes().length}`);
+});
+
+
+test('the OpenAPI inventory is the dispatcher, not a hand-written second list', () => {
+  const served = servedPaths().paths
+    .filter((path) => path === '/' || path === '/health' || path === '/metrics' || path.startsWith('/v1/'))
+    .sort();
+  const concrete = served.filter((path) => !path.endsWith('/'));
+  const prefixes = served.filter((path) => path.endsWith('/'));
+  assert.deepEqual([...CONCRETE_ROUTE_PATHS].sort(), concrete, 'the OpenAPI concrete paths drifted from the dispatcher');
+  assert.deepEqual([...ROUTE_PREFIXES].sort(), prefixes, 'the OpenAPI prefixes drifted from the dispatcher');
+  const document = openApiDocument('test');
+  assert.equal(document.openapi, '3.1.0');
+  for (const path of served) assert.ok(document.paths[path], `${path} is served but missing from the OpenAPI document`);
 });
