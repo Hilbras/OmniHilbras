@@ -930,6 +930,7 @@ export class GatewayService {
     resolver = resolver.onDemand('mistral', own('mistral').factory, { validation: own('mistral').validation });
     resolver = resolver.onDemand('nara-router', own('nara-router').factory, { validation: own('nara-router').validation });
     resolver = resolver.onDemand('tokenharbor', own('tokenharbor').factory, { validation: own('tokenharbor').validation });
+    resolver = resolver.onDemand('tokenrouter', own('tokenrouter').factory, { validation: own('tokenrouter').validation });
     resolver = resolver.onDemand('apinex', own('apinex').factory, { validation: own('apinex').validation });
     resolver = resolver.onDemand('tiarina', own('tiarina').factory, { validation: own('tiarina').validation });
     resolver = resolver.onDemand('xkiro', own('xkiro').factory, { validation: own('xkiro').validation });

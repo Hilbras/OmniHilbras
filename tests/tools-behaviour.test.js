@@ -105,7 +105,7 @@ const FORCED_WIRE = {
   coarena: 'openai', custom: 'openai', deepseek: 'openai', groq: 'openai', grok: 'openai', kimi: 'openai',
   kiraai: 'openai', mistral: 'openai', 'mimo-free': 'openai', 'nara-router': 'openai', nvidia: 'openai', numes: 'openai',
   ollama: 'openai', qwen: 'openai', 'qwen-token-plan': 'openai', tiarina: 'openai', tokenharbor: 'openai',
-  unorouter: 'openai', vengetic: 'openai', xkiro: 'openai', zro: 'openai',
+  unorouter: 'openai', tokenrouter: 'openai', vengetic: 'openai', xkiro: 'openai', zro: 'openai',
 };
 
 test('every provider whose row claims forcing has a driven wire', async () => {

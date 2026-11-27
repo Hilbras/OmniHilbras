@@ -18,6 +18,7 @@ import { OllamaAdapter } from '@omnihilbras/sdk-ollama';
 import { MistralAdapter } from '@omnihilbras/sdk-mistral';
 import { NaraRouterAdapter } from '@omnihilbras/sdk-nara-router';
 import { TokenharborAdapter } from '@omnihilbras/sdk-tokenharbor';
+import { TokenrouterAdapter } from '@omnihilbras/sdk-tokenrouter';
 import { ApinexAdapter } from '@omnihilbras/sdk-apinex';
 import { TiarinaAdapter } from '@omnihilbras/sdk-tiarina';
 import { XkiroAdapter } from '@omnihilbras/sdk-xkiro';
@@ -92,6 +93,9 @@ export const OWN_PROVIDER_ADAPTERS: Readonly<Record<string, OwnAdapterEntry>> = 
   'mistral': { validation: 'none', create: (options) => new MistralAdapter(withTransport(options)) },
   'nara-router': { validation: 'none', create: (options) => new NaraRouterAdapter(withTransport(options)) },
   'tokenharbor': { validation: 'none', create: (options) => new TokenharborAdapter(withTransport(options)) },
+  // Its catalog refuses an unauthenticated read (401), so listing it with the candidate key is a
+  // real check rather than a public page that answers any string.
+  'tokenrouter': { validation: 'models', create: (options) => new TokenrouterAdapter(withTransport(options)) },
   'apinex': { validation: 'none', create: (options) => new ApinexAdapter(withTransport(options)) },
   'tiarina': { validation: 'none', create: (options) => new TiarinaAdapter(withTransport(options)) },
   'xkiro': { validation: 'none', create: (options) => new XkiroAdapter(withTransport(options)) },

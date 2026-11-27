@@ -1,6 +1,6 @@
 # Spec: OmniHilbras Gateway and Provider SDK
 
-**Status:** Current — release 4.6.2
+**Status:** Current — release 4.7.0
 
 This document is the contract behind the gateway and its provider packages. It is intentionally more
 specific than the [README](../README.md): a route, an error code or a provider boundary written here is
@@ -2855,6 +2855,7 @@ The endpoint is checked before the card is written, not after:
 | --- | --- | --- | --- |
 | NaraRouter | `https://router.bynara.id/v1` | `GET /v1/models` | `401 A valid API key is required.` |
 | TokenHarbor | `https://tokenharbor.ai/v1` | `GET /v1/models` | `401 Invalid or revoked API key. Rotate your key at …` |
+| TokenRouter | `https://api.tokenrouter.com/v1` | `GET /v1/models` | `401 {"error":{"message":"Unauthorized. (request id: …)","type":"api_error"}}` |
 | AgentRouter | `https://agentrouter.org/v1` | `GET /v1/models` | `401 unauthorized client detected, contact support for assistance` — a **client-identity gate, checked before the key**; see below |
 | Aion Labs | `https://api.aionlabs.ai/v1` | `GET /v1/models` | `200` with a public model list; chat still requires a bearer key |
 | 100milionseek | `https://100milionseek.top/v1` | `GET /v1/models` | `401` without a key; with a key, the one `deepseek-v4.1-flash-free` model |
@@ -2866,6 +2867,18 @@ The endpoint is checked before the card is written, not after:
 **Cycle 5 adds `glm`**, a paid Z.ai coding-plan API key on the plain OpenAI chat path. Its base URL is `https://api.z.ai/api/coding/paas/v4` and the shared adapter appends `/chat/completions`, so the key reaches `https://api.z.ai/api/coding/paas/v4/chat/completions` with a bearer header and no client identity. It has a placeholder-only card in `src/data/providers.ts`, a literal `resolver.onDemand` registration in `Kernel/API/src/core/service.ts`, an `openAiRouter` factory in `OWN_PROVIDER_ADAPTERS` with `validation: 'none'`, a forced-tools-allowed row in `Kernel/Tools/src/caps.ts`, a defect-register row, and a scripted transport test in `Kernel/SDK/tests/glm.test.js` that asserts the exact path and refuses a public-catalog key check. The card says the key is billed by Z.ai and is **not** the ZCode Start Plan subscription on the `zcode` card or a ZCode CLI OAuth grant. The reference registry's Claude-header transport, forged client identity and CLI sign-in are deliberately not ported, as are `cursor`, `gemini-cli`, `zed` and `commandcode`: they impersonate a client or are unverifiable here. (`mimo-free` was listed here in cycle 5 and is now served as the plain keyed router described below.) No model count, latency, request total, last-used time or model list is claimed, and no live request was made.
 
 **Cycle 6 adds `glm-cn`**, the mainland BigModel coding-plan key. Its reference registry entry is a plain `apikey` router on `https://open.bigmodel.cn/api/coding/paas/v4/chat/completions`; the gateway stores the base without `/chat/completions` because the shared adapter appends it. It has a placeholder-only card (`src/data/providers.ts`) whose text names both the Z.ai key (`glm`) and the ZCode Start Plan subscription (`zcode`) as different products, a literal `resolver.onDemand` registration in `Kernel/API/src/core/service.ts`, its own row in `Kernel/Tools/src/providerRegistry.ts`, an `openAiRouter` factory in `OWN_PROVIDER_ADAPTERS` with `validation: 'none'`, a forced-tools-allowed row in `Kernel/Tools/src/caps.ts`, a defect-register row, and a scripted transport test in `tests/provider-validation.test.js` that asserts the host, the exact `/api/coding/paas/v4/chat/completions` path, the forwarded model, the bearer header and the absence of Claude/CLI identity headers. The reference's usage-quota endpoint and model list are not copied: nothing here measures either, and the card claims no model count, latency, request total, last-used time or model list. `glm-cn` keeps its own vault entry — it is not an alias of `glm`'s Z.ai key — and no live request was made.
+
+**Cycle 8 adds `tokenrouter`**, a keyed OpenAI-compatible gateway with vendor-namespaced model ids
+(`anthropic/claude-sonnet-4.6`, `openai/gpt-5.4`, `google/gemini-3.6-flash`, …). Its base is
+`https://api.tokenrouter.com/v1`, the shared adapter appends `/chat/completions`, and the model prefix is
+`tkr/` because `tokenrouter/...` keeps the vendor namespace intact while `anthropic/...` alone would route
+to the Anthropic card. It has its own SDK package (`Kernel/SDK/tokenrouter`), a placeholder-only card with
+the committed mark, a literal `resolver.onDemand` registration, a forced-tools-allowed row, and a scripted
+transport test (`Kernel/SDK/tests/tokenrouter.test.js`) that asserts the host, the exact `/v1/chat/completions`
+path, the preserved namespaced model id, the bearer header and the forced tool choice. **`GET /v1/models`
+was measured unauthenticated and answered 401**, so `validation: 'models'` is an evidence-backed key check,
+not an assumption. Embeddings and image generation are enabled because the reference registry lists both
+service kinds; no model count, latency, request total, last-used time or model list is claimed.
 
 **Cycle 7 adds `mimo-free`**, Xiaomi MiMo Code Free, as a plain API-key OpenAI-compatible router. Its published endpoint is the chat path itself, `https://api.xiaomimimo.com/api/free-ai/openai/chat`, so the shared adapter is given that exact `chatPath` instead of appending `/chat/completions` to it; no model path was measured, so none is set and the card claims no model list. It has a placeholder-only card in `src/data/providers.ts` with no bundled mark (the `M` initial is the fallback), a literal `resolver.onDemand` registration in `Kernel/API/src/core/service.ts`, its own row in `Kernel/Tools/src/providerRegistry.ts`, an `openAiRouter` factory in `OWN_PROVIDER_ADAPTERS` with `validation: 'none'` declared beside it, a forced-tools-allowed row in `Kernel/Tools/src/caps.ts`, a defect-register row, and a scripted transport test in `Kernel/SDK/tests/mimo-free.test.js` that asserts the host, the exact chat path, the forwarded model and the bearer header. No browser impersonation, client-identity header, OAuth grant or fabricated key check is ported, and no live request was made.
 
@@ -3721,7 +3734,7 @@ measurement, and `Kernel/API/test/spec-success-criteria.mjs` fails if any stops 
       `build` script; every `Kernel/SDK/<provider>/package.json` declares no React dependency.
 - [x] The SDK exposes stable normalized types and a provider registry. — `ProviderRegistry` is exported,
       and the adapter contract suite runs against it.
-- [x] Core adapters are implemented: OpenAI, Anthropic, Gemini, and OpenAI-compatible, with a real OpenRouter adapter for authenticated connection management. — **70 files** in `Kernel/SDK/` — 56 provider folders, each with its own `adapter/index.ts` and only provider-specific `lib/` helpers, plus one shared `_shared` package for the canonical types, transport, OpenAI base, `errors`, `url`, `streaming`, `bounded-map` and `model-normalize`. The shared code is a dependency, not a copy: a provider is still removable without touching the rest, and a fix lands once. `openai-compatible` is no longer a provider: it was inlined into the four providers that extended it. The helpers (`deepseek-pow`, `zen-free-tier`, `responses-lane`, `responses-tools`, `qoder/constants`, `qoder/encoding`) and `qwen-web` are not protocol adapters, which is why the capture guard counts 55: it measures providers, this counts files.
+- [x] Core adapters are implemented: OpenAI, Anthropic, Gemini, and OpenAI-compatible, with a real OpenRouter adapter for authenticated connection management. — **71 files** in `Kernel/SDK/` — 57 provider folders, each with its own `adapter/index.ts` and only provider-specific `lib/` helpers, plus one shared `_shared` package for the canonical types, transport, OpenAI base, `errors`, `url`, `streaming`, `bounded-map` and `model-normalize`. The shared code is a dependency, not a copy: a provider is still removable without touching the rest, and a fix lands once. `openai-compatible` is no longer a provider: it was inlined into the four providers that extended it. The helpers (`deepseek-pow`, `zen-free-tier`, `responses-lane`, `responses-tools`, `qoder/constants`, `qoder/encoding`) and `qwen-web` are not protocol adapters, which is why the capture guard counts 56: it measures providers, this counts files.
 - [x] A provider with a different protocol can be added through a capability-specific adapter without
       modifying the gateway core. — **10 registrations in `service.ts`, 0 provider-id conditionals in
       `routing.ts` or `service.ts`.** Proved by 1.43.0, which added nine providers as catalog entries and

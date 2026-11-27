@@ -259,7 +259,8 @@ test('THE COUNT, asserted so it cannot drift quietly', () => {
   // 68 is cycle 5's `glm` keyed router — also metadata until a connection reports something.
   // 69 is cycle 6's `glm-cn`, its mainland sibling — metadata until its own connection reports something.
   // 70 is cycle 7's `mimo-free`, also metadata until its own connection reports something.
-  assert.equal(providerCatalog.length, 70, `the catalog now has ${providerCatalog.length} cards`);
+  // 71 adds TokenRouter, a keyed OpenAI-compatible gateway; still no measurement of its own here.
+  assert.equal(providerCatalog.length, 71, `the catalog now has ${providerCatalog.length} cards`);
   const connected = mergeGatewayConnections(providerCatalog, [connection()], health());
   assert.equal(connected.length, providerCatalog.length, 'a merge must not add or drop a card');
   console.log(`    cards: ${providerCatalog.length}   fields that may change on a merge: 5   that may not: 2`);

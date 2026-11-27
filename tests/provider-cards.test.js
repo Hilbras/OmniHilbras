@@ -345,7 +345,7 @@ test('THE COUNT, asserted so it cannot drift quietly', () => {
   // 70 from cycle 7: `mimo-free`, a plain API-key router whose published endpoint is the whole chat
   // path. No client impersonation, OAuth, model listing or measured card field came with it; it has a
   // caps row, an openAiRouter factory and a scripted transport test.
-  assert.equal(all.length, 70, `the catalog now has ${all.length} cards`);
+  assert.equal(all.length, 71, `the catalog now has ${all.length} cards`);
   // Eighteen cards claim OAuth and the gateway serves eighteen start routes. `clinepass` used to be
   // the odd one out when it shared Cline's connection; it has its own route now. `claude-code` and
   // `codex` sign in through `server.ts` routes this scan reads too.

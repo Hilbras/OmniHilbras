@@ -1,0 +1,19 @@
+{
+  "name": "@omnihilbras/sdk-tokenrouter",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/adapter/index.js",
+  "types": "./dist/adapter/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@omnihilbras/sdk-openai": "workspace:*",
+    "@omnihilbras/sdk-shared": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

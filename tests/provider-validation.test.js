@@ -35,10 +35,14 @@ test('a declared credential check has a real validator behind it', async () => {
 });
 
 test('an authenticated-catalog check needs an evidence entry, not an assumption', () => {
-  // No provider has a measured, authenticated-only catalog today. Adding one is fine, but it has to
-  // be a decision with a reason in this list — the NVIDIA lesson is that a public /models endpoint
-  // answers 200 for a bogus key and looks exactly like a successful check.
-  const withEvidence = new Set();
+  // Every provider with an authenticated-only catalog needs a reason here — the NVIDIA lesson is that
+  // a public /models endpoint answers 200 for a bogus key and looks exactly like a successful check.
+  const withEvidence = new Set([
+    // Measured 2026-11-27: `GET https://api.tokenrouter.com/v1/models` without a key answers
+    // `401 {"error":{"message":"Unauthorized. (request id: …)","type":"api_error"}}`, so listing the
+    // catalog with the candidate key is a real check instead of a page any string can fetch.
+    'tokenrouter',
+  ]);
   const undeclared = ids.filter((id) => service.providers.validationStrategy(id) === 'models' && !withEvidence.has(id));
   assert.deepEqual(undeclared, [], 'a catalog-only check without a measurement would accept any key');
 });

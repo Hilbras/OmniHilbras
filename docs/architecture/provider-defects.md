@@ -3,7 +3,7 @@
 **Generated file — do not edit by hand.** Regenerate with `node scripts/build-provider-defects.mjs`;
 `node scripts/build-provider-defects.mjs --check` fails when the committed file is stale.
 Source for the external half: `open-sse/providers/registry/*.js` in `/mnt/sda3/work/projects.old/9router`.
-Source for the OmniHilbras half: `src/data/providers.ts` (70 cards).
+Source for the OmniHilbras half: `src/data/providers.ts` (71 cards).
 
 | | Count |
 | --- | --- |

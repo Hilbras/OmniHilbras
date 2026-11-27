@@ -371,6 +371,7 @@ const NOT_YET_CONTRACTED = {
   'anyrouter': 'Its own package owns only the provider id and base URL; the completion path is the shared OpenAI-compatible wire the generic harness already covers, so a separate contract run would duplicate that one.',
   'zro': 'Its own package owns only the provider id and base URL; the completion path is the shared OpenAI-compatible wire the generic harness already covers, so a separate contract run would duplicate that one.',
   'unorouter': 'Its own package owns only the provider id and base URL; the completion path is the shared OpenAI-compatible wire the generic harness already covers, so a separate contract run would duplicate that one.',
+  'tokenrouter': 'Its own package owns the id and base URL; chat/streaming are the shared OpenAI-compatible wire the generic contract harness already drives, so a separate contract run would duplicate it',
   'ollama': 'Its own package owns only the provider id and base URL; the completion path is the shared OpenAI-compatible wire the generic harness already covers, so a separate contract run would duplicate that one.',
   'mistral': 'Its own package owns only the provider id and base URL; the completion path is the shared OpenAI-compatible wire the generic harness already covers, so a separate contract run would duplicate that one.',
   'nara-router': 'Its own package owns only the provider id and base URL; the completion path is the shared OpenAI-compatible wire the generic harness already covers, so a separate contract run would duplicate that one.',

@@ -26,9 +26,9 @@ const read = (path) => readFileSync(join(ROOT, path), 'utf8');
 const byId = new Map(PROVIDER_MANIFESTS.map((manifest) => [manifest.id, manifest]));
 
 test('the manifest covers every catalogue card, and only catalogue cards become cards', () => {
-  assert.equal(providerCatalog.length, 70, 'the catalogue count changed');
-  assert.equal(PROVIDER_MANIFESTS.length, 71, 'the manifest should hold 70 cards plus openai-compatible');
-  assert.equal(PROVIDER_MANIFESTS.filter((manifest) => manifest.catalog).length, 70);
+  assert.equal(providerCatalog.length, 71, 'the catalogue count changed');
+  assert.equal(PROVIDER_MANIFESTS.length, 72, 'the manifest should hold 71 cards plus openai-compatible');
+  assert.equal(PROVIDER_MANIFESTS.filter((manifest) => manifest.catalog).length, 71);
   for (const card of providerCatalog) {
     const manifest = byId.get(card.id);
     assert.ok(manifest, `${card.id} is a card with no manifest`);

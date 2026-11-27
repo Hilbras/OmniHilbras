@@ -16,6 +16,7 @@ export const providerLogoMap = {
   opencode: '/providers/opencode.png',
   nara: '/providers/bynara-logo-icon-light.svg',
   tokenharbor: '/providers/tokenharbor.svg',
+  tokenrouter: '/providers/tokenrouter.svg',
   xkiro: '/providers/xkiro-logo.svg',
   apmix: '/providers/apmix.png',
   apinex: '/providers/apinex.png',

@@ -74,6 +74,7 @@ export const PROVIDER_SLUGS: Readonly<Record<string, string>> = {
   openrouter: 'or',
   'nara-router': 'nr',
   tokenharbor: 'th',
+  tokenrouter: 'tkr',
   apmix: 'amx',
   apinex: 'apx',
   tiarina: 'tr',

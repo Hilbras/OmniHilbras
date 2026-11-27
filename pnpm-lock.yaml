@@ -419,6 +419,9 @@ importers:
       '@omnihilbras/sdk-tokenharbor-web':
         specifier: workspace:*
         version: link:../SDK/tokenharbor-web
+      '@omnihilbras/sdk-tokenrouter':
+        specifier: workspace:*
+        version: link:../SDK/tokenrouter
       '@omnihilbras/sdk-unorouter':
         specifier: workspace:*
         version: link:../SDK/unorouter
@@ -1015,6 +1018,19 @@ importers:
 
   Kernel/SDK/tokenharbor-web:
     dependencies:
+      '@omnihilbras/sdk-shared':
+        specifier: workspace:*
+        version: link:../_shared
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  Kernel/SDK/tokenrouter:
+    dependencies:
+      '@omnihilbras/sdk-openai':
+        specifier: workspace:*
+        version: link:../openai
       '@omnihilbras/sdk-shared':
         specifier: workspace:*
         version: link:../_shared
