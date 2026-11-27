@@ -1,5 +1,7 @@
 # Architecture
 
+Visual language: [design-system.md](../design-system.md).
+
 This describes **what is built**, measured against the tree. Aspirational architecture belongs in
 a roadmap; this file is a map of the current one, so that a change can be judged by whether it
 moves the code toward the principle below or away from it.

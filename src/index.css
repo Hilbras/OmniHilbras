@@ -8,20 +8,20 @@
   --surface: #ffffff;
   --surface-2: #f7f4ec;
   --text: #17150f;
-  --muted: #6f6857;
+  --muted: #5f584a;
   --line: #e7e1d1;
   --line-strong: #d8d0bb;
   --gold: #d4af37;
   --gold-bright: #e9c963;
-  --gold-text: #8a6d12;
+  --gold-text: #6f570c;
   --gold-ink: #ffffff;
   --gold-soft: rgba(212, 175, 55, 0.14);
   --glow: rgba(212, 175, 55, 0.35);
   /* The update notice's tone, taken from the reference card: a darker amber than the brand gold, so an
      update reads as a notice rather than as another gold accent. */
-  --warning: #b8860b;
+  --warning: #8a6508;
   --success: #177d47;
-  --danger: #c23b31;
+  --danger: #a52a20;
   --info: #5d98e8;
   --violet: #9b7bd1;
   --shadow: 0 1px 2px rgba(30, 25, 5, 0.05), 0 12px 40px rgba(30, 25, 5, 0.07);

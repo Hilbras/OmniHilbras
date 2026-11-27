@@ -1,8 +1,26 @@
 # V5 program plan — accountable spend, safe exposure, cheaper inference
 
-**Baseline:** `4.0.1` (2026-11-26) · **Status:** planned, not started · **Research:**
+**Baseline:** `4.0.1` (2026-11-26) · **Status:** executed — 4.1.0, 4.2.0, 4.3.0, 4.4.0, 4.5.0 released 2026-11-26/27 · **Research:**
 [improvement-research-2026-11-26.md](../docs/reports/improvement-research-2026-11-26.md) ·
 **Successor to:** [v4-platform-plan.md](./v4-platform-plan.md)
+
+## Execution record (2026-11-27)
+
+All five phases shipped, one release each, with the full ceremony. Three decisions changed on the
+way, recorded here rather than left to be discovered:
+
+1. **The cache serves direct service calls only.** `load.test.js` pins "a client request is never
+   deduplicated", so cache v2 keys the whole request and can persist, but no HTTP response is served
+   from it and there is no `x-cache` header. Reversing that would be a deliberate change to a load
+   invariant, not a cache tweak.
+2. **Rerank is a capability, not a heuristic.** It is served by a connection whose adapter declares
+   `rerank`; no catalogue provider declares it yet, so the route answers 501. A lexical fallback was
+   rejected: it would look like a model's answer.
+3. **The semantic layer is local and lexical.** It hashes token uni/trigrams, so it catches
+   near-duplicate phrasing, not synonyms. It is off by default and documented as such.
+
+Phase 4 also added an axe gate, which forced four light-theme tokens to be darkened to 4.5:1 and
+regenerated the keys visual baseline.
 
 ## Goal
 

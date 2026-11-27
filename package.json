@@ -1,7 +1,7 @@
 {
   "name": "omnihilbras-site",
   "private": true,
-  "version": "4.4.0",
+  "version": "4.5.0",
   "description": "Provider-neutral local gateway and desktop dashboard",
   "author": {
     "name": "Hilbras",
@@ -76,6 +76,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.14.1",
     "@capacitor/cli": "^8.6.0",
     "@playwright/test": "^1.65.0",
     "@tailwindcss/vite": "^4.3.3",
