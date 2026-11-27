@@ -125,8 +125,14 @@ try {
 
   const stopped = verb('stop');
   if (stopped.refused?.length) throw new Error(`stop refused its own pids: ${JSON.stringify(stopped.refused)}`);
-  // The launcher cascades a shutdown when its gateway exits; wait for it to finish.
-  await Promise.race([childClosed, new Promise((resolve) => setTimeout(resolve, 5000))]);
+  // The launcher cascades a shutdown when its gateway exits. A crash during that shutdown still ends
+  // the process, so the exit code and stderr are the evidence — a `ReferenceError` there used to pass
+  // this test while Ctrl-C would have printed a stack trace.
+  const exitCode = await Promise.race([childClosed, new Promise((resolve) => setTimeout(() => resolve('timeout'), 8000))]);
+  if (exitCode === 'timeout') throw new Error('the launcher did not exit after its children stopped');
+  if (exitCode !== 0) throw new Error(`the launcher exited ${exitCode}: ${output.slice(-2000)}`);
+  if (/ReferenceError|TypeError|is not defined/.test(output)) throw new Error(`the launcher shutdown crashed: ${output.slice(-2000)}`);
+  if (!/Stopped\./.test(output)) throw new Error(`the launcher did not report a clean stop: ${output.slice(-1000)}`);
   if (existsSync(path.join(state, 'omnihilbras', 'bundled.json'))) throw new Error('stop did not clear the run record');
   const after = verb('ps');
   if (after.running !== false) throw new Error(`ps after stop should report not running, got ${JSON.stringify(after)}`);

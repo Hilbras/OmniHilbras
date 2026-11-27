@@ -205,6 +205,7 @@ test('the launcher declares the run id it clears, and writes it into the record'
   assert.match(source, /let currentRunId;/, 'the launcher references a run id it never declares');
   assert.match(source, /currentRunId \?\?= randomUUID\(\)/, 'a run without an id cannot be cleared safely');
   assert.match(source, /runId: currentRunId/, 'the record does not carry the id used to clear it');
+  assert.match(source, /supervisorPid: process\.pid/, 'the record must name the supervisor, or stop leaves it respawning children');
   assert.match(source, /clearBundledRecordIf\(runId\)/, 'the clear helper is not called with an id');
   assert.match(source, /record\.runId === undefined\) clearBundledRecord\(\)/, 'a pre-runId record is never cleared');
 });

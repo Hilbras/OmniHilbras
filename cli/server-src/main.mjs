@@ -338,9 +338,9 @@ async function shutdown(code = 0) {
   spinner?.stop();
   menuAbort?.abort();
   killChildren();
-  await Promise.all(Object.values(children).map((child) => child?.pid ? waitGone(child.pid, 1500) : Promise.resolve(true)));
+  await Promise.all(Object.values(children).map((child) => child?.pid ? waitPidGone(child.pid, 1500) : Promise.resolve(true)));
   for (const child of Object.values(children)) {
-    if (child?.pid && alive(child.pid)) {
+    if (child?.pid && isPidAlive(child.pid)) {
       try { child.kill('SIGKILL'); } catch { /* gone */ }
     }
   }
@@ -411,6 +411,9 @@ async function start() {
     currentRunId ??= randomUUID();
     writePidFile({
     runId: currentRunId,
+    // The launcher itself, so `omnihilbras stop` can stop the supervisor before its children — otherwise
+    // the supervisor reads a deliberate stop as a crash and starts a replacement pair.
+    supervisorPid: process.pid,
     gatewayPid: children.gateway.pid,
     staticPid: children.dashboard.pid,
     dashboardPort: options.dashboardPort,
@@ -575,7 +578,7 @@ async function restart() {
   stopping = true;
   spinner?.stop();
   killChildren();
-  await Promise.all(Object.values(children).map((child) => child?.pid ? waitGone(child.pid, 1500) : Promise.resolve(true)));
+  await Promise.all(Object.values(children).map((child) => child?.pid ? waitPidGone(child.pid, 1500) : Promise.resolve(true)));
   clearPidFile();
   stopping = wasStopping;
   await start();
