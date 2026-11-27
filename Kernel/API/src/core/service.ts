@@ -84,6 +84,7 @@ import { TokenRenewal, classifyRenewalFailure } from './token-renewal.js';
 import { ProviderResolver } from './provider-resolver.js';
 import { completeSignIn, describeSignInFailure } from './sign-in-coordinator.js';
 import { assertPublicDestination } from './destination-check.js';
+import { providerHttpFetchFor, providerHttpStats as currentProviderHttpStats, type ProviderHttpStats } from './provider-http.js';
 import { CredentialManager } from './credential-manager.js';
 import { CredentialLifecycle } from './credential-lifecycle.js';
 import { AdapterCredentialProvisioner } from './credential-provisioner.js';
@@ -732,6 +733,9 @@ export class GatewayService {
         maxStreamDurationMs: options.config.maxStreamDurationMs,
       } : {}),
       checkDestination: assertPublicDestination,
+      // The gateway owns one connection pool, shared by every adapter on this transport. The SDK's
+      // own default stays fetch-based, because it is also bundled into a browser.
+      fetch: providerHttpFetchFor(),
     });
     const now = options.now ?? (() => Date.now());
     this.rateLimiter = new SlidingWindowRateLimiter(now);
@@ -5597,6 +5601,17 @@ export class GatewayService {
   /** Budget gate counters for `/metrics`. */
   budgetMetrics(): { checks: number; usdRefusals: number; tokenRefusals: number; policyRefusals: number } {
     return { ...this.budgetCounters };
+  }
+
+  /**
+   * Provider connection-pool counters for `/metrics`.
+   *
+   * `reused` is the number that says whether the pool is doing its job: a request that reused a socket
+   * paid no TCP or TLS handshake. The counters are process-lifetime and never reset by a request, which
+   * is what a counter is for.
+   */
+  providerHttpMetrics(): ProviderHttpStats {
+    return currentProviderHttpStats();
   }
 
   /** The guardrail policy store, when this gateway was started with one. */

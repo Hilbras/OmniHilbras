@@ -38,7 +38,14 @@ export async function handleMetricsRoute(context: RouteContext): Promise<boolean
   }
 
   const records = await service.usage?.list({ limit: Number.MAX_SAFE_INTEGER }) ?? [];
-  const body = renderPrometheusMetrics({ records, version: gatewayBuild().version, budget: service.budgetMetrics() });
+  const body = renderPrometheusMetrics({
+    records,
+    version: gatewayBuild().version,
+    budget: service.budgetMetrics(),
+    // The pool's own counters, so an operator can see whether connections are actually being reused.
+    // They are process-lifetime, like every counter here.
+    providerHttp: service.providerHttpMetrics(),
+  });
 
   if (origin) {
     response.setHeader('access-control-allow-origin', origin);

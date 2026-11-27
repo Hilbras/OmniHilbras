@@ -41,11 +41,16 @@ export type MetricsInput = {
   version: string;
   /** Budget-gate counters, when this gateway enforces budgets. Absent means the series are omitted. */
   budget?: { checks: number; usdRefusals: number; tokenRefusals: number; policyRefusals: number };
+  /**
+   * Provider connection-pool counters. Absent means the pool is disabled, and the series are omitted
+   * rather than reported as zeros a reader would take for "nothing was reused".
+   */
+  providerHttp?: { requests: number; connections: number; reused: number };
   /** Epoch milliseconds, so a test can render a deterministic document. */
   now?: number;
 };
 
-export function renderPrometheusMetrics({ records, version, budget, now = Date.now() }: MetricsInput): string {
+export function renderPrometheusMetrics({ records, version, budget, providerHttp, now = Date.now() }: MetricsInput): string {
   void now;
   const byProvider = new Map<string, ProviderTotals>();
   for (const record of records) {
@@ -78,6 +83,15 @@ export function renderPrometheusMetrics({ records, version, budget, now = Date.n
 
   help('omnihilbras_build_info', 'gauge', 'Always 1; the version is the label.');
   lines.push(`omnihilbras_build_info{version="${escapeLabel(version)}"} 1`);
+
+  if (providerHttp) {
+    help('omnihilbras_provider_http_requests_total', 'counter', 'Provider requests handed to the gateway connection pool.');
+    lines.push(`omnihilbras_provider_http_requests_total ${providerHttp.requests}`);
+    help('omnihilbras_provider_http_connections_total', 'counter', 'Provider requests that opened a new TCP connection.');
+    lines.push(`omnihilbras_provider_http_connections_total ${providerHttp.connections}`);
+    help('omnihilbras_provider_http_reused_total', 'counter', 'Provider requests that reused a pooled connection. High is the fast state: no handshake was paid.');
+    lines.push(`omnihilbras_provider_http_reused_total ${providerHttp.reused}`);
+  }
 
   if (budget) {
     help('omnihilbras_budget_checks_total', 'counter', 'Requests whose key carried a budget, and were therefore checked before dispatch.');

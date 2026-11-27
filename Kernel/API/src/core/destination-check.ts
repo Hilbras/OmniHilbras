@@ -104,10 +104,15 @@ export async function resolveForDestinationCheck(hostname: string, signal?: Abor
  *
  * ## The limit, stated rather than hidden
  *
- * The transport makes its own connection, which resolves the name again. A DNS server that answers with a
- * public address to this check and a private one to the connection wins that race. Closing it needs the
- * check to run on the connection's own lookup, which Node's global `fetch` does not expose. So this is a
- * narrowing, not a guarantee: it stops names that point at private addresses, not a deliberate rebinding.
+ * The transport makes its own connection, which would resolve the name again. A DNS server that answers
+ * with a public address to this check and a private one to the connection could win that race. Closing
+ * it needs the check to run on the connection's own lookup, which Node's global `fetch` does not expose.
+ *
+ * The gateway's provider pool (`provider-http.ts`) closes it: the judged addresses are cached with the
+ * verdict and handed to the connector's `lookup`, so the address dialled is the address judged and no
+ * second resolution happens. That covers every gateway provider request. The limit that remains is for
+ * the SDK used on its own (which has no Node connector) and for `OMNIHILBRAS_DNS_CACHE_TTL_MS=0`, where
+ * there is no cached address to hand over. `cachedDestinationAddresses` is the seam between the two.
  */
 export async function assertPublicDestination(hostname: string, signal?: AbortSignal): Promise<void> {
   signal?.throwIfAborted();
@@ -131,7 +136,13 @@ export async function assertPublicDestination(hostname: string, signal?: AbortSi
   const addresses = await raceAbort(work, signal);
   if (addresses.length === 0) throw new Error(`The host ${hostname} did not resolve.`);
   const isPrivate = addresses.some((address) => isPrivateHostname(address));
-  if (ttl > 0) destinationVerdicts.set(hostname, { verdict: isPrivate ? 'private' : 'public', expiresAt: Date.now() + ttl });
+  if (ttl > 0) destinationVerdicts.set(hostname, {
+    verdict: isPrivate ? 'private' : 'public',
+    // A public verdict carries the addresses it judged, so the connector can dial one of them instead
+    // of resolving the name again. A private verdict carries none: the request is refused first.
+    addresses: isPrivate ? [] : addresses,
+    expiresAt: Date.now() + ttl,
+  });
   if (isPrivate) throw new Error(`The host ${hostname} resolves to a private address.`);
 }
 
@@ -144,7 +155,7 @@ export async function assertPublicDestination(hostname: string, signal?: AbortSi
  * paid once rather than per request — without holding a stale verdict for the five minutes the
  * reference implementation uses.
  */
-function destinationCacheTtlMs(): number {
+export function destinationCacheTtlMs(): number {
   const raw = process.env.OMNIHILBRAS_DNS_CACHE_TTL_MS?.trim();
   if (raw === undefined || raw === '') return 60_000;
   const parsed = Number(raw);
@@ -152,8 +163,27 @@ function destinationCacheTtlMs(): number {
 }
 
 type DestinationVerdict = 'public' | 'private';
-const destinationVerdicts = new Map<string, { verdict: DestinationVerdict; expiresAt: number }>();
+type CachedDestination = { verdict: DestinationVerdict; addresses: string[]; expiresAt: number };
+const destinationVerdicts = new Map<string, CachedDestination>();
 const pendingResolutions = new Map<string, Promise<string[]>>();
+
+/**
+ * The public addresses a hostname was last judged on, or `undefined` when there is no fresh verdict.
+ *
+ * This is the connector's half of the check. `provider-http.ts` asks it first, so the address dialled is
+ * the address judged, and a second resolution — which a network like this one can stall for seconds —
+ * is not paid for every new connection. When the cache is disabled (`OMNIHILBRAS_DNS_CACHE_TTL_MS=0`),
+ * this returns nothing and the connector resolves for itself; that keeps the "re-check every request"
+ * switch honest.
+ *
+ * Exported rather than kept internal because it is the one fact that ties the security check to the
+ * socket, and a test should be able to assert the tie without watching a TLS handshake.
+ */
+export function cachedDestinationAddresses(hostname: string): string[] | undefined {
+  const cached = destinationVerdicts.get(hostname);
+  if (!cached || cached.expiresAt <= Date.now() || cached.verdict !== 'public') return undefined;
+  return cached.addresses.length > 0 ? [...cached.addresses] : undefined;
+}
 
 /** Exported for tests and for a caller that wants a re-check after a network change. */
 export function clearDestinationCache() {

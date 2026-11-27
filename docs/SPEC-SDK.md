@@ -1,6 +1,6 @@
 # Spec: OmniHilbras Gateway and Provider SDK
 
-**Status:** Current — release 4.7.0
+**Status:** Current — release 4.8.0
 
 This document is the contract behind the gateway and its provider packages. It is intentionally more
 specific than the [README](../README.md): a route, an error code or a provider boundary written here is
@@ -105,7 +105,7 @@ The core package exposes:
 - `ProviderCapabilities` to describe which operations a provider supports; unsupported operations return a typed `NOT_SUPPORTED` error.
 - `ProviderRegistry` for adapter lookup and capability checks without provider-specific conditionals in the gateway.
 - `ProviderError` with stable machine-readable codes and provider metadata.
-- `HttpTransport` for timeout, cancellation, JSON requests, and streamed responses. It is a trusted adapter transport, not an arbitrary tenant URL fetcher.
+- `HttpTransport` for timeout, cancellation, JSON requests, and streamed responses. It is a trusted adapter transport, not an arbitrary tenant URL fetcher. The gateway supplies its own connector (`Kernel/API/src/core/provider-http.ts`): two keep-alive agents shared by every adapter, a 90-second idle window, the destination check's judged address reused for the socket lookup, and transparent gzip/deflate/brotli decoding. The SDK's own default stays `fetch`-based, because the SDK is also bundled into a browser. `OMNIHILBRAS_PROVIDER_POOL=off` restores global `fetch` for the gateway; `OMNIHILBRAS_PROVIDER_KEEPALIVE_MS` changes the idle window.
 - `SecretStore` for credential lookup; adapters receive credentials only for the duration of a request.
 
 The normalized contract must be provider-neutral. Provider-specific options are namespaced under `providerOptions` and validated by the adapter that owns them; options that an adapter does not implement are rejected rather than silently discarded.
@@ -179,7 +179,9 @@ The first local gateway exposes:
   only for providers that actually reported tokens. A record no provider served is counted under
   `provider="unattributed"` rather than dropped, and a gateway with no usage store answers with only `up` and
   `build_info` instead of inventing zeros. Budget enforcement adds `omnihilbras_budget_checks_total` and
-  `omnihilbras_budget_refusals_total{kind="usd"|"tokens"|"policy"}`; a gateway with no budget store omits them. **A management path**, like `/v1/usage`: it names every provider the gateway
+  `omnihilbras_budget_refusals_total{kind="usd"|"tokens"|"policy"}`; a gateway with no budget store omits them. The
+  provider connection pool adds `omnihilbras_provider_http_requests_total`, `_connections_total` and `_reused_total`
+  (process-lifetime; a request that reused a socket paid no TCP/TLS handshake). **A management path**, like `/v1/usage`: it names every provider the gateway
   can reach and how it is failing, so it is refused with 401 without a credential.
 - `GET /` — what this port is. A browser is redirected (`302`, `no-store`) to the dashboard when the
   launcher that started this gateway supplied one (`OMNIHILBRAS_DASHBOARD_URL`); a gateway started alone
@@ -3569,9 +3571,11 @@ Behavior when serving a request:
   that was otherwise ready, and a health poll plus the request after it paid
   twice. The verdict is now cached for `OMNIHILBRAS_DNS_CACHE_TTL_MS` (default
   **60 s**; `0` disables it), and concurrent checks for the same host share one
-  lookup. The cache only skips the *re-check*; the transport still connects
-  however it resolves the name, which is why this stays the documented
-  narrowing rather than a guarantee.
+  lookup. The gateway's provider pool now caches the addresses with the verdict
+  and hands them to its connector's `lookup`, so the socket dials the address the
+  check judged rather than resolving the name again; the documented narrowing
+  remains for the SDK used without the gateway, and for a cache disabled with
+  `OMNIHILBRAS_DNS_CACHE_TTL_MS=0`.
 - **Identical requests already in flight are coalesced.** The response cache
   helps a request that arrives after the first one *finished*; a burst of
   identical requests all missed it and all reached the provider. Requests the

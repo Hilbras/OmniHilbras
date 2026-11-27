@@ -161,3 +161,18 @@ test('budget checks and refusals are series, and are omitted when budgets are no
   const without = renderPrometheusMetrics({ records: [], version: '4.6.0' });
   assert.doesNotMatch(without, /omnihilbras_budget_/);
 });
+
+test('connection-pool reuse is exposed, because the fast state is otherwise invisible', () => {
+  const text = renderPrometheusMetrics({
+    records: [],
+    version: '4.8.0',
+    providerHttp: { requests: 12, connections: 2, reused: 10 },
+  });
+  assert.match(text, /^omnihilbras_provider_http_requests_total 12$/m);
+  assert.match(text, /^omnihilbras_provider_http_connections_total 2$/m);
+  assert.match(text, /^omnihilbras_provider_http_reused_total 10$/m);
+
+  // Omitted rather than zero when the gateway was not given the pool: three zeros would read as
+  // "the pool ran and never reused anything", which is a different claim.
+  assert.doesNotMatch(renderPrometheusMetrics({ records: [], version: '4.8.0' }), /omnihilbras_provider_http_/);
+});

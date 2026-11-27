@@ -147,7 +147,8 @@ that holds is one a machine re-derives.
 | `Kernel/API/src/core/circuit-breaker.ts` | 192 | **0** | per-connection closed → open → half-open; counts what it refused |
 | `Kernel/API/src/core/request-executor.ts` | 1049 | **0** | the failover loop, the attempt ledger, the ordering |
 | `Kernel/API/src/core/connection-manager.ts` | 383 | **0** | one error mapper, one catalog merge, one lock scope |
-| `Kernel/API/src/core/service.ts` | 5821 | 55 | every `.onDemand()` registration, in one constructor |
+| `Kernel/API/src/core/service.ts` | 5836 | 55 | every `.onDemand()` registration, in one constructor |
+| `Kernel/API/src/core/provider-http.ts` | 420 | **0** | one agent per protocol, the judged address, decoded bodies |
 | `Kernel/API/src/core/http.ts` | 361 | **0** | the vocabulary every route shares |
 | `Kernel/API/src/routes/oauth.ts` | 967 | 14 | the module a provider split would help most |
 | `Kernel/API/src/routes/connections.ts` | 441 | 1 | one OpenRouter save shortcut, the generic quota route, the build stamp, and the route that forgets an added model |
@@ -241,6 +242,8 @@ Kernel/API/src/
   routes/            One module per resource: status, connections, oauth, api-keys, inference, usage.
   core/              The rest of the gateway: composition, policy, and the contract layer.
     http.ts          Read a request, write a response, turn a failure into an envelope.
+    provider-http.ts The provider connection pool: one agent per protocol, the destination check's
+                     judged address, and the decompression `fetch` used to do for us.
     service.ts       Composition root. Wires the managers below to its own effects.
     provider-resolver  Which adapter serves a provider id. Zero provider ids; a test enforces it.
     provider-client-identity  The client identity one provider's relay gates on — impersonation of another
@@ -299,6 +302,32 @@ A web-session credential is **an account, not a key**. It grants what the accoun
 expires unpredictably, and it is often a browser-only, undocumented protocol. Treating it like an
 API key is how a dashboard ends up claiming a connection works when a provider has since gated
 it — which is exactly what happened to Qwen, and why its card says what it measured.
+
+---
+
+## The provider socket
+
+Every provider request goes through `core/provider-http.ts`, which owns the connection instead of
+delegating to Node's global `fetch`. The reason is measured: undici's keep-alive window is four seconds,
+so a provider turn, a tool call and the next turn — the ordinary shape of an agent loop — paid a new
+TCP and TLS handshake on nearly every turn. Four requests spaced 5.5 s apart opened **four**
+connections through global `fetch` and **one** through the pool (2026-11-27).
+
+Two more properties follow from owning the connector:
+
+- **The address the destination check judged is the address dialled.** The check caches its verdict
+  with the addresses it resolved, and the connector's `lookup` reads that cache, so the second resolve
+  — the one a stalled system resolver could hold for seconds — does not happen. This also narrows the
+  DNS-rebinding gap the check used to document: the connection cannot be answered differently from the
+  check.
+- **Compression is decoded in the pool.** Raw `http` does not decompress, while `fetch` did, so gzip,
+  deflate and brotli are decoded there and their headers removed; the adapter sees the bytes it
+  always saw.
+
+`GET /metrics` exposes `omnihilbras_provider_http_reused_total` beside `_connections_total` and
+`_requests_total`, so "is the pool working" is a counter rather than a hope. `OMNIHILBRAS_PROVIDER_POOL=off`
+restores the global-fetch behavior for a network that rejects keep-alive; `OMNIHILBRAS_PROVIDER_KEEPALIVE_MS`
+sets the idle window (default 90 s).
 
 ---
 

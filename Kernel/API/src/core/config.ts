@@ -7,6 +7,7 @@ import { OpenAIAdapter } from '@omnihilbras/sdk-openai';
 import { OpenRouterAdapter } from '@omnihilbras/sdk-openrouter';
 import { LocalApiKeyStore, type ApiKeyStore } from './api-keys.js';
 import { assertPublicDestination } from './destination-check.js';
+import { providerHttpFetchFor } from './provider-http.js';
 import { createUsageStore, type UsageBackend } from './usage-store-sqlite.js';
 import { SpendLedger } from './spend-ledger.js';
 import { LocalGuardrailStore } from './guardrails.js';
@@ -315,7 +316,7 @@ export function loadGatewayConfig(env: Readonly<Record<string, string | undefine
   };
 }
 
-export function createProviderRegistry(config: GatewayConfig, transport = new FetchHttpTransport({ timeoutMs: config.timeoutMs, streamIdleTimeoutMs: config.streamIdleTimeoutMs, maxStreamDurationMs: config.maxStreamDurationMs, checkDestination: assertPublicDestination })) {
+export function createProviderRegistry(config: GatewayConfig, transport = new FetchHttpTransport({ timeoutMs: config.timeoutMs, streamIdleTimeoutMs: config.streamIdleTimeoutMs, maxStreamDurationMs: config.maxStreamDurationMs, checkDestination: assertPublicDestination, fetch: providerHttpFetchFor() })) {
   const registry = new ProviderRegistry();
   registry.register(new OpenAIAdapter({
     baseUrl: config.openai.baseUrl,
