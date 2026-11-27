@@ -661,10 +661,18 @@ export function isRetryableFailure(error: unknown) {
  * Splitting at the first slash alone would misread real model ids: most ids in the catalog already
  * contain one (`qwen/qwen3.8-27b:free`), and `qwen` is not a provider prefix there. So the prefix must
  * name a connected provider, and anything else is returned unchanged as a bare model id.
+ *
+ * ## A catalog id wins over the prefix reading
+ *
+ * NVIDIA publishes ids namespaced with its own name (`nvidia/nemotron-3.5-super-vl-120b-a12b`), and that
+ * first segment is also its provider id. Stripping it sent `nemotron-3.5-super-vl-120b-a12b` to NVIDIA,
+ * which answered `404 page not found`; the same model with the explicit `nv/` prefix worked in 541 ms.
+ * So if any connection's catalog lists the **whole** id, it is the model and not a prefix. The request is
+ * left intact and routing finds the connection that owns it.
  */
 export function splitProviderPrefix(
   model: string,
-  connections: readonly Pick<ConnectionRecord, 'providerId'>[],
+  connections: readonly (Pick<ConnectionRecord, 'providerId'> & { modelIds?: readonly string[] })[],
 ): { model: string; providerId?: string } {
   const trimmed = model.trim();
   const slash = trimmed.indexOf('/');
@@ -675,7 +683,10 @@ export function splitProviderPrefix(
   // The id, the current slug, or a slug this table used to publish — so a client that saved an id before
   // a rename still resolves. See `provider-slugs.ts`.
   const owner = connections.find((connection) => connection.providerId === prefix || providerPrefixes(connection.providerId).includes(prefix));
-  return owner ? { model: rest, providerId: owner.providerId } : { model: trimmed };
+  if (!owner) return { model: trimmed };
+  const whole = lookupModelId(trimmed);
+  const catalogued = connections.some((connection) => (connection.modelIds ?? []).some((id) => lookupModelId(id) === whole));
+  return catalogued ? { model: trimmed } : { model: rest, providerId: owner.providerId };
 }
 
 /**

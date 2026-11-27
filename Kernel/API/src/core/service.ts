@@ -65,7 +65,7 @@ import { KiroSessionStore, importKiroRefreshToken, pollKiroSignInWithClaim, star
 import { createChatGptWebDriver } from '../providers/chatgptWeb.js';
 import { createGeminiWebDriver } from '../providers/geminiWeb.js';
 import { createDuckDuckGoWebDriver } from '../providers/duckduckgoWeb.js';
-import { SlidingWindowRateLimiter, bareModelFor, modelCapacityCapabilities, noCandidateMessage, requiredCapabilitiesFromRequest, type CapacityAdapterConfig, type RouteCandidate, type RouteDecision } from './routing.js';
+import { SlidingWindowRateLimiter, bareModelFor, lookupModelId, modelCapacityCapabilities, noCandidateMessage, requiredCapabilitiesFromRequest, type CapacityAdapterConfig, type RouteCandidate, type RouteDecision } from './routing.js';
 import { HealthManager } from './health.js';
 import { ConnectionLatencyLedger } from './connection-latency.js';
 import { ResponseCache } from './response-cache.js';
@@ -1166,8 +1166,14 @@ export class GatewayService {
     if (!connectionId) return bare;
     const connection = (await this.connections.list()).find((entry) => entry.id === connectionId);
     if (!connection?.modelMeta) return bare;
+    // NVIDIA's own ids begin with `nvidia/`, which is also its provider id. Stripping that prefix sent
+    // `nemotron-3.5-super-vl-120b-a12b` upstream and got a 404; the catalog lists the whole id, so the
+    // catalog decides what the provider is called.
+    const whole = lookupModelId(resolved);
+    const catalogued = (connection.modelIds ?? []).some((id) => lookupModelId(id) === whole);
+    const wire = catalogued ? resolved : bare;
     const meta = connection.modelMeta[resolved] ?? connection.modelMeta[bare] ?? connection.modelMeta[requested];
-    return meta?.u ?? bare;
+    return meta?.u ?? wire;
   }
 
   /** Saves a model alias and makes it routable at once. */

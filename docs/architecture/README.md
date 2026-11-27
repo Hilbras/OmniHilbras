@@ -142,12 +142,12 @@ that holds is one a machine re-derives.
 
 | Surface | Lines | Provider ids named | Note |
 | --- | --- | --- | --- |
-| `Kernel/API/src/core/routing.ts` | 949 | **0** | provider-agnostic; `isRetryableFailure` judges an unreadable answer a provider fault |
+| `Kernel/API/src/core/routing.ts` | 960 | **0** | provider-agnostic; `isRetryableFailure` judges an unreadable answer a provider fault |
 | `Kernel/API/src/core/provider-resolver.ts` | 347 | 1 | enforced by a test that greps the file; the per-provider tables live in `provider-client-identity.ts` and `provider-responses-lane.ts` it reads |
 | `Kernel/API/src/core/circuit-breaker.ts` | 192 | **0** | per-connection closed → open → half-open; counts what it refused |
 | `Kernel/API/src/core/request-executor.ts` | 1049 | **0** | the failover loop, the attempt ledger, the ordering |
 | `Kernel/API/src/core/connection-manager.ts` | 383 | **0** | one error mapper, one catalog merge, one lock scope |
-| `Kernel/API/src/core/service.ts` | 5836 | 55 | every `.onDemand()` registration, in one constructor |
+| `Kernel/API/src/core/service.ts` | 5842 | 55 | every `.onDemand()` registration, in one constructor |
 | `Kernel/API/src/core/provider-http.ts` | 420 | **0** | one agent per protocol, the judged address, decoded bodies |
 | `Kernel/API/src/core/settings.ts` | 126 | **0** | the persistent settings file, read before `loadGatewayConfig` |
 | `Kernel/API/src/core/http.ts` | 361 | **0** | the vocabulary every route shares |
