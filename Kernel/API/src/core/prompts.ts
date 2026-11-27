@@ -122,6 +122,33 @@ export class LocalPromptStore {
   private persist() {
     return this.document.write(JSON.stringify({ version: 1, prompts: [...this.prompts.values()] }));
   }
+
+  /** The encrypted backup's section, in the store's own file shape. */
+  async exportState(): Promise<{ version: 1; prompts: Prompt[] }> {
+    await this.ensureLoaded();
+    return { version: 1, prompts: [...this.prompts.values()] };
+  }
+
+  /** Replaces every prompt. Validated through `parsePromptState`, the same reader the file uses. */
+  async importState(state: unknown): Promise<void> {
+    const parsed = parsePromptState(state);
+    this.prompts = new Map(parsed.prompts.map((prompt) => [prompt.id, prompt]));
+    await this.persist();
+  }
+}
+
+/** Validates a backup's prompt section strictly, so a restore cannot install a shape the file reader refuses. */
+export function parsePromptState(value: unknown): { version: 1; prompts: Prompt[] } {
+  if (typeof value !== 'object' || value === null) throw new Error('The backup\'s prompt section is not readable.');
+  const record = value as { version?: unknown; prompts?: unknown };
+  if (record.version !== 1 || !Array.isArray(record.prompts)) throw new Error('The backup\'s prompt section is not readable.');
+  const prompts: Prompt[] = [];
+  for (const candidate of record.prompts) {
+    if (!isPrompt(candidate)) throw new Error('The backup contains an unreadable prompt.');
+    prompts.push(candidate);
+  }
+  if (new Set(prompts.map((prompt) => prompt.id)).size !== prompts.length) throw new Error('The backup contains two prompts with the same id.');
+  return { version: 1, prompts };
 }
 
 function isPrompt(value: unknown): value is Prompt {

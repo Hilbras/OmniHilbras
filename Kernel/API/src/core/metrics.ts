@@ -39,11 +39,13 @@ function emptyTotals(): ProviderTotals {
 export type MetricsInput = {
   records: readonly UsageRecord[];
   version: string;
+  /** Budget-gate counters, when this gateway enforces budgets. Absent means the series are omitted. */
+  budget?: { checks: number; usdRefusals: number; tokenRefusals: number; policyRefusals: number };
   /** Epoch milliseconds, so a test can render a deterministic document. */
   now?: number;
 };
 
-export function renderPrometheusMetrics({ records, version, now = Date.now() }: MetricsInput): string {
+export function renderPrometheusMetrics({ records, version, budget, now = Date.now() }: MetricsInput): string {
   void now;
   const byProvider = new Map<string, ProviderTotals>();
   for (const record of records) {
@@ -76,6 +78,15 @@ export function renderPrometheusMetrics({ records, version, now = Date.now() }: 
 
   help('omnihilbras_build_info', 'gauge', 'Always 1; the version is the label.');
   lines.push(`omnihilbras_build_info{version="${escapeLabel(version)}"} 1`);
+
+  if (budget) {
+    help('omnihilbras_budget_checks_total', 'counter', 'Requests whose key carried a budget, and were therefore checked before dispatch.');
+    lines.push(`omnihilbras_budget_checks_total ${budget.checks}`);
+    help('omnihilbras_budget_refusals_total', 'counter', 'Requests refused by a budget, quota or key policy, by kind.');
+    lines.push(`omnihilbras_budget_refusals_total{kind="usd"} ${budget.usdRefusals}`);
+    lines.push(`omnihilbras_budget_refusals_total{kind="tokens"} ${budget.tokenRefusals}`);
+    lines.push(`omnihilbras_budget_refusals_total{kind="policy"} ${budget.policyRefusals}`);
+  }
 
   help('omnihilbras_requests_total', 'counter', 'Finished requests by provider and outcome, from the usage store.');
   const providers = [...byProvider.keys()].sort();

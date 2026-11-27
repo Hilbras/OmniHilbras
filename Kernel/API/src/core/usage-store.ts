@@ -157,6 +157,9 @@ export type UsageKeyTotals = {
   requests: number;
   inputTokens: number;
   outputTokens: number;
+  /** Filled by the route from the same prices the totals use; absent when nothing was priced. */
+  costUsd?: number;
+  unpricedRequests?: number;
 };
 
 /** Unattributed records — written before attribution existed — are their own row, never a zero. */

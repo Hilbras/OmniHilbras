@@ -22,6 +22,12 @@ way, recorded here rather than left to be discovered:
 Phase 4 also added an axe gate, which forced four light-theme tokens to be darkened to 4.5:1 and
 regenerated the keys visual baseline.
 
+**4.6.0 closed the follow-up gaps** found in the completion audit: the usage page's key filter, Key
+column and By-key cost panel; `omnihilbras_budget_checks_total` and
+`omnihilbras_budget_refusals_total`; `budget.threshold` webhooks at 80%/100%; and prompts in the
+encrypted backup. The prompts dashboard page and the axe gate over all seventeen pages landed in
+4.5.1.
+
 ## Goal
 
 Turn the capabilities the gateway market now treats as table stakes into local-first features that

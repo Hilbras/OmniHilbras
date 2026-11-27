@@ -78,7 +78,7 @@ import { evaluateBudget, type Budget } from './budgets.js';
 import { requestCostUsd } from './usage-pricing.js';
 import { estimatePromptTokens } from './token-estimate.js';
 import type { LocalGuardrailStore } from './guardrails.js';
-import type { LocalPromptStore } from './prompts.js';
+import { parsePromptState, type LocalPromptStore } from './prompts.js';
 import { spanFromUsage, type OtelExporter } from './otel.js';
 import { TokenRenewal, classifyRenewalFailure } from './token-renewal.js';
 import { ProviderResolver } from './provider-resolver.js';
@@ -431,6 +431,8 @@ export class GatewayService {
   private readonly batchControllers = new Map<string, AbortController>();
   /** Budget alerts already sent, so a refused request does not send one per retry. */
   private readonly budgetAlerts = new Set<string>();
+  /** Budget gate outcomes, for /metrics. Counters only; per-key labels would be unbounded. */
+  private readonly budgetCounters = { checks: 0, usdRefusals: 0, tokenRefusals: 0, policyRefusals: 0 };
   private readonly requestDetails?: RequestDetailStore;
   private readonly virtualModelStore?: VirtualModelStore;
   private readonly workspaceStore?: WorkspaceStore;
@@ -3550,6 +3552,7 @@ export class GatewayService {
       { name: 'proxyPools', store: this.proxyPoolStore, parse: parseProxyPoolState },
       { name: 'providerNodes', store: this.providerNodeStore, parse: parseProviderNodeState },
       { name: 'mitm', store: this.mitmStore, parse: parseMitmState },
+      { name: 'prompts', store: this.promptStore, parse: parsePromptState },
       // Last on purpose: a profile belongs to a connection that the connections section has already
       // installed, so this one writes sessions for the vault the import just put in place.
       { name: 'webProfiles', store: this.webProfileStore(), parse: parseWebProfilesState },
@@ -5590,6 +5593,11 @@ export class GatewayService {
     return this.spendLedger;
   }
 
+  /** Budget gate counters for `/metrics`. */
+  budgetMetrics(): { checks: number; usdRefusals: number; tokenRefusals: number; policyRefusals: number } {
+    return { ...this.budgetCounters };
+  }
+
   /** The guardrail policy store, when this gateway was started with one. */
   get guardrails(): LocalGuardrailStore | undefined {
     return this.guardrailStore;
@@ -5650,10 +5658,12 @@ export class GatewayService {
     if (principal?.actor === 'key') {
       const allowedModels = principal.allowedModels;
       if (allowedModels && allowedModels.length > 0 && !allowedModels.some((pattern) => globMatches(pattern, input.model))) {
+        this.budgetCounters.policyRefusals += 1;
         return { status: 403, code: 'POLICY_DENIED', message: `This key may not request ${input.model}.`, headers: {} };
       }
       const allowedRoutes = principal.allowedRoutes;
       if (input.route && allowedRoutes && allowedRoutes.length > 0 && !allowedRoutes.includes(input.route)) {
+        this.budgetCounters.policyRefusals += 1;
         return { status: 403, code: 'POLICY_DENIED', message: `This key may not call ${input.route}.`, headers: {} };
       }
     }
@@ -5664,6 +5674,7 @@ export class GatewayService {
       const estimate = input.inputTokens ?? estimatePromptTokens(Array.isArray(input.messages) ? input.messages : undefined) ?? 0;
       const wanted = estimate + (input.maxOutputTokens ?? this.maxOutputTokensCap ?? 4096);
       if (current.tokens > 0 && current.tokens + wanted > principal.tpm) {
+        this.budgetCounters.tokenRefusals += 1;
         return {
           status: 429,
           code: 'QUOTA_EXCEEDED',
@@ -5676,6 +5687,7 @@ export class GatewayService {
     }
     const policy = await this.requestBudget();
     if (!policy) return undefined;
+    this.budgetCounters.checks += 1;
     if (!this.spendLedger) {
       return {
         status: 402,
@@ -5693,6 +5705,8 @@ export class GatewayService {
     if (!status.allowed) {
       const resetSeconds = status.resetAt ? Math.max(1, Math.ceil((Date.parse(status.resetAt) - Date.now()) / 1000)) : undefined;
       if (resetSeconds) headers['retry-after'] = String(resetSeconds);
+      if (status.kind === 'usd') this.budgetCounters.usdRefusals += 1;
+      else this.budgetCounters.tokenRefusals += 1;
       return {
         status: status.kind === 'usd' ? 402 : 429,
         code: status.kind === 'usd' ? 'BUDGET_EXCEEDED' : 'QUOTA_EXCEEDED',
@@ -5738,6 +5752,50 @@ export class GatewayService {
     };
     if (apiKeyId) await ledger.record({ scope: 'key', id: apiKeyId, requestId: record.requestId, ...entry });
     if (workspaceId) await ledger.record({ scope: 'workspace', id: workspaceId, ...entry });
+    await this.checkBudgetThresholds(record);
+  }
+
+  /**
+   * Emits `budget.threshold` once per scope, period and threshold when spend crosses 80% or 100%.
+   *
+   * The dedupe key includes the period's reset date, so a new day can alert again while a hundred
+   * requests in the same minute produce one notification. Failure to deliver is never allowed to
+   * affect the request that caused it; `deliverWebhook` already swallows.
+   */
+  private async checkBudgetThresholds(record: UsageRecord): Promise<void> {
+    if (!this.webhookDispatcher || !this.spendLedger) return;
+    let budget: Budget | undefined;
+    let scope: 'key' | 'workspace' = 'key';
+    let id: string | undefined;
+    if (record.apiKeyId) {
+      const key = (await this.listApiKeys()).keys.find((candidate) => candidate.id === record.apiKeyId);
+      if (key?.budget) { budget = key.budget; id = key.id; }
+    }
+    if (!budget && record.workspaceId) {
+      const workspace = await this.workspaceStore?.get(record.workspaceId);
+      if (workspace?.budget) { budget = workspace.budget; scope = 'workspace'; id = workspace.id; }
+    }
+    if (!budget || !id) return;
+    const snapshot = await this.spendLedger.snapshot(scope, id, budget.period);
+    const ratio = budget.usd !== undefined
+      ? snapshot.usdMicros / Math.max(1, Math.round(budget.usd * 1_000_000))
+      : budget.tokens !== undefined
+        ? snapshot.tokens / Math.max(1, budget.tokens)
+        : 0;
+    const reset = budget.period === 'total' ? 'total' : new Date().toISOString().slice(0, 10);
+    for (const threshold of [0.8, 1] as const) {
+      if (ratio < threshold) continue;
+      const key = `${scope}:${id}:${budget.period}:${reset}:${threshold}`;
+      if (this.budgetAlerts.has(key)) continue;
+      this.budgetAlerts.add(key);
+      void this.deliverWebhook('budget.threshold', {
+        scope, id, period: budget.period, threshold,
+        spentUsd: snapshot.usdMicros / 1_000_000,
+        spentTokens: snapshot.tokens,
+        limitUsd: budget.usd,
+        limitTokens: budget.tokens,
+      });
+    }
   }
 
   private requireAdapter(providerId: string): ProviderAdapter {

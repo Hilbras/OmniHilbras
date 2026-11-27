@@ -109,3 +109,24 @@ test('an old record without attribution reads as unattributed rather than as zer
   assert.equal(summary.records[0].actor, undefined);
   assert.equal(summary.byKey?.[0]?.apiKeyId, 'unattributed');
 });
+
+test('the usage route returns spend per key from the same records as the totals', async (t) => {
+  const registry = new ProviderRegistry().register(provider());
+  const store = new InMemoryConnectionStore();
+  await store.save({ id: 'conn', providerId: 'p', name: 'conn', endpoint: 'https://p.example/v1', priority: 1, enabled: true, proxyPool: 'none', modelPolicy: 'all', modelIds: [], customModelIds: [], resilience: { maxRetries: 0, requestsPerMinute: 0, timeoutMs: 5_000, hedgeAfterMs: 0 } }, { type: 'api-key', value: 'k1' });
+  const usage = new InMemoryUsageStore();
+  const apiKeys = new InMemoryApiKeyStore();
+  const key = await apiKeys.create('grouped', 'ws');
+  const service = new GatewayService(registry, new InMemorySecretStore({}), store, apiKeys, { failureThreshold: 1_000, usageStore: usage });
+  service.setHealthInterval(0);
+  const server = createGatewayServer(service, { corsOrigins: ['http://localhost:5173'] });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => { server.closeAllConnections?.(); server.close(resolve); }));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  await fetch(`${base}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${key.key}` }, body: JSON.stringify({ model: 'm', messages: [{ role: 'user', content: 'hi' }] }) });
+  const response = await fetch(`${base}/v1/usage`, { headers: { authorization: `Bearer ${key.key}` } });
+  const body = await response.json();
+  assert.equal(body.byKey[0].apiKeyId, key.record.id);
+  assert.equal(body.byKey[0].requests, 1);
+  assert.equal(body.byKey[0].unpricedRequests, 1);
+});

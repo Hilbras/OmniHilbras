@@ -1,6 +1,6 @@
 # Spec: OmniHilbras Gateway and Provider SDK
 
-**Status:** Current — release 4.5.1
+**Status:** Current — release 4.6.0
 
 This document is the contract behind the gateway and its provider packages. It is intentionally more
 specific than the [README](../README.md): a route, an error code or a provider boundary written here is
@@ -178,7 +178,8 @@ The first local gateway exposes:
   aggregated across instances, so the sum and count are given instead), and `omnihilbras_tokens_total{provider,kind}`
   only for providers that actually reported tokens. A record no provider served is counted under
   `provider="unattributed"` rather than dropped, and a gateway with no usage store answers with only `up` and
-  `build_info` instead of inventing zeros. **A management path**, like `/v1/usage`: it names every provider the gateway
+  `build_info` instead of inventing zeros. Budget enforcement adds `omnihilbras_budget_checks_total` and
+  `omnihilbras_budget_refusals_total{kind="usd"|"tokens"|"policy"}`; a gateway with no budget store omits them. **A management path**, like `/v1/usage`: it names every provider the gateway
   can reach and how it is failing, so it is refused with 401 without a credential.
 - `GET /` — what this port is. A browser is redirected (`302`, `no-store`) to the dashboard when the
   launcher that started this gateway supplied one (`OMNIHILBRAS_DASHBOARD_URL`); a gateway started alone

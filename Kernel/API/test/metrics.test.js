@@ -150,3 +150,14 @@ test('the release route is answered by the gateway, and an unreachable feed is a
   assert.equal(body.unavailable, true);
   assert.match(String(body.reason), /403/);
 });
+
+test('budget checks and refusals are series, and are omitted when budgets are not wired', () => {
+  const withBudget = renderPrometheusMetrics({ records: [], version: '4.6.0', budget: { checks: 7, usdRefusals: 2, tokenRefusals: 1, policyRefusals: 3 } });
+  assert.match(withBudget, /^omnihilbras_budget_checks_total 7$/m);
+  assert.match(withBudget, /^omnihilbras_budget_refusals_total\{kind="usd"\} 2$/m);
+  assert.match(withBudget, /^omnihilbras_budget_refusals_total\{kind="tokens"\} 1$/m);
+  assert.match(withBudget, /^omnihilbras_budget_refusals_total\{kind="policy"\} 3$/m);
+
+  const without = renderPrometheusMetrics({ records: [], version: '4.6.0' });
+  assert.doesNotMatch(without, /omnihilbras_budget_/);
+});

@@ -38,7 +38,7 @@ export async function handleMetricsRoute(context: RouteContext): Promise<boolean
   }
 
   const records = await service.usage?.list({ limit: Number.MAX_SAFE_INTEGER }) ?? [];
-  const body = renderPrometheusMetrics({ records, version: gatewayBuild().version });
+  const body = renderPrometheusMetrics({ records, version: gatewayBuild().version, budget: service.budgetMetrics() });
 
   if (origin) {
     response.setHeader('access-control-allow-origin', origin);

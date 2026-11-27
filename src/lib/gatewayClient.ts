@@ -1174,6 +1174,11 @@ export type GatewayUsageRecord = {
   cacheWriteTokens?: number;
   reasoningTokens?: number;
   tokensEstimated?: boolean;
+  /** Who spent it, when the record was written after 4.1. */
+  actor?: 'key' | 'dashboard' | 'anonymous';
+  apiKeyId?: string;
+  apiKeyPrefix?: string;
+  workspaceId?: string;
   /** The id the response header carried, when the record has one. */
   requestId?: string;
   /** Per-attempt ledger, when the record carries it. */
@@ -1262,6 +1267,8 @@ export type GatewayUsage = {
   /** Absent on a gateway too old to send it; the page then shows the cards without the charts. */
   breakdown?: GatewayUsageBreakdown;
   cost?: GatewayUsageCost;
+  /** Spend per key, priced from the same records as the totals. */
+  byKey?: Array<{ apiKeyId: string; apiKeyPrefix?: string; requests: number; inputTokens: number; outputTokens: number; costUsd?: number; pricedRequests?: number; unpricedRequests?: number }>;
 };
 
 /** One finished request, as `GET /v1/logs/stream` sends it. No message content, prompt or credential. */

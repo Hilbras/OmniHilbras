@@ -1,7 +1,7 @@
 import { ProviderError, isProviderError } from '../core/index.js';
 import type { RouteContext } from './route-context.js';
 import type { UsageOutcome } from '../core/usage-store.js';
-import { priceUsage, pricingCaveat } from '../core/usage-pricing.js';
+import { priceUsage, pricingCaveat, requestCostUsd } from '../core/usage-pricing.js';
 import { buildUsageBreakdown, resolveUsagePeriod, usagePeriods, type UsagePeriod } from '../core/usage-breakdown.js';
 import { sendJson } from '../core/http.js';
 
@@ -147,15 +147,26 @@ export async function handleUsageRoute(context: RouteContext): Promise<boolean> 
     const priced = priceUsage(summary.records.map((record, index) => ({ ...record, pricing: prices[index] })));
     // Built from the **same** priced array the totals come from, so a chart bar cannot disagree with the card
     // above it. The records here are every matched record, not the capped page slice.
-    const breakdown = buildUsageBreakdown(
-      summary.records.map((record, index) => ({ ...record, pricing: prices[index] })),
-      { period, ...(breakdownSince ? { since: breakdownSince } : {}), ...(breakdownUntil ? { until: breakdownUntil } : {}) },
-    );
+    const pricedRecords = summary.records.map((record, index) => ({ ...record, pricing: prices[index] }));
+    const breakdown = buildUsageBreakdown(pricedRecords, { period, ...(breakdownSince ? { since: breakdownSince } : {}), ...(breakdownUntil ? { until: breakdownUntil } : {}) });
+    // Cost per key from the same prices as the totals, so the key table cannot disagree with the card.
+    const byKey = (summary.byKey ?? []).map((group) => {
+      let costUsd = 0;
+      let priced = 0;
+      let unpriced = 0;
+      for (const record of pricedRecords) {
+        if ((record.apiKeyId ?? 'unattributed') !== group.apiKeyId) continue;
+        const cost = requestCostUsd(record);
+        if (cost === undefined) unpriced += 1;
+        else { costUsd += cost; priced += 1; }
+      }
+      return { ...group, costUsd: Math.round(costUsd * 1e6) / 1e6, pricedRequests: priced, unpricedRequests: unpriced };
+    });
     sendJson(response, 200, {
       recording: true,
       period,
       totals: summary.totals,
-      ...(summary.byKey ? { byKey: summary.byKey } : {}),
+      byKey,
       records: listed,
       breakdown,
       cost: {

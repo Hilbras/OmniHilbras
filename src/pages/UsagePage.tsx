@@ -11,7 +11,7 @@ import {
   TimerOff,
   Undo2,
 } from 'lucide-react';
-import { getGatewayUsage, getProviderQuota, isNotSupported, type GatewayProviderQuota, type GatewayUsage, type GatewayUsageRecord } from '../lib/gatewayClient';
+import { getGatewayUsage, getProviderQuota, isNotSupported, listGatewayApiKeys, type GatewayApiKey, type GatewayProviderQuota, type GatewayUsage, type GatewayUsageRecord } from '../lib/gatewayClient';
 import { useGatewayReload } from '../lib/useGatewayStatus';
 import { badgeTone } from '../ui/primitives';
 
@@ -277,6 +277,7 @@ function RecordRow({ record }: { record: GatewayUsageRecord }) {
   return (
     <tr className="border-t border-line">
       <td className="px-4 py-3 text-xs whitespace-nowrap">{formatWhen(record.at)}</td>
+      <td className="px-4 py-3 font-mono text-[11px] text-muted">{record.apiKeyPrefix ?? '—'}</td>
       <td className="px-4 py-3 text-xs">
         <span className="font-medium">{record.model}</span>
         {/* No provider is shown when none was reached, because a request log that puts a provider on a
@@ -315,6 +316,8 @@ export function UsageContent({ providerId, connectionId }: { providerId?: string
   const [filter, setFilter] = useState<OutcomeFilter>('all');
   const [period, setPeriod] = useState<Period>('7d');
   const [page, setPage] = useState(0);
+  const [keyFilter, setKeyFilter] = useState('');
+  const [keys, setKeys] = useState<GatewayApiKey[]>([]);
 
   const load = useCallback((signal?: AbortSignal) => {
     setLoading(true);
@@ -323,6 +326,7 @@ export function UsageContent({ providerId, connectionId }: { providerId?: string
       period,
       ...(providerId ? { provider: providerId } : {}),
       ...(connectionId ? { connection: connectionId } : {}),
+      ...(keyFilter ? { apiKeyId: keyFilter } : {}),
     };
     // Two reads, deliberately. The cards, cost and charts describe the window; the outcome filter
     // lives in the table and must not rewrite them. One request with `outcome` made "Failed 0" appear
@@ -347,13 +351,18 @@ export function UsageContent({ providerId, connectionId }: { providerId?: string
         setError(cause instanceof Error ? cause.message : 'The gateway did not answer.');
       })
       .finally(() => setLoading(false));
-  }, [filter, page, period, providerId, connectionId]);
+  }, [filter, page, period, providerId, connectionId, keyFilter]);
 
   useEffect(() => {
     const controller = new AbortController();
     load(controller.signal);
     return () => controller.abort();
   }, [load]);
+  useEffect(() => {
+    const controller = new AbortController();
+    listGatewayApiKeys(controller.signal).then((result) => setKeys(result.keys)).catch(() => undefined);
+    return () => controller.abort();
+  }, []);
   useGatewayReload(load);
 
   // The newest row on screen. Deliberately not an "oldest of the window" — the table pages ten at a time, so that
@@ -407,6 +416,16 @@ export function UsageContent({ providerId, connectionId }: { providerId?: string
               </button>
             ))}
           </div>
+          <label className="sr-only" htmlFor="usage-key-filter">Filter by API key</label>
+          <select
+            id="usage-key-filter"
+            value={keyFilter}
+            onChange={(event) => { setPage(0); setKeyFilter(event.target.value); }}
+            className="input !h-9 !rounded-lg !border !border-line !bg-surface-2 !px-2 !text-xs"
+          >
+            <option value="">All keys</option>
+            {keys.map((key) => <option key={key.id} value={key.id}>{key.name}</option>)}
+          </select>
           <button type="button" onClick={() => load()} className="btn-ghost !px-3 !py-2.5 !text-xs">
             <RefreshCw className={`h-3.5 w-3.5${loading ? ' animate-spin' : ''}`} aria-hidden="true" />
             {loading ? 'Reading usage' : 'Refresh'}
@@ -427,12 +446,32 @@ export function UsageContent({ providerId, connectionId }: { providerId?: string
               body, a stub in a test — made this line throw `Cannot read properties of undefined (reading 'requests')`
               and blank the whole page. The page's own rule is that a missing figure is a dash, never a crash. */}
           {totals ? `${totals.requests.toLocaleString()} ${totals.requests === 1 ? 'record' : 'records'}` : 'reading…'}
+          {keyFilter ? ' · one key' : ''}
           {/* "Oldest" was the oldest row on **this page**, not in the window, which is a different claim and a wrong
               one: the table pages ten rows at a time. What the page knows is how many rows it holds and which is the
               newest, so that is what it says. */}
           {usage ? ` · showing ${records.length}` : ''}
           {newestRecordAt ? ` · newest ${newestRecordAt}` : ''}
         </p>
+
+        {!providerId && summary?.byKey && summary.byKey.length > 0 && (
+          <div className="card mt-3 overflow-x-auto p-3">
+            <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">By key</p>
+            <table className="w-full text-left text-xs">
+              <thead><tr className="text-[10px] uppercase tracking-[0.12em] text-muted"><th className="px-2 py-1">Key</th><th className="px-2 py-1">Requests</th><th className="px-2 py-1">Tokens</th><th className="px-2 py-1">Cost</th></tr></thead>
+              <tbody>
+                {summary.byKey.map((group) => (
+                  <tr key={group.apiKeyId} className="border-t border-line">
+                    <td className="px-2 py-1.5 font-mono">{group.apiKeyPrefix ?? (group.apiKeyId === 'unattributed' ? 'unattributed' : group.apiKeyId)}</td>
+                    <td className="px-2 py-1.5 tabular-nums">{group.requests.toLocaleString()}</td>
+                    <td className="px-2 py-1.5 tabular-nums">{formatTokens(group.inputTokens + group.outputTokens)}</td>
+                    <td className="px-2 py-1.5 tabular-nums">{group.costUsd === undefined || group.costUsd === 0 ? (group.unpricedRequests ? '—' : '$0.00') : `$${group.costUsd.toFixed(4)}`}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/*
@@ -632,6 +671,7 @@ export function UsageContent({ providerId, connectionId }: { providerId?: string
                   <thead>
                     <tr className="text-[11px] uppercase tracking-[0.12em] text-muted">
                       <th scope="col" className="px-4 py-2.5 font-semibold">When</th>
+                      <th scope="col" className="px-4 py-2.5 font-semibold">Key</th>
                       <th scope="col" className="px-4 py-2.5 font-semibold">Model</th>
                       <th scope="col" className="px-4 py-2.5 font-semibold">Outcome</th>
                       <th scope="col" className="px-4 py-2.5 font-semibold">Tokens in / out</th>

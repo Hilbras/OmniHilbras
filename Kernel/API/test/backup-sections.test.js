@@ -208,6 +208,7 @@ test('a section the file does not carry is left alone rather than cleared', asyn
   // The detail store is now its own backup section, so remove it too: this test is about a section
   // the file does not carry, not about which sections exist.
   delete payload.requestDetails;
+  delete payload.prompts;
   const withoutUsage = encryptBackup(payload, passphrase);
 
   const target = await fullGateway();
@@ -215,5 +216,5 @@ test('a section the file does not carry is left alone rather than cleared', asyn
   const result = await target.service.importBackup(passphrase, withoutUsage);
 
   assert.equal((await target.usageStore.list()).length, 2, 'an absent section cleared records the file never mentioned');
-  assert.deepEqual(result.notCarried, ['usage', 'requestDetails']);
+  assert.deepEqual(result.notCarried, ['usage', 'requestDetails', 'prompts']);
 });
