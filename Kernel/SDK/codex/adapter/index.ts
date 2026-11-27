@@ -286,9 +286,18 @@ export class CodexAdapter implements ProviderAdapter {
     return parseCodexUsage(data ?? {});
   }
 
-  async validateCredential(credential: ProviderCredential | undefined) {
+  /**
+   * A real, free, authenticated read, the same one `healthCheck` performs.
+   *
+   * This used to return `valid` from the credential's shape alone: a revoked or expired token passed
+   * Check because nothing was asked. The catalog endpoint is served to every Codex account and bills
+   * nothing, so asking it is both a real proof and a free one.
+   */
+  async validateCredential(credential: ProviderCredential | undefined, context: ProviderRequestContext = {}) {
     if (!credential || credential.type !== 'oauth' || !credential.value) throw new ProviderError('AUTHENTICATION_FAILED', 'A Codex OAuth connection is required.', { providerId: this.id });
-    return { status: 'valid' as const, checkedAt: new Date(this.now()).toISOString() };
+    const startedAt = this.now();
+    await this.listModels({ ...context, credential });
+    return { status: 'valid' as const, checkedAt: new Date(this.now()).toISOString(), latencyMs: Math.max(0, this.now() - startedAt) };
   }
 
   /**

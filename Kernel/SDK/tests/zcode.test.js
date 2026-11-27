@@ -241,3 +241,18 @@ test('the template workspace placeholder is substituted, not sent literally', as
   assert.ok(!system.includes('__ZCODE_PRIMARY_WORKING_DIRECTORY__'), 'the placeholder was sent literally');
   assert.ok(system.includes('/home/gin/work'), 'the working directory is missing from the system prompt');
 });
+test('a business envelope spelled `message` is surfaced, code included', async () => {
+  // The backend has answered `{code, msg}` and, after a change, `{code, message}`. The second spelling
+  // was reported as "invalid response" with no reason, which is the one outcome a user cannot act on.
+  const transport = transportFor(() => ({ data: { code: 401, message: 'invalid session token' } }));
+  const adapter = new ZcodeAdapter({ transport });
+  await assert.rejects(
+    () => adapter.chat({ model: 'glm-5.3-flash', messages: [{ role: 'user', content: 'hi' }] }, { credential }),
+    (error) => {
+      assert.equal(error.code, 'PROVIDER_REQUEST_FAILED');
+      assert.match(error.publicMessage ?? '', /invalid session token/);
+      assert.match(error.publicMessage ?? '', /code 401/);
+      return true;
+    },
+  );
+});

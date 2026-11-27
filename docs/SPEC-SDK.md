@@ -1,6 +1,6 @@
 # Spec: OmniHilbras Gateway and Provider SDK
 
-**Status:** Current — release 4.9.0
+**Status:** Current — release 4.9.1
 
 This document is the contract behind the gateway and its provider packages. It is intentionally more
 specific than the [README](../README.md): a route, an error code or a provider boundary written here is
@@ -716,8 +716,11 @@ The dashboard reads these four stores read-only on `/dashboard/mitm`, `/dashboar
   runs the shared provider contract.
   **NVIDIA validates keys with a real inference probe.** Its `/v1/models` is public (HTTP 200 with no key
   and with a bogus key), so a catalog read proves reachability only: `healthCheck` reports `degraded` with
-  that reason, and `validateCredential` sends one 1-token `chat/completions` request through the free
-  tier before reporting a key valid. NVIDIA interprets `reasoning_effort` as the UI-level field described
+  that reason, and `validateCredential` sends a 1-token `chat/completions` request through the free tier
+  before reporting a key valid. The probe tries up to five catalog entries, chat-shaped metadata first,
+  because the catalog contains entries that are not chat models: measured on 2026-11-27, the first entry
+  (`bigcode/starcoder2-15b`) answered `404` while another catalog model served a real turn in 541 ms. A
+  400/404/422 moves to the next model; a 401/403 is the key refused. NVIDIA interprets `reasoning_effort` as the UI-level field described
   on its model pages; the wire receives `chat_template_kwargs` (`enable_thinking`, `medium_effort`, and
   `force_nonempty_content` when tools are declared), and only that narrow provider option is passed
   through. Provider-stated `supports_tools`, `supports_thinking` and `model_type` are carried into the
@@ -808,6 +811,9 @@ The dashboard reads these four stores read-only on `/dashboard/mitm`, `/dashboar
   `minimal_client_version` and answers `200` with the missing ones silently dropped — a stale client
   version is therefore reported, not mistaken for an account with no models. `POST
   /v1/connections/:id/models/refresh` re-reads it on demand from the provider page.
+  **Credential validation asks that catalog too**, rather than returning `valid` from the token's shape: a
+  revoked or expired Codex token used to pass Check because nothing was asked. The read is free and
+  authenticated, and the result carries the measured `latencyMs`.
   **The shipped `clientVersion` is `0.171.0`**, raised from `0.159.2` to match the published client.
   That is a catalog-gate inference, not a measured backend acceptance: no live Codex turn was made to
   prove that this identity is accepted, only that it is the version npm publishes and that every

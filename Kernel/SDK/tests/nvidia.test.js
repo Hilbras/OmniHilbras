@@ -103,3 +103,45 @@ test('the shared normalizer carries NVIDIA capability flags', async () => {
   const bare = normalizeCatalogModel({ id: 'bare' }, 'nvidia');
   assert.equal(bare.capabilities, undefined, 'a silent catalog is not a tools:false claim');
 });
+
+test('a chat-incompatible catalog entry moves to the next model instead of failing a valid key', async () => {
+  // Measured on 2026-11-27: NVIDIA's first catalog entry was `bigcode/starcoder2-15b`, and posting it
+  // to /chat/completions answered 404 while a real turn on another catalog model returned 200. The
+  // key was fine; the probe had picked a model that is not a chat endpoint.
+  const multi = { data: [{ id: 'bigcode/starcoder2-15b' }, { id: 'nvidia/nemotron-3.5-super-vl-120b-a12b' }] };
+  const fake = transport((request) => {
+    if (request.method === 'GET') return { data: multi };
+    if (request.body.includes('starcoder2-15b')) {
+      return { throw: new ProviderError('PROVIDER_REQUEST_FAILED', '404 page not found', { statusCode: 404 }) };
+    }
+    return { data: chatReply };
+  });
+  const result = await new NvidiaAdapter({ transport: fake }).validateCredential(credential);
+  assert.equal(result.status, 'valid');
+  assert.equal(fake.calls.length, 3, 'catalog read plus two probes');
+  assert.match(fake.calls[2].body, /nemotron-3\.5-super-vl-120b-a12b/);
+});
+
+test('a 401 on any model is the key being refused, not a model-level miss', async () => {
+  const multi = { data: [{ id: 'one' }, { id: 'two' }] };
+  const fake = transport((request) => request.method === 'GET'
+    ? { data: multi }
+    : { throw: new ProviderError('AUTHENTICATION_FAILED', 'Forbidden', { statusCode: 401 }) });
+  await assert.rejects(
+    () => new NvidiaAdapter({ transport: fake }).validateCredential(credential),
+    (error) => error.code === 'AUTHENTICATION_FAILED' && /NVIDIA refused this key/.test(error.publicMessage ?? ''),
+  );
+  assert.equal(fake.calls.length, 2, 'it stops at the first refusal; it does not try every model with a dead key');
+});
+
+test('when every candidate is model-level refused, the message says the catalog, not the key', async () => {
+  const multi = { data: Array.from({ length: 7 }, (_, index) => ({ id: `model-${index}` })) };
+  const fake = transport((request) => request.method === 'GET'
+    ? { data: multi }
+    : { throw: new ProviderError('PROVIDER_REQUEST_FAILED', '404', { statusCode: 404 }) });
+  await assert.rejects(
+    () => new NvidiaAdapter({ transport: fake }).validateCredential(credential),
+    (error) => error.code === 'PROVIDER_UNAVAILABLE' && /7 models and none accepted a probe/.test(error.publicMessage ?? ''),
+  );
+  assert.equal(fake.calls.length, 6, 'catalog read plus a bounded five probes');
+});

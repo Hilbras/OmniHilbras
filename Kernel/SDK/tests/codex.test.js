@@ -438,3 +438,22 @@ test('a health check is a real free read, and a failure keeps the reason', async
   assert.equal(bad.verified, 'credential');
   assert.match(bad.message, /session expired/, 'the reason a user can act on survives the check');
 });
+
+test('credential validation asks the catalog, because a token shape proves nothing', async () => {
+  const calling = [];
+  const transport = {
+    calls: calling,
+    async request(input) {
+      calling.push(input);
+      return { status: 200, headers: new Headers(), data: { data: [{ id: 'gpt-5.4' }] } };
+    },
+    async *stream() {},
+  };
+  const adapter = new CodexAdapter({ transport });
+  const credential = { type: 'oauth', value: 'access' };
+  const result = await adapter.validateCredential(credential, { credential });
+  assert.equal(result.status, 'valid');
+  assert.equal(calling.length, 1);
+  assert.equal(calling[0].url, CODEX.modelsUrl);
+  assert.equal(typeof result.latencyMs, 'number');
+});

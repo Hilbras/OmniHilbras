@@ -440,12 +440,24 @@ export class ZcodeAdapter implements ProviderAdapter {
       // A 200 with a business envelope is an error the transport did not see. Surface the provider's
       // own message (`1005 exceed quota limit`) as the public message, because "the provider returned an
       // invalid response" hides the one thing a user can act on.
-      const business = (response as { error?: { message?: string }; msg?: string }).error?.message ?? (response as { msg?: string }).msg;
+      //
+      // The envelope has been seen with `msg` and, when the backend changes, `message`; a 200 carrying
+      // `{code, message}` against an otherwise valid session used to be reported as an invalid
+      // response with no reason at all. Both spellings and the code are read here.
+      const envelope = response as {
+        error?: { message?: string; code?: unknown };
+        msg?: string;
+        message?: string;
+        code?: unknown;
+      };
+      const business = envelope.error?.message ?? envelope.msg ?? envelope.message;
+      const code = envelope.error?.code ?? envelope.code;
       if (business && business.trim()) {
-        throw new ProviderError('PROVIDER_REQUEST_FAILED', `ZCode refused the turn: ${business}`, {
+        const reason = code === undefined ? business : `${business} (code ${String(code)})`;
+        throw new ProviderError('PROVIDER_REQUEST_FAILED', `ZCode refused the turn: ${reason}`, {
           providerId: this.id,
-          publicMessage: `ZCode refused the turn: ${business}`,
-          details: { providerMessage: business },
+          publicMessage: `ZCode refused the turn: ${reason}`,
+          details: { providerMessage: reason },
         });
       }
       throw invalidResponse(this.id, 'ZCode response is missing content blocks.');

@@ -24,7 +24,7 @@
   <a href="./CONTRIBUTING.md">Contributing</a>
 </p>
 
-**Current version: 4.9.0**
+**Current version: 4.9.1**
 
 OmniHilbras sits between your application and the model providers you already use. It gives every client one
 OpenAI-compatible endpoint, keeps credentials on your machine, and decides which saved connection serves each
@@ -616,6 +616,7 @@ record the mutation that first proved them blind; keep that habit when adding on
 | [`docs/MIGRATION-4.0.md`](./docs/MIGRATION-4.0.md) | Upgrading to 4.0: automatic vault/key migration, opt-in state backend and identity features, and the known limits |
 | [`docs/MIGRATION-4.8.md`](./docs/MIGRATION-4.8.md) | Faster provider connections: the keep-alive pool, destination-address reuse, the new `/metrics` counters and the escape hatch |
 | [`docs/MIGRATION-4.9.md`](./docs/MIGRATION-4.9.md) | The persistent settings file and history trimming: schema, precedence, and the 850k-token prompt it exists for |
+| [`docs/MIGRATION-4.9.1.md`](./docs/MIGRATION-4.9.1.md) | Corrected provider checks: NVIDIA's multi-model probe, Codex's real catalog read, and ZCode's business-error message |
 | [`NPM-PUBLISH.md`](./NPM-PUBLISH.md) | What is published, how, and how to confirm it actually landed |
 | [`docs/architecture/README.md`](./docs/architecture/README.md) | Measured architecture, layer boundaries and provider-specific surface |
 | [`docs/architecture/embeddings-plan.md`](./docs/architecture/embeddings-plan.md) | Embeddings design and dispatch rules |
