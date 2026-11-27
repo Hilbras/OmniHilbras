@@ -1,6 +1,6 @@
 # Spec: OmniHilbras Gateway and Provider SDK
 
-**Status:** Current — release 4.8.0
+**Status:** Current — release 4.9.0
 
 This document is the contract behind the gateway and its provider packages. It is intentionally more
 specific than the [README](../README.md): a route, an error code or a provider boundary written here is
@@ -608,7 +608,10 @@ The dashboard reads these four stores read-only on `/dashboard/mitm`, `/dashboar
   exceeds it, preserving the system prompt, the first user message, the last
   `OMNIHILBRAS_HISTORY_TRIM_KEEP_RECENT` messages and `is_error` tool results; the original is retrievable
   from the same store. With `OMNIHILBRAS_CACHE_ANCHOR=1`, adapters that support provider cache breakpoints
-  re-anchor them on the final body after the savers run. `/v1/settings` reports both.
+  re-anchor them on the final body after the savers run. `/v1/settings` reports both. The persistent form is
+  `$XDG_CONFIG_HOME/omnihilbras/settings.json` — `{"historyTrim":{"maxInputTokens":200000,"keepRecent":8}}` —
+  read by the gateway entry point before configuration is loaded; an explicitly exported variable wins over
+  the file, per key, and a malformed file is printed and ignored rather than preventing startup.
 - **Prompt shaping and external savers** are opt-in configuration, not routes.
   `OMNIHILBRAS_CAVEMAN` and `OMNIHILBRAS_PONYTAIL` append one system instruction (idempotently) and are
   reported as `ran` with no invented input saving. `OMNIHILBRAS_HEADROOM_URL` posts `{messages, model}` to

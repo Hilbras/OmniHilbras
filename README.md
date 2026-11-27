@@ -24,7 +24,7 @@
   <a href="./CONTRIBUTING.md">Contributing</a>
 </p>
 
-**Current version: 4.8.0**
+**Current version: 4.9.0**
 
 OmniHilbras sits between your application and the model providers you already use. It gives every client one
 OpenAI-compatible endpoint, keeps credentials on your machine, and decides which saved connection serves each
@@ -362,6 +362,22 @@ OMNIHILBRAS_HEADROOM_URL=http://127.0.0.1:8788     # optional, opt-in by URL
 OMNIHILBRAS_PXPIPE_URL=http://127.0.0.1:8789       # optional, opt-in by URL
 ```
 
+Those variables live as long as the terminal that exported them. The same settings can be kept in
+`$XDG_CONFIG_HOME/omnihilbras/settings.json`, which every gateway entry reads at startup (bundled CLI,
+desktop app, or a bare `node dist/src/main.js`), and an explicit environment variable still wins over the
+file:
+
+```json
+{
+  "historyTrim": { "maxInputTokens": 200000, "keepRecent": 8 }
+}
+```
+
+A malformed file is printed on stderr and ignored rather than preventing startup, and invalid values are
+named and dropped. This is the setting for a client that sends a very long conversation: the known case
+was a coding agent sending ~850,000 input tokens per turn, where the provider spent 12–56 s prefilling
+before the first token, while 8-token requests through the same gateway answered in under a second.
+
 ## Dashboard
 
 One React Router app mounted at `/dashboard`; client-side navigation never reloads the document.
@@ -526,6 +542,10 @@ most people change:
 | `OMNIHILBRAS_MAX_METADATA_BYTES` | 4 MiB | How large the metadata file may grow |
 | `OMNIHILBRAS_FAILURE_THRESHOLD` | 3 | Consecutive failures before a connection is ejected |
 
+`$XDG_CONFIG_HOME/omnihilbras/settings.json` is the persistent form of the settings that support it —
+currently `historyTrim` — read by every gateway entry at startup. An explicitly exported variable wins
+over the file. See [Token saver](#token-saver) for the schema and why a long conversation needs it.
+
 Secrets are read from the environment or the encrypted vault. A credential must never be committed, pasted
 into an issue, or written to browser storage.
 
@@ -595,6 +615,7 @@ record the mutation that first proved them blind; keep that habit when adding on
 | [`docs/INSTALL.md`](./docs/INSTALL.md) | Installing, the first-run check, and uninstalling every version on a machine |
 | [`docs/MIGRATION-4.0.md`](./docs/MIGRATION-4.0.md) | Upgrading to 4.0: automatic vault/key migration, opt-in state backend and identity features, and the known limits |
 | [`docs/MIGRATION-4.8.md`](./docs/MIGRATION-4.8.md) | Faster provider connections: the keep-alive pool, destination-address reuse, the new `/metrics` counters and the escape hatch |
+| [`docs/MIGRATION-4.9.md`](./docs/MIGRATION-4.9.md) | The persistent settings file and history trimming: schema, precedence, and the 850k-token prompt it exists for |
 | [`NPM-PUBLISH.md`](./NPM-PUBLISH.md) | What is published, how, and how to confirm it actually landed |
 | [`docs/architecture/README.md`](./docs/architecture/README.md) | Measured architecture, layer boundaries and provider-specific surface |
 | [`docs/architecture/embeddings-plan.md`](./docs/architecture/embeddings-plan.md) | Embeddings design and dispatch rules |

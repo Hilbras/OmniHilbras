@@ -1,5 +1,6 @@
 import { startGatewayServer } from './server.js';
 import { ensureOpencodeService, opencodeServiceMode, resolveOpencodeBinary, startOpencodeSupervisor, stopOpencodeService } from './core/opencode-runtime.js';
+import { gatewayEnvFromSettings } from './core/settings.js';
 
 /**
  * Shutdown state, declared before anything can fail.
@@ -93,6 +94,24 @@ const shutdown = (signal: NodeJS.Signals) => {
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 
+/**
+ * The persistent settings file, read before the configuration is loaded.
+ *
+ * `main.ts` is the one entry every launcher reaches — the bundled CLI server, the desktop app's fork of
+ * `Kernel/API/dist/src/main.js`, and a bare `node dist/src/main.js` — so reading it here is what makes a
+ * setting survive whichever of them started the gateway. Explicit environment values still win; the
+ * merge and the precedence rule live in `core/settings.ts`.
+ *
+ * A malformed file is printed and ignored rather than thrown: a typo in an optional setting is not a
+ * reason for the gateway to refuse to start.
+ */
+const settings = gatewayEnvFromSettings(process.env);
+for (const warning of settings.warnings) console.error(`OmniHilbras gateway: ${warning}`);
+if (settings.env.OMNIHILBRAS_HISTORY_TRIM_TOKENS) {
+  const keep = settings.env.OMNIHILBRAS_HISTORY_TRIM_KEEP_RECENT ?? '8';
+  console.error(`OmniHilbras gateway: ${settings.path} trims history over ${settings.env.OMNIHILBRAS_HISTORY_TRIM_TOKENS} estimated tokens (keep last ${keep}).`);
+}
+
 instance = await startGatewayServer({
   /**
    * The dashboard's own stop button (`POST /v1/system/shutdown`) takes the same path a `SIGTERM` does, so
@@ -107,6 +126,7 @@ instance = await startGatewayServer({
    * none and `GET /` answers a JSON index instead of guessing a port.
    */
   ...(process.env.OMNIHILBRAS_DASHBOARD_URL?.trim() ? { dashboardUrl: process.env.OMNIHILBRAS_DASHBOARD_URL.trim() } : {}),
+  env: { ...settings.env, ...process.env },
 });
 markReady();
 

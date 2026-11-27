@@ -149,6 +149,7 @@ that holds is one a machine re-derives.
 | `Kernel/API/src/core/connection-manager.ts` | 383 | **0** | one error mapper, one catalog merge, one lock scope |
 | `Kernel/API/src/core/service.ts` | 5836 | 55 | every `.onDemand()` registration, in one constructor |
 | `Kernel/API/src/core/provider-http.ts` | 420 | **0** | one agent per protocol, the judged address, decoded bodies |
+| `Kernel/API/src/core/settings.ts` | 126 | **0** | the persistent settings file, read before `loadGatewayConfig` |
 | `Kernel/API/src/core/http.ts` | 361 | **0** | the vocabulary every route shares |
 | `Kernel/API/src/routes/oauth.ts` | 967 | 14 | the module a provider split would help most |
 | `Kernel/API/src/routes/connections.ts` | 441 | 1 | one OpenRouter save shortcut, the generic quota route, the build stamp, and the route that forgets an added model |
@@ -244,6 +245,7 @@ Kernel/API/src/
     http.ts          Read a request, write a response, turn a failure into an envelope.
     provider-http.ts The provider connection pool: one agent per protocol, the destination check's
                      judged address, and the decompression `fetch` used to do for us.
+    settings.ts      The persistent settings file, read before configuration; an exported env var wins.
     service.ts       Composition root. Wires the managers below to its own effects.
     provider-resolver  Which adapter serves a provider id. Zero provider ids; a test enforces it.
     provider-client-identity  The client identity one provider's relay gates on — impersonation of another
