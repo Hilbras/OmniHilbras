@@ -25,6 +25,7 @@ import { fileURLToPath } from 'node:url';
 import {
   bundledRuntimePaths,
   bundledStateDir,
+  clearBundledRecord,
   clearBundledRecordIf,
   commandLineForPid,
   isPidAlive,
@@ -198,8 +199,18 @@ function writePidFile(record) {
   writeBundledRecord(record);
 }
 
-function clearPidFile() {
-  clearBundledRecordIf(currentRunId);
+/**
+ * The id of the run this launcher wrote.
+ *
+ * `clearBundledRecordIf` refuses to delete a record it did not write, so a second launcher started while
+ * this one is shutting down cannot lose its record to the older process. It used to be an undeclared
+ * name here: with no prior record the startup path never reached this function, and with a stale
+ * `bundled.json` the launcher crashed before starting — `ReferenceError: currentRunId is not defined`.
+ */
+let currentRunId;
+
+function clearPidFile(runId = currentRunId) {
+  clearBundledRecordIf(runId);
 }
 
 /**
@@ -225,7 +236,12 @@ async function stopRecorded() {
   for (const entry of refused) {
     console.log(paint(DIM, `Left pid ${entry.pid} alone: not one of this launcher's servers.`));
   }
-  if (refused.length === 0 && survivors.length === 0) clearPidFile();
+  if (refused.length === 0 && survivors.length === 0) {
+    // A record from an older launcher carries no runId. It was just read and stopped as ours, so the
+    // fallback clears it; `clearBundledRecordIf(undefined)` would refuse and leave it behind.
+    if (record.runId === undefined) clearBundledRecord();
+    else clearPidFile(record.runId);
+  }
 }
 
 /**
@@ -391,13 +407,17 @@ async function start() {
     captureTail(dashboard.stdout, 'dashboard', tails.dashboard);
   }
 
-  const recordRun = () => writePidFile({
+  const recordRun = () => {
+    currentRunId ??= randomUUID();
+    writePidFile({
+    runId: currentRunId,
     gatewayPid: children.gateway.pid,
     staticPid: children.dashboard.pid,
     dashboardPort: options.dashboardPort,
     gatewayPort: options.gatewayPort,
     startedAt: new Date().toISOString(),
-  });
+    });
+  };
   recordRun();
 
   // `started` flips once both ports answer. Before that, a child exit is a startup failure and fails fast

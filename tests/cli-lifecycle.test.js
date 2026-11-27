@@ -199,3 +199,12 @@ test('the bundled launcher stops recorded pids through the ownership-verified he
   assert.match(stopRecorded, /refused/, 'a refused (foreign) pid is handled rather than signalled');
   assert.match(stopRecorded, /survivors/, 'a pid that survived escalation is not reported as stopped');
 });
+
+test('the launcher declares the run id it clears, and writes it into the record', () => {
+  const source = fs.readFileSync(path.join(root, 'cli/server-src/main.mjs'), 'utf8');
+  assert.match(source, /let currentRunId;/, 'the launcher references a run id it never declares');
+  assert.match(source, /currentRunId \?\?= randomUUID\(\)/, 'a run without an id cannot be cleared safely');
+  assert.match(source, /runId: currentRunId/, 'the record does not carry the id used to clear it');
+  assert.match(source, /clearBundledRecordIf\(runId\)/, 'the clear helper is not called with an id');
+  assert.match(source, /record\.runId === undefined\) clearBundledRecord\(\)/, 'a pre-runId record is never cleared');
+});

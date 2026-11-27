@@ -13,7 +13,7 @@
  */
 
 import { spawn, execFileSync } from 'node:child_process';
-import { mkdtempSync, existsSync, rmSync } from 'node:fs';
+import { mkdtempSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -47,6 +47,21 @@ function waitPort(port, timeoutMs = 30000) {
 const config = mkdtempSync(path.join(os.tmpdir(), 'omnihilbras-smoke-'));
 const state = mkdtempSync(path.join(os.tmpdir(), 'omnihilbras-smoke-state-'));
 const verbEnv = { ...process.env, XDG_CONFIG_HOME: config, XDG_STATE_HOME: state, OMNIHILBRAS_GATEWAY_URL: `http://127.0.0.1:${gatewayPort}` };
+/**
+ * A record from a launcher that predates `runId`.
+ *
+ * The 4.6.0 launcher crashed on exactly this file with `ReferenceError: currentRunId is not defined`,
+ * because `clearPidFile` reached an undeclared name when a stale record had to be cleared at startup.
+ * Seeding it here means the smoke test exercises that path instead of only the clean-install one.
+ */
+mkdirSync(path.join(state, 'omnihilbras'), { recursive: true });
+writeFileSync(path.join(state, 'omnihilbras', 'bundled.json'), JSON.stringify({
+  gatewayPid: 999999,
+  staticPid: 999998,
+  dashboardPort: 1,
+  gatewayPort: 1,
+  startedAt: new Date(0).toISOString(),
+}, null, 2));
 const child = spawn(process.execPath, [main, '--port', String(dashboardPort), '--gateway-port', String(gatewayPort), '--no-browser'], {
   env: verbEnv,
   stdio: ['ignore', 'pipe', 'pipe'],
