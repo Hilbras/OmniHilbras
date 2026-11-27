@@ -24,7 +24,7 @@
   <a href="./CONTRIBUTING.md">Contributing</a>
 </p>
 
-**Current version: 4.5.0**
+**Current version: 4.5.1**
 
 OmniHilbras sits between your application and the model providers you already use. It gives every client one
 OpenAI-compatible endpoint, keeps credentials on your machine, and decides which saved connection serves each
@@ -375,6 +375,7 @@ One React Router app mounted at `/dashboard`; client-side navigation never reloa
 | `/dashboard/routing` | Routing order and connection state |
 | `/dashboard/keys` | Gateway API keys |
 | `/dashboard/usage` | Requests, tokens, cache and cost |
+| `/dashboard/prompts` | Versioned prompt content, activation and render |
 | `/dashboard/logs` | Live request log |
 | `/dashboard/settings` | Loaded configuration and desktop settings |
 | `/dashboard/token-saver` | Measured savings from context compression |

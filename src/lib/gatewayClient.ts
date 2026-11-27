@@ -2046,3 +2046,33 @@ export type GatewayTranslationPair = { source: string; target: string };
 export function getGatewayTranslators(signal?: AbortSignal): Promise<{ object: 'list'; data: GatewayTranslationPair[] }> {
   return requestJson<{ object: 'list'; data: GatewayTranslationPair[] }>('/v1/translators', { signal });
 }
+
+
+export type GatewayPromptVersion = { version: number; content: string; variables: string[]; createdAt: string };
+export type GatewayPrompt = { id: string; name: string; description: string; versions: GatewayPromptVersion[]; activeVersion: number; createdAt: string; updatedAt: string };
+
+export function listGatewayPrompts(signal?: AbortSignal) {
+  return requestJson<{ available: boolean; prompts?: GatewayPrompt[]; reason?: string }>('/v1/prompts', { signal });
+}
+
+export function saveGatewayPrompt(input: { id: string; name?: string; description?: string; content: string }, signal?: AbortSignal) {
+  return requestJson<{ prompt: GatewayPrompt }>('/v1/prompts', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input), signal,
+  }).then((body) => body.prompt);
+}
+
+export function activateGatewayPrompt(id: string, version: number, signal?: AbortSignal) {
+  return requestJson<{ prompt: GatewayPrompt }>(`/v1/prompts/${encodeURIComponent(id)}/activate`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ version }), signal,
+  }).then((body) => body.prompt);
+}
+
+export function renderGatewayPrompt(id: string, values: Record<string, string>, signal?: AbortSignal) {
+  return requestJson<{ id: string; version: number; content: string }>(`/v1/prompts/${encodeURIComponent(id)}/render`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ values }), signal,
+  });
+}
+
+export function removeGatewayPrompt(id: string, signal?: AbortSignal) {
+  return requestJson<{ deleted: true; id: string }>(`/v1/prompts/${encodeURIComponent(id)}`, { method: 'DELETE', signal });
+}

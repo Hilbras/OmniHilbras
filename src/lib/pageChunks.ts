@@ -28,6 +28,7 @@ export const LogsContent = lazy(() => import('../pages/LogsPage').then((module) 
 export const SettingsContent = lazy(() => import('../pages/SettingsPage').then((module) => ({ default: module.SettingsContent })));
 export const AboutContent = lazy(() => import('../pages/AboutPage').then((module) => ({ default: module.AboutContent })));
 export const TokenSaverContent = lazy(() => import('../pages/TokenSaverPage').then((module) => ({ default: module.TokenSaverContent })));
+export const PromptsContent = lazy(() => import('../pages/PromptsPage').then((module) => ({ default: module.PromptsContent })));
 export const MitmContent = lazy(() => import('../pages/MitmPage').then((module) => ({ default: module.MitmContent })));
 export const ProxyPoolsContent = lazy(() => import('../pages/ProxyPoolsPage').then((module) => ({ default: module.ProxyPoolsContent })));
 export const TunnelsContent = lazy(() => import('../pages/TunnelsPage').then((module) => ({ default: module.TunnelsContent })));
@@ -53,6 +54,7 @@ const prefetchable: Record<string, () => Promise<unknown>> = {
   '/settings': () => import('../pages/SettingsPage'),
   '/about': () => import('../pages/AboutPage'),
   '/token-saver': () => import('../pages/TokenSaverPage'),
+  '/prompts': () => import('../pages/PromptsPage'),
   '/mitm': () => import('../pages/MitmPage'),
   '/proxy-pools': () => import('../pages/ProxyPoolsPage'),
   '/tunnels': () => import('../pages/TunnelsPage'),

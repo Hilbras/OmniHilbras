@@ -22,6 +22,7 @@ import {
   TokenSaverContent,
   TranslatorContent,
   UsageContent,
+  PromptsContent,
   CliToolsContent,
 } from './lib/pageChunks';
 
@@ -48,6 +49,7 @@ const activePageTitles = {
   // Added in 1.64.0 with the page itself; `overview` is only a fallback title, never a route,
   // which the catch-all `<Route path="*">` redirects to Providers — so it is a title nothing can reach.
   usage: 'Usage',
+  prompts: 'Prompts',
   logs: 'Request log',
   settings: 'Settings',
   about: 'About',
@@ -72,6 +74,7 @@ const pageDescriptions = {
   // exactly the overstatement the guard exists to catch, so the description says what the page
   // actually shows instead.
   usage: 'Requests your gateway actually served, and their measured cost',
+  prompts: 'Versioned prompt content, with activation and a render check',
   logs: 'Requests as the gateway records them, newest first',
   settings: 'The configuration this gateway loaded at startup',
   about: 'Version, platform, backup and recovery',
@@ -135,6 +138,8 @@ function DashboardRoutes() {
         ? 'keys'
         : location.pathname.startsWith('/usage')
           ? 'usage'
+          : location.pathname.startsWith('/prompts')
+          ? 'prompts'
           : location.pathname.startsWith('/logs')
             ? 'logs'
             : location.pathname.startsWith('/settings')
@@ -184,6 +189,7 @@ function DashboardRoutes() {
           <Route path="/routing" element={<RoutingContent />} />
           <Route path="/keys" element={<ApiKeysContent />} />
           <Route path="/usage" element={<UsageContent />} />
+          <Route path={dashboardRoutes.prompts} element={<PromptsContent />} />
           <Route path="/logs" element={<LogsContent />} />
           <Route path="/settings" element={<SettingsContent />} />
           <Route path={dashboardRoutes.about} element={<AboutContent />} />

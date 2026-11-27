@@ -9,7 +9,25 @@ import { expect, test } from '@playwright/test';
  * no name). `serious` and `critical` fail; `moderate` and `minor` are reported by axe but do not stop a
  * release, so the gate is a floor rather than a claim of full conformance.
  */
-for (const route of ['/dashboard', '/dashboard/keys', '/dashboard/usage']) {
+for (const route of [
+  '/dashboard',
+  '/dashboard/providers',
+  '/dashboard/models',
+  '/dashboard/routing',
+  '/dashboard/keys',
+  '/dashboard/usage',
+  '/dashboard/prompts',
+  '/dashboard/logs',
+  '/dashboard/settings',
+  '/dashboard/about',
+  '/dashboard/token-saver',
+  '/dashboard/mitm',
+  '/dashboard/proxy-pools',
+  '/dashboard/tunnels',
+  '/dashboard/skills',
+  '/dashboard/translators',
+  '/dashboard/cli-tools',
+]) {
   test(`${route} has no serious or critical axe violations`, async ({ page }) => {
     await page.goto(route);
     await expect(page.locator('main')).toBeVisible();

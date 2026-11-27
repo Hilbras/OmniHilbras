@@ -44,6 +44,8 @@ export const dashboardRoutes = {
    * no per-tool configuration route, so there is nothing here to write back and no key value to show.
    */
   cliTools: '/cli-tools',
+  /** Versioned prompt content, appendix-only. */
+  prompts: '/prompts',
   /** Build provenance and the honest limits of this installation. */
   about: '/about',
   /** What the context saver actually measured, from `GET /v1/token-saver/stats`. */

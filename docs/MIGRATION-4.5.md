@@ -29,3 +29,11 @@ visual baselines changed.
 `docs/design-system.md` states the tokens and rules. `docs/reports/desktop-packaging-decision-2026-11-27.md`
 records the measured 275 MB Electron 45 distribution and the decision: trim/keep Electron for now, no
 Tauri rewrite inside a capability release.
+
+
+## 4.5.1
+
+- The prompt registry has its dashboard page at `/dashboard/prompts`: create, append a version,
+  activate an older one, remove, with the active content and its variables shown.
+- The axe gate now runs on **every** dashboard page, not three; all seventeen pass with zero serious
+  or critical findings.
